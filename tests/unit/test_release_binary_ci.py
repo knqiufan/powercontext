@@ -243,6 +243,17 @@ def test_release_uploads_arch_named_binary_assets() -> None:
     )
 
 
+def test_pypi_publish_workflow_verifies_both_python_packages() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
+
+    assert "pypi-publish-powermem-mcp:" in workflow
+    assert "pypi-verify:" in workflow
+    assert "      - pypi-publish-powermem-mcp" in workflow
+    assert "ref: ${{ github.ref }}" in workflow
+    assert "scripts/check_pypi_release.py" in workflow
+    assert "powermem powermem-mcp" in workflow
+
+
 def test_smoke_script_maps_archive_names_to_package_dirs() -> None:
     assert (
         _package_name(Path("powermem-1.1.4-linux-amd64-binaries.tar.gz"))

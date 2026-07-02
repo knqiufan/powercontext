@@ -872,24 +872,37 @@ class ExampleClass:
 
 ### 前置条件 {#prerequisites-1}
 
-在发布到 PyPI 之前，请确保您已完成以下操作：
+本仓库会发布两个 PyPI 项目：
 
-1. **PyPI 账户**：在 [pypi.org](https://pypi.org) 创建一个账户
-2. **API tokens**：从您的 PyPI 账户设置中生成 API tokens
-3. **配置凭据**：设置 `~/.pypirc` 或使用环境变量
+- `powermem`：主 SDK、CLI、服务端以及可选 MCP 实现。
+- `powermem-mcp`：面向零安装 MCP 客户端的薄封装包。它必须与
+  `powermem` 保持同版本，并依赖同版本的 `powermem[server,seekdb]`。
+
+标准发布流程通过 `.github/workflows/publish.yml` 使用 GitHub Actions
+OIDC 和 PyPI Trusted Publishers，不应依赖长期有效的 PyPI API token。
+发布前请确认两个 PyPI 项目都配置了匹配的 Trusted Publisher：
+
+1. **Owner**：`oceanbase`
+2. **Repository**：`powermem`
+3. **Workflow filename**：`publish.yml`
+4. **Environment**：如果 workflow 的发布 job 没有声明 GitHub environment，
+   这里保持为空；如果后续添加了 environment，PyPI 中也必须填写同名
+   environment。
 
 ### 发布流程 {#publishing-process}
 
-1. 在 `pyproject.toml` 中**更新版本**：
-```toml
-[project]
-version = "0.1.1"  # 增加版本号
-```
-2. **更新变更日志**（如果您维护了一个）
-
-3. **构建并检查包**：
+1. **同步更新两个 Python 项目的版本**：
 ```bash
-make build-check
+make bump-version VERSION=1.1.8
+```
+该命令会更新 `pyproject.toml` 和 `packages/powermem-mcp/pyproject.toml`，
+包括 wrapper 包对主包的依赖版本。
+
+2. **更新变更日志或 Release Notes**（如果本次发布需要）。
+
+3. **构建并检查两个 Python 包**：
+```bash
+make build-all-python-packages
 ```
 4. **本地测试**：
 ```bash
@@ -897,17 +910,27 @@ make install-local
 # 测试已安装的包
 python -c "import powermem; print(powermem.__version__)"
 ```
-5. **先发布到 TestPyPI**（推荐）：
+5. **创建并推送发布 tag**：
 ```bash
-make publish-testpypi
+git tag -a v1.1.8 -m "Release version 1.1.8"
+git push origin v1.1.8
 ```
-6. **从 TestPyPI 测试安装**：
+`Build Package` workflow 会创建 GitHub Release 并触发 `Upload Python Package`，
+该 workflow 会先发布 `powermem`，再发布 `powermem-mcp`，最后校验两个版本在
+PyPI 上都可见。
+
+6. **补发已存在 GitHub Release 但 PyPI 缺失的版本**：
 ```bash
-pip install --index-url https://test.pypi.org/simple/ powermem
+gh workflow run publish.yml --repo oceanbase/powermem --ref main -f release_tag=v1.1.8
 ```
-7. **发布到 PyPI**：
+发布 workflow 配置了 `skip-existing: true`，已存在的文件会跳过，缺失的包版本
+仍可继续上传。补发旧版本时使用 `--ref main`，确保 workflow 与校验脚本来自最新发布自动化，
+同时通过 `release_tag` 指定实际要构建和发布的源码 tag。
+
+7. **验证 PyPI 可见性**：
 ```bash
-make publish-pypi
+python scripts/check_pypi_release.py --version 1.1.8
+python -m pip install --no-cache-dir powermem-mcp==1.1.8
 ```
 ### 版本管理 {#version-management}
 
@@ -919,10 +942,10 @@ make publish-pypi
 
 ### Git 标签 {#git-tagging}
 
-发布后，创建一个 git 标签：
+发布标签使用 `vX.Y.Z` 格式：
 ```bash
-git tag -a v0.1.1 -m "Release version 0.1.1"
-git push origin v0.1.1
+git tag -a v1.1.8 -m "Release version 1.1.8"
+git push origin v1.1.8
 ```
 ## 调试 {#debugging}
 

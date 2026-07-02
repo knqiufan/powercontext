@@ -937,27 +937,42 @@ class ExampleClass:
 
 ### Prerequisites
 
-Before publishing to PyPI, ensure you have:
+PowerMem publishes two PyPI projects from this repository:
 
-1. **PyPI account**: Create an account at [pypi.org](https://pypi.org)
-2. **API tokens**: Generate API tokens from your PyPI account settings
-3. **Configure credentials**: Set up `~/.pypirc` or use environment variables
+- `powermem`: the main SDK, CLI, server, and optional MCP implementation.
+- `powermem-mcp`: a thin wrapper for zero-install MCP clients. Its version
+  must match `powermem`, and it depends on `powermem[server,seekdb]` for the
+  same version.
+
+Normal releases use GitHub Actions OIDC and PyPI Trusted Publishers through
+`.github/workflows/publish.yml`; do not rely on long-lived PyPI API tokens for
+the standard release path. Before publishing, ensure both PyPI projects have a
+Trusted Publisher entry that matches:
+
+1. **Owner**: `oceanbase`
+2. **Repository**: `powermem`
+3. **Workflow filename**: `publish.yml`
+4. **Environment**: leave blank unless the publish job declares a GitHub
+   environment; if an environment is added to the workflow, the same name must
+   be configured in PyPI for the matching project.
 
 ### Publishing Process
 
-1. **Update version** in `pyproject.toml`:
-
-```toml
-[project]
-version = "0.1.1"  # Increment version number
-```
-
-2. **Update changelog** (if you maintain one)
-
-3. **Build and check the package**:
+1. **Update versions** in both Python projects:
 
 ```bash
-make build-check
+make bump-version VERSION=1.1.8
+```
+
+This updates `pyproject.toml` and `packages/powermem-mcp/pyproject.toml`,
+including the wrapper dependency pin.
+
+2. **Update changelog or release notes** if the release needs them.
+
+3. **Build and check both Python packages**:
+
+```bash
+make build-all-python-packages
 ```
 
 4. **Test locally**:
@@ -968,22 +983,34 @@ make install-local
 python -c "import powermem; print(powermem.__version__)"
 ```
 
-5. **Publish to TestPyPI first** (recommended):
+5. **Create and push a release tag**:
 
 ```bash
-make publish-testpypi
+git tag -a v1.1.8 -m "Release version 1.1.8"
+git push origin v1.1.8
 ```
 
-6. **Test installation from TestPyPI**:
+The `Build Package` workflow creates the GitHub Release and dispatches
+`Upload Python Package`, which publishes `powermem` first, then
+`powermem-mcp`, then verifies both versions on PyPI.
+
+6. **Backfill a missing PyPI release** if a publish job failed after the
+   GitHub Release already exists:
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ powermem
+gh workflow run publish.yml --repo oceanbase/powermem --ref main -f release_tag=v1.1.8
 ```
 
-7. **Publish to PyPI**:
+The publish workflow uses `skip-existing: true`, so already-published files are
+skipped while missing package versions can still be uploaded. Use `--ref main`
+for backfills so the workflow and verification script come from the latest
+release automation, while `release_tag` still selects the package source tag.
+
+7. **Verify PyPI visibility**:
 
 ```bash
-make publish-pypi
+python scripts/check_pypi_release.py --version 1.1.8
+python -m pip install --no-cache-dir powermem-mcp==1.1.8
 ```
 
 ### Version Management
@@ -996,11 +1023,11 @@ Follow [Semantic Versioning](https://semver.org/):
 
 ### Git Tagging
 
-After publishing, create a git tag:
+Release tags use the `vX.Y.Z` format:
 
 ```bash
-git tag -a v0.1.1 -m "Release version 0.1.1"
-git push origin v0.1.1
+git tag -a v1.1.8 -m "Release version 1.1.8"
+git push origin v1.1.8
 ```
 
 ## Debugging
