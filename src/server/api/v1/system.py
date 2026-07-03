@@ -2,6 +2,8 @@
 System management API routes
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Request, Response, Query
 from slowapi import Limiter
 from typing import Optional
@@ -19,6 +21,8 @@ from ...config import config
 from ...utils.metrics import get_metrics_collector
 from ...utils.health_check import check_all_dependencies
 from ...utils.service_errors import (
+    dependency_unavailable_message,
+    operation_failed_message,
     public_startup_error_message,
     public_startup_error_with_recommendation,
 )
@@ -29,6 +33,14 @@ from powermem.version import __version__ as powermem_version
 from ...state import SERVER_START_TIME
 
 router = APIRouter(prefix="/system", tags=["system"])
+logger = logging.getLogger("server")
+
+
+def _dependency_status_response(name: str, dependency: DependencyStatus) -> dict:
+    data = dependency.model_dump(mode='json')
+    if name in {"database", "llm"} and data.get("error_message"):
+        data["error_message"] = dependency_unavailable_message(name)
+    return data
 
 
 @router.get(
@@ -121,7 +133,7 @@ async def get_status(
         
         # Convert dependencies to dict for response
         dependencies_dict = {
-            name: dep.model_dump(mode='json')
+            name: _dependency_status_response(name, dep)
             for name, dep in dependencies.items()
         }
         
@@ -240,9 +252,10 @@ async def delete_all_memories(
             data={"deleted": result, "filters": filters},
             message=f"All memories{filter_desc} deleted successfully",
         )
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to delete all memories")
         raise APIError(
             code=ErrorCode.INTERNAL_ERROR,
-            message=f"Failed to delete all memories: {str(e)}",
+            message=operation_failed_message("delete all memories"),
             status_code=500,
         )

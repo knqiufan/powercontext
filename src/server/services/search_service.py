@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from powermem import Memory, auto_config
 from ..models.errors import ErrorCode, APIError
 from ..utils.metrics import get_metrics_collector
+from ..utils.service_errors import operation_failed_message
 
 logger = logging.getLogger("server")
 
@@ -109,6 +110,6 @@ class SearchService:
             
             raise APIError(
                 code=ErrorCode.SEARCH_FAILED,
-                message=f"Search failed: {str(e)}",
+                message=operation_failed_message("search memories"),
                 status_code=500,
             )

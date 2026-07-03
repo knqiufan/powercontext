@@ -9,6 +9,7 @@ from typing import Callable, Dict, Tuple
 
 from ..models.response import DependencyStatus
 from ..config import config
+from .service_errors import dependency_unavailable_message
 
 
 logger = logging.getLogger("server")
@@ -126,18 +127,15 @@ def _check_database_sync() -> DependencyStatus:
             latency_ms=round(latency_ms, 2),
             last_checked=datetime.utcnow(),
         )
-    except Exception as e:
+    except Exception:
         latency_ms = (time.time() - start_time) * 1000
-        error_msg = str(e)
-        # Truncate long error messages
-        if len(error_msg) > 200:
-            error_msg = error_msg[:197] + "..."
+        logger.exception("Database dependency health check failed")
             
         return DependencyStatus(
             name="database",
             status="unavailable",
             latency_ms=round(latency_ms, 2),
-            error_message=error_msg,
+            error_message=dependency_unavailable_message("database"),
             last_checked=datetime.utcnow(),
         )
 
@@ -219,18 +217,15 @@ def _check_llm_sync() -> DependencyStatus:
             latency_ms=round(latency_ms, 2),
             last_checked=datetime.utcnow(),
         )
-    except Exception as e:
+    except Exception:
         latency_ms = (time.time() - start_time) * 1000
-        error_msg = str(e)
-        # Truncate long error messages
-        if len(error_msg) > 200:
-            error_msg = error_msg[:197] + "..."
+        logger.exception("LLM dependency health check failed")
             
         return DependencyStatus(
             name="llm",
             status="unavailable",
             latency_ms=round(latency_ms, 2),
-            error_message=error_msg,
+            error_message=dependency_unavailable_message("llm"),
             last_checked=datetime.utcnow(),
         )
 

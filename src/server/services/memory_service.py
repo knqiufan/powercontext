@@ -12,6 +12,7 @@ from ..models.errors import ErrorCode, APIError
 from ..models.request import ObservationIngestRequest
 from ..utils.converters import memory_dict_to_response
 from ..utils.metrics import get_metrics_collector
+from ..utils.service_errors import operation_failed_message
 
 logger = logging.getLogger("server")
 
@@ -315,7 +316,7 @@ class MemoryService:
             logger.error(f"Failed to ingest observation: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.MEMORY_CREATE_FAILED,
-                message=f"Failed to ingest observation: {str(e)}",
+                message=operation_failed_message("ingest observation"),
                 status_code=500,
             )
 
@@ -365,7 +366,7 @@ class MemoryService:
                     "success": False,
                     "observation_id": observation_id,
                     "result": None,
-                    "error": str(e),
+                    "error": operation_failed_message("ingest observation"),
                 })
                 failed_count += 1
 
@@ -500,7 +501,7 @@ class MemoryService:
             
             raise APIError(
                 code=ErrorCode.MEMORY_CREATE_FAILED,
-                message=f"Failed to create memory: {str(e)}",
+                message=operation_failed_message("create memory"),
                 status_code=500,
             )
     
@@ -560,7 +561,7 @@ class MemoryService:
             logger.error(f"Failed to get memory {memory_id}: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.INTERNAL_ERROR,
-                message=f"Failed to get memory: {str(e)}",
+                message=operation_failed_message("get memory"),
                 status_code=500,
             )
     
@@ -623,7 +624,7 @@ class MemoryService:
             logger.error(f"Failed to list memories: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.INTERNAL_ERROR,
-                message=f"Failed to list memories: {str(e)}",
+                message=operation_failed_message("list memories"),
                 status_code=500,
             )
     
@@ -1367,7 +1368,7 @@ class MemoryService:
             logger.error(f"Failed to update memory {memory_id}: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.MEMORY_UPDATE_FAILED,
-                message=f"Failed to update memory: {str(e)}",
+                message=operation_failed_message("update memory"),
                 status_code=500,
             )
 
@@ -1447,7 +1448,7 @@ class MemoryService:
             logger.error(f"Failed to delete memory {memory_id}: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.MEMORY_DELETE_FAILED,
-                message=f"Failed to delete memory: {str(e)}",
+                message=operation_failed_message("delete memory"),
                 status_code=500,
             )
     
@@ -1563,7 +1564,7 @@ class MemoryService:
                 failed.append({
                     "index": idx,
                     "content": memory_item.get("content", "N/A"),
-                    "error": str(e),
+                    "error": operation_failed_message("create memory"),
                 })
         
         return {
@@ -1648,7 +1649,7 @@ class MemoryService:
                 failed.append({
                     "index": idx,
                     "memory_id": update_item.get("memory_id"),
-                    "error": str(e),
+                    "error": operation_failed_message("update memory"),
                 })
         
         return {
@@ -1759,6 +1760,6 @@ class MemoryService:
             logger.error(f"Failed to analyze memory quality: {e}", exc_info=True)
             raise APIError(
                 code=ErrorCode.INTERNAL_ERROR,
-                message=f"Failed to analyze memory quality: {str(e)}",
+                message=operation_failed_message("analyze memory quality"),
                 status_code=500,
             )

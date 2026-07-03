@@ -7,6 +7,22 @@ import pytest
 from server.models.response import DependencyStatus
 from server.utils import health_check
 
+SENSITIVE_DEPENDENCY_ERROR = (
+    "failed to connect to postgresql://user:SYNTHETIC_SECRET@db.example/powermem "
+    "from /synthetic/local/path"
+)
+SENSITIVE_FRAGMENTS = (
+    "postgresql://user",
+    "SYNTHETIC_SECRET",
+    "db.example",
+    "/synthetic/local/path",
+)
+
+
+def assert_sensitive_dependency_error_hidden(message: str):
+    for fragment in SENSITIVE_FRAGMENTS:
+        assert fragment not in message
+
 
 @pytest.fixture(autouse=True)
 def clear_dependency_probe_state():
@@ -136,3 +152,35 @@ async def test_dependency_status_coalesces_concurrent_same_dependency(monkeypatc
 
     assert calls == {"database": 1}
     assert {result.status for result in results} == {"healthy"}
+
+
+def test_database_probe_error_message_does_not_expose_raw_exception(monkeypatch):
+    import powermem
+
+    class FailingMemory:
+        def __init__(self, config):
+            raise RuntimeError(SENSITIVE_DEPENDENCY_ERROR)
+
+    monkeypatch.setattr(powermem, "auto_config", lambda: {})
+    monkeypatch.setattr(powermem, "Memory", FailingMemory)
+
+    status = health_check._check_database_sync()
+
+    assert status.status == "unavailable"
+    assert status.error_message
+    assert_sensitive_dependency_error_hidden(status.error_message)
+
+
+def test_llm_probe_error_message_does_not_expose_raw_exception(monkeypatch):
+    import powermem
+
+    def fail_config_load():
+        raise RuntimeError(SENSITIVE_DEPENDENCY_ERROR)
+
+    monkeypatch.setattr(powermem, "auto_config", fail_config_load)
+
+    status = health_check._check_llm_sync()
+
+    assert status.status == "unavailable"
+    assert status.error_message
+    assert_sensitive_dependency_error_hidden(status.error_message)
