@@ -105,53 +105,9 @@ class ImportanceEvaluator:
         Returns:
             Importance score between 0 and 1
         """
-        score = 0.0
-        
-        # Length factor
-        if len(content) > 100:
-            score += 0.1
-        elif len(content) > 50:
-            score += 0.05
-        
-        # Keyword importance
-        important_keywords = [
-            "important", "critical", "urgent", "remember", "note",
-            "preference", "like", "dislike", "hate", "love",
-            "password", "secret", "private", "confidential"
-        ]
-        
-        content_lower = content.lower()
-        for keyword in important_keywords:
-            if keyword in content_lower:
-                score += 0.1
-        
-        # Question factor
-        if "?" in content:
-            score += 0.05
-        
-        # Exclamation factor
-        if "!" in content:
-            score += 0.05
-        
-        # Metadata factors
-        if metadata:
-            if metadata.get("priority") == "high":
-                score += 0.2
-            elif metadata.get("priority") == "medium":
-                score += 0.1
-            
-            if metadata.get("tags"):
-                score += 0.05
-        
-        # Context factors
-        if context:
-            if context.get("user_engagement") == "high":
-                score += 0.1
-            elif context.get("user_engagement") == "medium":
-                score += 0.05
-        
-        # Cap the score at 1.0
-        return min(score, 1.0)
+        dimension_scores = self._compute_dimension_scores(content, metadata, context)
+        score = self._weighted_dimension_total(dimension_scores)
+        return score if score is not None else 0.0
     
     def _llm_based_evaluation(
         self,
@@ -226,98 +182,126 @@ class ImportanceEvaluator:
         Returns:
             Dictionary with importance breakdown
         """
-        breakdown = {}
-        
-        for criterion, weight in self.criteria_weights.items():
-            # Calculate score for each criterion
-            if criterion == "relevance":
-                breakdown[criterion] = self._evaluate_relevance(content, context)
-            elif criterion == "novelty":
-                breakdown[criterion] = self._evaluate_novelty(content, metadata)
-            elif criterion == "emotional_impact":
-                breakdown[criterion] = self._evaluate_emotional_impact(content)
-            elif criterion == "actionable":
-                breakdown[criterion] = self._evaluate_actionable(content)
-            elif criterion == "factual":
-                breakdown[criterion] = self._evaluate_factual(content)
-            elif criterion == "personal":
-                breakdown[criterion] = self._evaluate_personal(content, metadata)
-        
+        breakdown = self._compute_dimension_scores(content, metadata, context)
+        weighted_total = self._weighted_dimension_total(breakdown)
+        breakdown["weighted_total"] = (
+            weighted_total if weighted_total is not None else 0.0
+        )
         return breakdown
+
+    def _compute_dimension_scores(
+        self,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, float]:
+        """Compute the six configured importance dimension scores."""
+        return {
+            "relevance": self._evaluate_relevance(content, context),
+            "novelty": self._evaluate_novelty(content, metadata),
+            "emotional_impact": self._evaluate_emotional_impact(content),
+            "actionable": self._evaluate_actionable(content),
+            "factual": self._evaluate_factual(content),
+            "personal": self._evaluate_personal(content, metadata),
+        }
+
+    def _weighted_dimension_total(self, scores: Dict[str, Any]) -> Optional[float]:
+        """Compute weighted total from dimension scores using configured weights."""
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for criterion, weight in self.criteria_weights.items():
+            score = self._extract_dimension_score(scores.get(criterion))
+            if score is None:
+                continue
+            weighted_sum += score * weight
+            total_weight += weight
+        if total_weight == 0.0:
+            return None
+        return self._clamp_score(weighted_sum / total_weight)
+
+    def _extract_dimension_score(self, raw_score: Any) -> Optional[float]:
+        """Normalize flat or nested dimension score values."""
+        if isinstance(raw_score, dict):
+            raw_score = raw_score.get("score")
+        if raw_score is None:
+            return None
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return None
+        if 0.0 <= score <= 1.0:
+            return score
+        return None
+
+    def _clamp_score(self, score: float) -> float:
+        """Clamp a score to the [0, 1] range."""
+        return max(0.0, min(1.0, score))
+
+    def _keyword_score(
+        self,
+        content_lower: str,
+        keywords: list[str],
+        increment: float
+    ) -> float:
+        """Score keyword hits with a fixed increment per matched indicator."""
+        score = 0.0
+        for keyword in keywords:
+            if keyword in content_lower:
+                score += increment
+        return self._clamp_score(score)
     
     def _evaluate_relevance(self, content: str, context: Optional[Dict[str, Any]]) -> float:
         """Evaluate relevance of content."""
-        # Simple keyword-based relevance
-        relevance_keywords = ["relevant", "related", "connected", "associated"]
+        relevance_keywords = [
+            "relevant", "related", "connected", "associated",
+            "important", "critical", "urgent", "remember", "note",
+            "preference", "重要", "关键", "紧急", "记住", "注意",
+            "相关", "关联", "需要", "偏好", "？", "?",
+        ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for keyword in relevance_keywords:
-            if keyword in content_lower:
-                score += 0.25
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, relevance_keywords, 0.25)
     
     def _evaluate_novelty(self, content: str, metadata: Optional[Dict[str, Any]]) -> float:
         """Evaluate novelty of content."""
-        # Check for new information indicators
-        novelty_indicators = ["new", "first", "never", "unprecedented", "unique"]
+        novelty_indicators = [
+            "new", "first", "never", "unprecedented", "unique",
+            "新增", "新的", "首次", "第一次", "从未", "独特",
+        ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for indicator in novelty_indicators:
-            if indicator in content_lower:
-                score += 0.2
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, novelty_indicators, 0.25)
     
     def _evaluate_emotional_impact(self, content: str) -> float:
         """Evaluate emotional impact of content."""
-        # Check for emotional words
         emotional_words = [
             "happy", "sad", "angry", "excited", "worried", "scared",
-            "love", "hate", "fear", "joy", "sorrow", "anger"
+            "love", "hate", "fear", "joy", "sorrow", "anger",
+            "like", "dislike", "喜欢", "讨厌", "开心", "难过",
+            "生气", "兴奋", "担心", "害怕", "热爱", "焦虑", "！", "!",
         ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for word in emotional_words:
-            if word in content_lower:
-                score += 0.1
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, emotional_words, 0.2)
     
     def _evaluate_actionable(self, content: str) -> float:
         """Evaluate if content is actionable."""
-        # Check for action words
         action_words = [
             "do", "make", "create", "build", "fix", "solve",
-            "implement", "execute", "perform", "complete"
+            "implement", "execute", "perform", "complete",
+            "请", "需要", "应该", "执行", "创建", "构建", "修复",
+            "解决", "实现", "完成", "操作", "待办",
         ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for word in action_words:
-            if word in content_lower:
-                score += 0.1
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, action_words, 0.2)
     
     def _evaluate_factual(self, content: str) -> float:
         """Evaluate if content contains factual information."""
-        # Check for factual indicators
         factual_indicators = [
             "fact", "data", "statistic", "research", "study",
-            "evidence", "proof", "confirmed", "verified"
+            "evidence", "proof", "confirmed", "verified",
+            "事实", "数据", "统计", "研究", "证据", "证明",
+            "确认", "验证", "已证实",
         ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for indicator in factual_indicators:
-            if indicator in content_lower:
-                score += 0.15
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, factual_indicators, 0.2)
     
     def _parse_importance_response(self, response: str) -> Optional[float]:
         """
@@ -378,29 +362,7 @@ class ImportanceEvaluator:
 
     def _synthesize_from_criteria(self, criteria: Dict[str, Any]) -> Optional[float]:
         """Compute weighted importance score from criteria_scores dict."""
-        weighted_sum = 0.0
-        total_weight = 0.0
-
-        for key, weight in self.criteria_weights.items():
-            raw = criteria.get(key)
-            # criteria_scores may be either flat floats or nested {"score": float}
-            if isinstance(raw, dict):
-                raw = raw.get("score")
-            if raw is None:
-                continue
-            try:
-                val = float(raw)
-                if 0.0 <= val <= 1.0:
-                    weighted_sum += val * weight
-                    total_weight += weight
-            except (TypeError, ValueError):
-                continue
-
-        if total_weight == 0.0:
-            return None
-
-        score = weighted_sum / total_weight
-        return max(0.0, min(1.0, score))
+        return self._weighted_dimension_total(criteria)
 
     def _parse_importance_from_field_regex(self, response: str) -> Optional[float]:
         """L2: Extract score only when anchored to a recognized field name."""
@@ -421,16 +383,11 @@ class ImportanceEvaluator:
     
     def _evaluate_personal(self, content: str, metadata: Optional[Dict[str, Any]]) -> float:
         """Evaluate if content is personal."""
-        # Check for personal indicators
         personal_indicators = [
             "i", "me", "my", "mine", "myself",
-            "personal", "private", "confidential"
+            "personal", "private", "confidential", "password", "secret",
+            "我", "我的", "自己", "个人", "私人", "私密", "保密",
+            "密码", "秘密", "偏好",
         ]
         content_lower = content.lower()
-        
-        score = 0.0
-        for indicator in personal_indicators:
-            if indicator in content_lower:
-                score += 0.1
-        
-        return min(score, 1.0)
+        return self._keyword_score(content_lower, personal_indicators, 0.2)

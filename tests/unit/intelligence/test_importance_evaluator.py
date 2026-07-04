@@ -163,3 +163,67 @@ class TestLLMBasedEvaluationFallback:
             result = evaluator._llm_based_evaluation("test content", None, None)
             assert result == 0.4
             mock_rule.assert_called_once()
+
+
+class TestRuleBasedWeightedEvaluation:
+    """Tests for rule-based six-dimension weighted evaluation."""
+
+    def test_weighted_dimension_total_uses_configured_weights(self, evaluator):
+        scores = {
+            "relevance": 1.0,
+            "novelty": 0.5,
+            "emotional_impact": 0.0,
+            "actionable": 0.5,
+            "factual": 1.0,
+            "personal": 0.0,
+        }
+
+        result = evaluator._weighted_dimension_total(scores)
+
+        assert result == pytest.approx(0.575)
+
+    def test_rule_based_evaluation_matches_breakdown_total_with_metadata_context(
+        self, evaluator
+    ):
+        dimension_scores = {
+            "relevance": 0.5,
+            "novelty": 0.5,
+            "emotional_impact": 0.0,
+            "actionable": 0.0,
+            "factual": 0.0,
+            "personal": 0.0,
+        }
+        metadata = {"priority": "high", "tags": ["profile"]}
+        context = {"user_engagement": "medium"}
+
+        with patch.object(
+            evaluator, "_compute_dimension_scores", return_value=dimension_scores
+        ):
+            result = evaluator._rule_based_evaluation("content", metadata, context)
+            breakdown = evaluator.get_importance_breakdown(
+                "content", metadata, context
+            )
+
+        assert result == pytest.approx(0.25)
+        assert breakdown["weighted_total"] == pytest.approx(result)
+
+    def test_rule_based_evaluation_understands_chinese_signals(self, evaluator):
+        content = "请记住我的偏好：我喜欢低糖咖啡！这是新的事实证据。"
+
+        result = evaluator._rule_based_evaluation(content)
+
+        assert result >= 0.35
+
+    def test_get_importance_breakdown_returns_weighted_total(self, evaluator):
+        content = "请记住我的偏好：我喜欢低糖咖啡！这是新的事实证据。"
+
+        breakdown = evaluator.get_importance_breakdown(content)
+        expected = sum(
+            breakdown[criterion] * weight
+            for criterion, weight in evaluator.criteria_weights.items()
+        )
+
+        assert set(evaluator.criteria_weights).issubset(breakdown)
+        assert "weighted_total" in breakdown
+        assert breakdown["weighted_total"] == pytest.approx(expected)
+        assert 0.0 <= breakdown["weighted_total"] <= 1.0
