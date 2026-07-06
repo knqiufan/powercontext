@@ -17,6 +17,16 @@ from powermem.agent.types import (
 )
 from powermem.agent.filters import matches_memory_filters
 from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.agent.utils.retention import (
+    RETENTION_ACTION_ARCHIVE,
+    RETENTION_ACTION_DELETE,
+    apply_agent_retention,
+    calculate_agent_retention,
+    classify_agent_retention,
+    get_agent_ebbinghaus_algorithm,
+    persist_agent_retention_metadata,
+    restore_effective_retention_fields,
+)
 from powermem.intelligence.intelligent_memory_manager import IntelligentMemoryManager
 from powermem.agent.abstract.manager import AgentMemoryManagerBase
 
@@ -550,6 +560,9 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
             
             # Convert database format to user memory format and load into memory cache
             processed_memory_ids = set()
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
             
             for db_memory in db_memories:
                 memory_id = db_memory.get('id')
@@ -590,9 +603,7 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 memory_data['scope'] = metadata.get('scope') or 'private'
                 
                 # Extract additional fields from metadata
-                if 'intelligence' in metadata:
-                    memory_data['retention_score'] = metadata['intelligence'].get('current_retention', 1.0)
-                    memory_data['importance_level'] = metadata['intelligence'].get('importance_score')
+                restore_effective_retention_fields(memory_data, algorithm)
                 
                 # Load into memory cache for future fast access
                 if user_id not in self.user_memories:
@@ -609,8 +620,11 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                         MemoryType.GROUP_CONSENSUS: {},
                     }
                 
-                if memory_id not in self.user_memories[user_id][memory_type]:
-                    self.user_memories[user_id][memory_type][memory_id] = memory_data
+                normalized_id = normalize_memory_id(memory_id)
+                for cached_type in MemoryType:
+                    for key in memory_key_variants(normalized_id):
+                        self.user_memories[user_id][cached_type].pop(key, None)
+                self.user_memories[user_id][memory_type][normalized_id] = memory_data
                 
                 # Check if this memory belongs to the user
                 if memory_data['user_id'] == user_id:
@@ -911,48 +925,31 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 'forgotten_memories': 0,
                 'reinforced_memories': 0,
             }
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
+            memory_instance = self._get_or_create_memory_instance()
             
             # Update decay for all user memories
             for user_id, user_memory_types in self.user_memories.items():
                 for memory_type in MemoryType:
                     for memory_id, memory_data in user_memory_types[memory_type].items():
-                        current_score = memory_data.get('retention_score', 1.0)
-                        access_count = memory_data.get('access_count', 0)
-                        last_accessed = memory_data.get('last_accessed')
-                        
-                        # Simple decay calculation (this should be replaced with proper Ebbinghaus algorithm)
-                        decay_rate = 0.1
-                        if last_accessed:
-                            # Parse ISO format string to datetime
-                            if isinstance(last_accessed, str):
-                                last_accessed_dt = datetime.fromisoformat(last_accessed.replace('Z', '+00:00'))
-                            else:
-                                last_accessed_dt = last_accessed
-                            time_since_access = (datetime.now() - last_accessed_dt).total_seconds() / 3600
-                        else:
-                            time_since_access = 24
-                        new_score = current_score * (1 - decay_rate * time_since_access / 24)
-                        new_score = max(0.0, min(1.0, new_score))
-                        
-                        decay_result = {
-                            'new_score': new_score,
-                            'decay_rate': decay_rate,
-                            'forgotten': new_score < 0.1
-                        }
-                        
-                        # Update memory data
-                        memory_data['retention_score'] = decay_result.get('new_score', memory_data.get('retention_score', 1.0))
-                        memory_data['decay_rate'] = decay_result.get('decay_rate', 0.1)
-                        
+                        retention_update = calculate_agent_retention(
+                            memory_data, algorithm, reinforce_due=True
+                        )
+                        apply_agent_retention(memory_data, retention_update)
+                        persist_agent_retention_metadata(memory_instance, memory_data)
                         decay_results['updated_memories'] += 1
+                        if retention_update.reinforced:
+                            decay_results['reinforced_memories'] += 1
                         
                         # Check if memory should be forgotten
-                        if decay_result.get('forgotten', False):
+                        if classify_agent_retention(
+                            memory_data,
+                            retention_update,
+                            algorithm,
+                        ) == RETENTION_ACTION_DELETE:
                             decay_results['forgotten_memories'] += 1
-                        
-                        # Check if memory should be reinforced
-                        if decay_result.get('reinforced', False):
-                            decay_results['reinforced_memories'] += 1
             
             logger.info(f"Updated memory decay: {decay_results}")
             return decay_results
@@ -976,14 +973,25 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 'cleaned_memory_ids': [],
             }
             memory_instance = self._get_or_create_memory_instance()
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
 
+            processed_ids = set()
             for user_id, user_memory_types in self.user_memories.items():
                 for memory_type in MemoryType:
                     memories_to_remove = []
-                    processed_ids = set()
 
                     for cache_key, memory_data in list(user_memory_types[memory_type].items()):
-                        retention_score = memory_data.get('retention_score', 1.0)
+                        retention_update = calculate_agent_retention(
+                            memory_data, algorithm
+                        )
+                        metadata = apply_agent_retention(memory_data, retention_update)
+                        retention_action = classify_agent_retention(
+                            memory_data,
+                            retention_update,
+                            algorithm,
+                        )
                         normalized_id = normalize_memory_id(
                             memory_data.get('id', cache_key)
                         )
@@ -991,21 +999,14 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                             continue
                         processed_ids.add(normalized_id)
 
-                        if retention_score < 0.1:
+                        if retention_action == RETENTION_ACTION_DELETE:
                             memories_to_remove.append((cache_key, normalized_id, memory_data))
                             cleanup_results['deleted_memories'] += 1
-                        elif retention_score < 0.3:
+                        elif retention_action == RETENTION_ACTION_ARCHIVE:
                             memory_data['archived'] = True
-                            metadata = dict(memory_data.get('metadata') or {})
                             metadata['archived'] = True
-                            memory_instance.update(
-                                memory_id=normalized_id,
-                                content=memory_data.get('content', ''),
-                                user_id=memory_data.get('user_id'),
-                                agent_id=memory_data.get('agent_id'),
-                                metadata=metadata,
-                            )
                             memory_data['metadata'] = metadata
+                            persist_agent_retention_metadata(memory_instance, memory_data)
                             cleanup_results['archived_memories'] += 1
 
                     for cache_key, normalized_id, memory_data in memories_to_remove:
@@ -1196,14 +1197,11 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
 
     def _remove_memory_from_cache(self, location: Dict[str, Any]) -> None:
         """Remove a memory entry from user cache."""
-        user_id = location['user_id']
-        memory_type = location['memory_type']
-        if (
-            user_id in self.user_memories
-            and memory_type in self.user_memories[user_id]
-        ):
-            for key in memory_key_variants(location['memory_id']):
-                self.user_memories[user_id][memory_type].pop(key, None)
+        for user_memory_types in self.user_memories.values():
+            for memory_type in MemoryType:
+                if memory_type in user_memory_types:
+                    for key in memory_key_variants(location['memory_id']):
+                        user_memory_types[memory_type].pop(key, None)
 
     def _clear_shared_records(self, memory_id: Union[str, int]) -> None:
         """Remove sharing and consent records for all id variants."""

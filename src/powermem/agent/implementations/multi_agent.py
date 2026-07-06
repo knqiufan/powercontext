@@ -23,6 +23,16 @@ from powermem.agent.components.collaboration_coordinator import CollaborationCoo
 from powermem.agent.components.privacy_protector import PrivacyProtector
 from powermem.agent.filters import matches_memory_filters
 from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.agent.utils.retention import (
+    RETENTION_ACTION_ARCHIVE,
+    RETENTION_ACTION_DELETE,
+    apply_agent_retention,
+    calculate_agent_retention,
+    classify_agent_retention,
+    get_agent_ebbinghaus_algorithm,
+    persist_agent_retention_metadata,
+    restore_effective_retention_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -518,6 +528,9 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
             total_memories = len(db_memories)
             scope_access_passed = 0
             permission_passed = 0
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
             
             for db_memory in db_memories:
                 memory_id = db_memory.get('id')
@@ -542,6 +555,7 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                     'access_count': 0,
                     'last_accessed': None,
                 }
+                restore_effective_retention_fields(memory_data, algorithm)
                 
                 # Extract scope and memory_type from metadata
                 metadata = memory_data.get('metadata', {})
@@ -561,13 +575,13 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 memory_data['scope'] = scope
                 memory_data['memory_type'] = memory_type
                 
-                # Load into memory cache for future fast access
-                if memory_id not in self.scope_memories[scope][memory_type]:
-                    self.scope_memories[scope][memory_type][memory_id] = memory_data
-                
-                # Also load into scope controller's storage for access control
-                if self.scope_controller and memory_id not in self.scope_controller.scope_storage[scope][memory_type]:
-                    self.scope_controller.scope_storage[scope][memory_type][memory_id] = memory_data
+                # Keep database-loaded state authoritative for Agent caches.
+                self._sync_scope_storage_entry(
+                    scope,
+                    memory_type,
+                    normalize_memory_id(memory_id),
+                    memory_data,
+                )
                 
                 # Restore permissions from metadata if available
                 # Check if this memory was created by the current agent
@@ -928,48 +942,31 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 'forgotten_memories': 0,
                 'reinforced_memories': 0,
             }
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
+            memory_instance = self._get_or_create_memory_instance()
             
             # Update decay for all memories
             for scope in MemoryScope:
                 for memory_type in MemoryType:
                     for memory_id, memory_data in self.scope_memories[scope][memory_type].items():
-                        current_score = memory_data.get('retention_score', 1.0)
-                        access_count = memory_data.get('access_count', 0)
-                        last_accessed = memory_data.get('last_accessed')
-                        
-                        # Simple decay calculation (this should be replaced with proper Ebbinghaus algorithm)
-                        decay_rate = 0.1
-                        if last_accessed:
-                            # Parse ISO format string to datetime
-                            if isinstance(last_accessed, str):
-                                last_accessed_dt = datetime.fromisoformat(last_accessed.replace('Z', '+00:00'))
-                            else:
-                                last_accessed_dt = last_accessed
-                            time_since_access = (datetime.now() - last_accessed_dt).total_seconds() / 3600
-                        else:
-                            time_since_access = 24
-                        new_score = current_score * (1 - decay_rate * time_since_access / 24)
-                        new_score = max(0.0, min(1.0, new_score))
-                        
-                        decay_result = {
-                            'new_score': new_score,
-                            'decay_rate': decay_rate,
-                            'forgotten': new_score < 0.1
-                        }
-                        
-                        # Update memory data
-                        memory_data['retention_score'] = decay_result.get('new_score', memory_data.get('retention_score', 1.0))
-                        memory_data['decay_rate'] = decay_result.get('decay_rate', 0.1)
-                        
+                        retention_update = calculate_agent_retention(
+                            memory_data, algorithm, reinforce_due=True
+                        )
+                        apply_agent_retention(memory_data, retention_update)
+                        persist_agent_retention_metadata(memory_instance, memory_data)
                         decay_results['updated_memories'] += 1
+                        if retention_update.reinforced:
+                            decay_results['reinforced_memories'] += 1
                         
                         # Check if memory should be forgotten
-                        if decay_result.get('forgotten', False):
+                        if classify_agent_retention(
+                            memory_data,
+                            retention_update,
+                            algorithm,
+                        ) == RETENTION_ACTION_DELETE:
                             decay_results['forgotten_memories'] += 1
-                        
-                        # Check if memory should be reinforced
-                        if decay_result.get('reinforced', False):
-                            decay_results['reinforced_memories'] += 1
             
             logger.info(f"Updated memory decay: {decay_results}")
             return decay_results
@@ -993,16 +990,27 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 'cleaned_memory_ids': [],
             }
             memory_instance = self._get_or_create_memory_instance()
+            algorithm = get_agent_ebbinghaus_algorithm(
+                getattr(self, 'intelligent_manager', None)
+            )
 
+            processed_ids = set()
             for scope in MemoryScope:
                 for memory_type in MemoryType:
                     memories_to_remove = []
-                    processed_ids = set()
 
                     for cache_key, memory_data in list(
                         self.scope_memories[scope][memory_type].items()
                     ):
-                        retention_score = memory_data.get('retention_score', 1.0)
+                        retention_update = calculate_agent_retention(
+                            memory_data, algorithm
+                        )
+                        metadata = apply_agent_retention(memory_data, retention_update)
+                        retention_action = classify_agent_retention(
+                            memory_data,
+                            retention_update,
+                            algorithm,
+                        )
                         normalized_id = normalize_memory_id(
                             memory_data.get('id', cache_key)
                         )
@@ -1010,21 +1018,14 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                             continue
                         processed_ids.add(normalized_id)
 
-                        if retention_score < 0.1:
+                        if retention_action == RETENTION_ACTION_DELETE:
                             memories_to_remove.append((cache_key, normalized_id, memory_data))
                             cleanup_results['deleted_memories'] += 1
-                        elif retention_score < 0.3:
+                        elif retention_action == RETENTION_ACTION_ARCHIVE:
                             memory_data['archived'] = True
-                            metadata = dict(memory_data.get('metadata') or {})
                             metadata['archived'] = True
-                            memory_instance.update(
-                                memory_id=normalized_id,
-                                content=memory_data.get('content', ''),
-                                user_id=memory_data.get('user_id'),
-                                agent_id=memory_data.get('agent_id'),
-                                metadata=metadata,
-                            )
                             memory_data['metadata'] = metadata
+                            persist_agent_retention_metadata(memory_instance, memory_data)
                             cleanup_results['archived_memories'] += 1
 
                     for cache_key, normalized_id, memory_data in memories_to_remove:
@@ -1158,18 +1159,20 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
 
     def _remove_memory_from_cache(self, location: Dict[str, Any]) -> None:
         """Remove a memory entry from scope and scope-controller caches."""
-        scope = location['scope']
-        memory_type = location['memory_type']
         normalized_id = location['memory_id']
 
-        for key in memory_key_variants(normalized_id):
-            if key in self.scope_memories[scope][memory_type]:
-                del self.scope_memories[scope][memory_type][key]
+        for scope in MemoryScope:
+            for memory_type in MemoryType:
+                for key in memory_key_variants(normalized_id):
+                    self.scope_memories[scope][memory_type].pop(key, None)
 
         if self.scope_controller:
-            for key in memory_key_variants(normalized_id):
-                if key in self.scope_controller.scope_storage[scope][memory_type]:
-                    del self.scope_controller.scope_storage[scope][memory_type][key]
+            for scope in MemoryScope:
+                for memory_type in MemoryType:
+                    for key in memory_key_variants(normalized_id):
+                        self.scope_controller.scope_storage[scope][memory_type].pop(
+                            key, None
+                        )
 
     def _sync_scope_storage_entry(
         self,
@@ -1179,12 +1182,18 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
         memory_data: Dict[str, Any],
     ) -> None:
         """Keep scope_memories and scope_controller storage in sync."""
-        for key in memory_key_variants(memory_id):
-            self.scope_memories[scope][memory_type].pop(key, None)
+        for existing_scope in MemoryScope:
+            for existing_type in MemoryType:
+                for key in memory_key_variants(memory_id):
+                    self.scope_memories[existing_scope][existing_type].pop(key, None)
         self.scope_memories[scope][memory_type][memory_id] = memory_data
         if self.scope_controller:
-            for key in memory_key_variants(memory_id):
-                self.scope_controller.scope_storage[scope][memory_type].pop(key, None)
+            for existing_scope in MemoryScope:
+                for existing_type in MemoryType:
+                    for key in memory_key_variants(memory_id):
+                        self.scope_controller.scope_storage[existing_scope][
+                            existing_type
+                        ].pop(key, None)
             self.scope_controller.scope_storage[scope][memory_type][memory_id] = memory_data
 
     def _revoke_memory_permissions(self, memory_id: Union[str, int]) -> None:
