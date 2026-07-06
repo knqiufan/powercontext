@@ -25,6 +25,7 @@ from ..utils.output import (
     print_warning,
     print_info,
 )
+from powermem.utils.intelligence_metadata import extract_retention_score
 
 logger = logging.getLogger(__name__)
 
@@ -352,8 +353,8 @@ def cleanup_cmd(ctx: CLIContext, threshold, archive_threshold, user_id, agent_id
         to_archive = []
         
         for mem in memories:
-            metadata = mem.get("metadata", {})
-            retention_score = metadata.get("retention_score")
+            metadata = mem.get("metadata") or {}
+            retention_score = extract_retention_score(metadata)
             
             # If no retention score, check access count and age
             if retention_score is None:
@@ -396,7 +397,7 @@ def cleanup_cmd(ctx: CLIContext, threshold, archive_threshold, user_id, agent_id
                 for mem in to_delete[:5]:
                     content = mem.get("memory") or mem.get("content", "N/A")
                     content = content[:40] + "..." if len(content) > 40 else content
-                    score = mem.get("metadata", {}).get("retention_score", "N/A")
+                    score = extract_retention_score(mem.get("metadata") or {})
                     click.echo(f"  - {content} (score: {score})")
                 if len(to_delete) > 5:
                     click.echo(f"  ... and {len(to_delete) - 5} more")

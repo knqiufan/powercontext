@@ -19,6 +19,10 @@ from powermem.agent.filters import matches_memory_filters
 from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
 from powermem.intelligence.intelligent_memory_manager import IntelligentMemoryManager
 from powermem.agent.abstract.manager import AgentMemoryManagerBase
+from powermem.utils.intelligence_metadata import (
+    extract_importance_level,
+    extract_retention_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +156,8 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
             
             # Determine scope based on sharing settings
             scope = self._determine_user_scope(user_id, context, enhanced_metadata)
+            retention_score = extract_retention_score(enhanced_metadata)
+            importance_level = extract_importance_level(enhanced_metadata)
             
             # Persist to database first to get Snowflake ID
             # Use temporary memory data for database insertion
@@ -165,6 +171,8 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 'run_id': run_id,
                 'scope': scope,
                 'memory_type': memory_type,
+                'retention_score': retention_score,
+                'importance_level': importance_level,
                 'metadata': enhanced_metadata,
             }
             
@@ -187,8 +195,8 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 'updated_at': datetime.now().isoformat(),
                 'access_count': 0,
                 'last_accessed': None,
-                'retention_score': enhanced_metadata.get('intelligence', {}).get('current_retention', 1.0),
-                'importance_level': enhanced_metadata.get('intelligence', {}).get('importance_score'),
+                'retention_score': retention_score if retention_score is not None else 1.0,
+                'importance_level': importance_level,
                 'privacy_level': self._determine_privacy_level(enhanced_metadata),
                 'shared_with': enhanced_metadata.get('share_with', []),
             }
@@ -258,6 +266,18 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
         """
         try:
             memory_instance = self._get_or_create_memory_instance()
+            metadata = memory_data.get('metadata') or {}
+            retention_score = memory_data.get('retention_score')
+            if retention_score is None:
+                retention_score = extract_retention_score(metadata)
+            importance_level = memory_data.get('importance_level')
+            if importance_level is None:
+                importance_level = extract_importance_level(metadata)
+            privacy_level = memory_data.get('privacy_level')
+            if privacy_level is None:
+                privacy_level = metadata.get('privacy_level')
+            else:
+                privacy_level = getattr(privacy_level, 'value', privacy_level)
 
             add_result = memory_instance.add(
                 messages=memory_data['content'],
@@ -265,12 +285,12 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                 agent_id=memory_data.get('agent_id'),
                 run_id=memory_data.get('run_id'),
                 metadata={
+                    **metadata,
                     'scope': memory_data.get('scope').value if memory_data.get('scope') else None,
                     'memory_type': memory_data.get('memory_type').value if memory_data.get('memory_type') else None,
-                    'retention_score': memory_data.get('retention_score'),
-                    'importance_level': memory_data.get('importance_level'),
-                    'privacy_level': memory_data.get('privacy_level').value if memory_data.get('privacy_level') else None,
-                    **memory_data.get('metadata', {})
+                    'retention_score': retention_score,
+                    'importance_level': importance_level,
+                    'privacy_level': privacy_level,
                 },
                 infer=False  # Use simple mode to avoid intelligent processing returning empty results
             )

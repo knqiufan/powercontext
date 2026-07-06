@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 from powermem.agent.implementations.multi_user import MultiUserMemoryManager
-from powermem.agent.types import MemoryType
+from powermem.agent.types import MemoryScope, MemoryType
 
 
 def _build_manager() -> MultiUserMemoryManager:
@@ -78,6 +78,55 @@ def test_delete_memory_removes_all_cache_key_variants():
     assert manager.user_memories["user-1"][MemoryType.WORKING] == {}
     assert manager.shared_memories == {}
     assert manager.consent_records["user-2"] == {}
+
+
+def test_persist_memory_copies_intelligence_retention_to_top_level_metadata():
+    manager = _build_manager()
+    manager._memory_instance.add.return_value = {"results": [{"id": 456}]}
+
+    memory_id = manager._persist_memory_to_storage(
+        {
+            "content": "remember user preference",
+            "user_id": "user-1",
+            "agent_id": "agent-1",
+            "scope": MemoryScope.PRIVATE,
+            "memory_type": MemoryType.LONG_TERM,
+            "metadata": {
+                "intelligence": {
+                    "current_retention": 0.42,
+                    "importance_score": 0.77,
+                }
+            },
+        }
+    )
+
+    assert memory_id == 456
+    add_metadata = manager._memory_instance.add.call_args.kwargs["metadata"]
+    assert add_metadata["retention_score"] == 0.42
+    assert add_metadata["importance_level"] == 0.77
+    assert add_metadata["intelligence"]["current_retention"] == 0.42
+
+
+def test_persist_memory_preserves_metadata_privacy_level_when_not_overridden():
+    manager = _build_manager()
+    manager._memory_instance.add.return_value = {"results": [{"id": 456}]}
+
+    manager._persist_memory_to_storage(
+        {
+            "content": "remember private user preference",
+            "user_id": "user-1",
+            "agent_id": "agent-1",
+            "scope": MemoryScope.PRIVATE,
+            "memory_type": MemoryType.LONG_TERM,
+            "metadata": {
+                "privacy_level": "confidential",
+                "intelligence": {"current_retention": 0.42},
+            },
+        }
+    )
+
+    add_metadata = manager._memory_instance.add.call_args.kwargs["metadata"]
+    assert add_metadata["privacy_level"] == "confidential"
 
 
 def test_cleanup_forgotten_memories_calls_db_delete_and_returns_ids():

@@ -132,6 +132,32 @@ def test_delete_memory_removes_all_cache_key_variants():
     ] == {}
 
 
+def test_persist_memory_copies_intelligence_retention_to_top_level_metadata():
+    manager = _build_manager()
+    manager._memory_instance.add.return_value = {"results": [{"id": 456}]}
+
+    memory_id = manager._persist_memory_to_storage(
+        {
+            "content": "remember agent preference",
+            "agent_id": "agent-1",
+            "scope": MemoryScope.PRIVATE,
+            "memory_type": MemoryType.LONG_TERM,
+            "metadata": {
+                "intelligence": {
+                    "current_retention": 0.42,
+                    "importance_score": 0.77,
+                }
+            },
+        }
+    )
+
+    assert memory_id == 456
+    add_metadata = manager._memory_instance.add.call_args.kwargs["metadata"]
+    assert add_metadata["retention_score"] == 0.42
+    assert add_metadata["importance_level"] == 0.77
+    assert add_metadata["intelligence"]["current_retention"] == 0.42
+
+
 def test_cleanup_forgotten_memories_returns_cleaned_memory_ids():
     manager = _build_manager()
     memory_data = manager.scope_memories[MemoryScope.PRIVATE][MemoryType.WORKING][123]

@@ -23,6 +23,10 @@ from powermem.agent.components.collaboration_coordinator import CollaborationCoo
 from powermem.agent.components.privacy_protector import PrivacyProtector
 from powermem.agent.filters import matches_memory_filters
 from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.utils.intelligence_metadata import (
+    extract_importance_level,
+    extract_retention_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +224,8 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
             
             # Determine memory type from enhanced metadata
             memory_type = self._determine_memory_type_from_metadata(enhanced_metadata)
+            retention_score = extract_retention_score(enhanced_metadata)
+            importance_level = extract_importance_level(enhanced_metadata)
             
             # Persist to database first to get Snowflake ID
             # Use temporary memory data for database insertion
@@ -228,6 +234,8 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 'agent_id': agent_id,
                 'scope': scope,
                 'memory_type': memory_type,
+                'retention_score': retention_score,
+                'importance_level': importance_level,
                 'metadata': enhanced_metadata,
             }
             
@@ -249,8 +257,8 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 'updated_at': datetime.now().isoformat(),
                 'access_count': 0,
                 'last_accessed': None,
-                'retention_score': enhanced_metadata.get('intelligence', {}).get('current_retention', 1.0),
-                'importance_level': enhanced_metadata.get('intelligence', {}).get('importance_score'),
+                'retention_score': retention_score if retention_score is not None else 1.0,
+                'importance_level': importance_level,
             }
             
             # Store in appropriate scope and type
@@ -341,17 +349,25 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
             # Use the existing Memory.add() method
             # Get the Snowflake ID returned from database to ensure consistency
             # Use infer=False to use simple mode since intelligent processing is already done at agent layer
+            metadata = memory_data.get('metadata') or {}
+            retention_score = memory_data.get('retention_score')
+            if retention_score is None:
+                retention_score = extract_retention_score(metadata)
+            importance_level = memory_data.get('importance_level')
+            if importance_level is None:
+                importance_level = extract_importance_level(metadata)
+
             add_result = memory_instance.add(
                 messages=memory_data['content'],
                 user_id=memory_data.get('user_id'),
                 agent_id=memory_data.get('agent_id'),
                 run_id=memory_data.get('run_id'),
                 metadata={
+                    **metadata,
                     'scope': getattr(memory_data.get('scope'), 'value', memory_data.get('scope')),
                     'memory_type': getattr(memory_data.get('memory_type'), 'value', memory_data.get('memory_type')),
-                    'retention_score': memory_data.get('retention_score'),
-                    'importance_level': memory_data.get('importance_level'),
-                    **memory_data.get('metadata', {})
+                    'retention_score': retention_score,
+                    'importance_level': importance_level,
                 },
                 infer=False  # Use simple mode to avoid intelligent processing returning empty results
             )
