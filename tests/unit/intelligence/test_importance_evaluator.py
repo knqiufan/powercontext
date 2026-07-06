@@ -207,6 +207,20 @@ class TestRuleBasedWeightedEvaluation:
         assert result == pytest.approx(0.25)
         assert breakdown["weighted_total"] == pytest.approx(result)
 
+    def test_rule_based_evaluation_uses_real_metadata_context_signals(
+        self, evaluator
+    ):
+        metadata = {"priority": "high", "tags": ["profile"]}
+        context = {"user_engagement": "high"}
+
+        result = evaluator.evaluate_importance(
+            "alpha beta gamma",
+            metadata=metadata,
+            context=context,
+        )
+
+        assert result == pytest.approx(0.35)
+
     def test_rule_based_evaluation_understands_chinese_signals(self, evaluator):
         content = "请记住我的偏好：我喜欢低糖咖啡！这是新的事实证据。"
 

@@ -197,7 +197,7 @@ class ImportanceEvaluator:
     ) -> Dict[str, float]:
         """Compute the six configured importance dimension scores."""
         return {
-            "relevance": self._evaluate_relevance(content, context),
+            "relevance": self._evaluate_relevance(content, metadata, context),
             "novelty": self._evaluate_novelty(content, metadata),
             "emotional_impact": self._evaluate_emotional_impact(content),
             "actionable": self._evaluate_actionable(content),
@@ -250,7 +250,12 @@ class ImportanceEvaluator:
                 score += increment
         return self._clamp_score(score)
     
-    def _evaluate_relevance(self, content: str, context: Optional[Dict[str, Any]]) -> float:
+    def _evaluate_relevance(
+        self,
+        content: str,
+        metadata: Optional[Dict[str, Any]],
+        context: Optional[Dict[str, Any]],
+    ) -> float:
         """Evaluate relevance of content."""
         relevance_keywords = [
             "relevant", "related", "connected", "associated",
@@ -259,7 +264,38 @@ class ImportanceEvaluator:
             "相关", "关联", "需要", "偏好", "？", "?",
         ]
         content_lower = content.lower()
-        return self._keyword_score(content_lower, relevance_keywords, 0.25)
+        score = self._keyword_score(content_lower, relevance_keywords, 0.25)
+        score += self._metadata_priority_relevance_score(metadata)
+        score += self._context_engagement_relevance_score(context)
+        return self._clamp_score(score)
+
+    def _metadata_priority_relevance_score(
+        self,
+        metadata: Optional[Dict[str, Any]]
+    ) -> float:
+        """Convert legacy priority metadata into the relevance dimension."""
+        if not metadata:
+            return 0.0
+        priority = metadata.get("priority")
+        if priority == "high":
+            return 2.0 / 3.0
+        if priority == "medium":
+            return 1.0 / 3.0
+        return 0.0
+
+    def _context_engagement_relevance_score(
+        self,
+        context: Optional[Dict[str, Any]]
+    ) -> float:
+        """Convert legacy engagement context into the relevance dimension."""
+        if not context:
+            return 0.0
+        engagement = context.get("user_engagement")
+        if engagement == "high":
+            return 1.0 / 3.0
+        if engagement == "medium":
+            return 1.0 / 6.0
+        return 0.0
     
     def _evaluate_novelty(self, content: str, metadata: Optional[Dict[str, Any]]) -> float:
         """Evaluate novelty of content."""
@@ -268,7 +304,10 @@ class ImportanceEvaluator:
             "新增", "新的", "首次", "第一次", "从未", "独特",
         ]
         content_lower = content.lower()
-        return self._keyword_score(content_lower, novelty_indicators, 0.25)
+        score = self._keyword_score(content_lower, novelty_indicators, 0.25)
+        if metadata and metadata.get("tags"):
+            score += 0.25
+        return self._clamp_score(score)
     
     def _evaluate_emotional_impact(self, content: str) -> float:
         """Evaluate emotional impact of content."""
