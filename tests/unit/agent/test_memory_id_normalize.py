@@ -2,7 +2,12 @@
 
 import pytest
 
-from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.agent.utils.memory_id import (
+    memory_cache_key,
+    memory_cache_key_variants,
+    memory_key_variants,
+    normalize_memory_id,
+)
 
 
 def test_normalize_memory_id_accepts_int_and_string():
@@ -13,6 +18,16 @@ def test_normalize_memory_id_accepts_int_and_string():
 
 def test_memory_key_variants_include_int_and_str():
     assert memory_key_variants(123) == [123, "123"]
+
+
+def test_memory_cache_key_variants_keep_legacy_string_id():
+    assert memory_cache_key("memory-1") == "memory-1"
+    assert memory_cache_key_variants("memory-1") == ["memory-1"]
+
+
+def test_memory_cache_key_variants_include_int_and_str_for_snowflake_id():
+    assert memory_cache_key("123") == 123
+    assert memory_cache_key_variants("123") == [123, "123"]
 
 
 def test_normalize_memory_id_rejects_empty_string():

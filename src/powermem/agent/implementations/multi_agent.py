@@ -22,7 +22,12 @@ from powermem.agent.components.permission_controller import PermissionController
 from powermem.agent.components.collaboration_coordinator import CollaborationCoordinator
 from powermem.agent.components.privacy_protector import PrivacyProtector
 from powermem.agent.filters import matches_memory_filters
-from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.agent.utils.memory_id import (
+    memory_cache_key,
+    memory_cache_key_variants,
+    memory_key_variants,
+    normalize_memory_id,
+)
 from powermem.agent.utils.retention import (
     RETENTION_ACTION_ARCHIVE,
     RETENTION_ACTION_DELETE,
@@ -579,7 +584,7 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
                 self._sync_scope_storage_entry(
                     scope,
                     memory_type,
-                    normalize_memory_id(memory_id),
+                    memory_id,
                     memory_data,
                 )
                 
@@ -1178,23 +1183,24 @@ class MultiAgentMemoryManager(AgentMemoryManagerBase):
         self,
         scope: MemoryScope,
         memory_type: MemoryType,
-        memory_id: int,
+        memory_id: Union[str, int],
         memory_data: Dict[str, Any],
     ) -> None:
         """Keep scope_memories and scope_controller storage in sync."""
+        cache_key = memory_cache_key(memory_id)
         for existing_scope in MemoryScope:
             for existing_type in MemoryType:
-                for key in memory_key_variants(memory_id):
+                for key in memory_cache_key_variants(memory_id):
                     self.scope_memories[existing_scope][existing_type].pop(key, None)
-        self.scope_memories[scope][memory_type][memory_id] = memory_data
+        self.scope_memories[scope][memory_type][cache_key] = memory_data
         if self.scope_controller:
             for existing_scope in MemoryScope:
                 for existing_type in MemoryType:
-                    for key in memory_key_variants(memory_id):
+                    for key in memory_cache_key_variants(memory_id):
                         self.scope_controller.scope_storage[existing_scope][
                             existing_type
                         ].pop(key, None)
-            self.scope_controller.scope_storage[scope][memory_type][memory_id] = memory_data
+            self.scope_controller.scope_storage[scope][memory_type][cache_key] = memory_data
 
     def _revoke_memory_permissions(self, memory_id: Union[str, int]) -> None:
         """Clear permission records for all id key variants."""

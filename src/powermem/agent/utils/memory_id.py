@@ -24,3 +24,23 @@ def memory_key_variants(memory_id: MemoryIdInput) -> List[Union[int, str]]:
     """Return int/str key variants for transitional cache lookup."""
     normalized = normalize_memory_id(memory_id)
     return [normalized, str(normalized)]
+
+
+def memory_cache_key(memory_id: MemoryIdInput) -> Union[int, str]:
+    """Return the canonical cache key while preserving legacy string ids."""
+    try:
+        return normalize_memory_id(memory_id)
+    except ValueError:
+        if isinstance(memory_id, str):
+            stripped = memory_id.strip()
+            if stripped:
+                return stripped
+        raise
+
+
+def memory_cache_key_variants(memory_id: MemoryIdInput) -> List[Union[int, str]]:
+    """Return cache lookup variants without rejecting legacy string ids."""
+    try:
+        return memory_key_variants(memory_id)
+    except ValueError:
+        return [memory_cache_key(memory_id)]

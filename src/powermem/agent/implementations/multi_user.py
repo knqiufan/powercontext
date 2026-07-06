@@ -16,7 +16,12 @@ from powermem.agent.types import (
     AccessPermission
 )
 from powermem.agent.filters import matches_memory_filters
-from powermem.agent.utils.memory_id import memory_key_variants, normalize_memory_id
+from powermem.agent.utils.memory_id import (
+    memory_cache_key,
+    memory_cache_key_variants,
+    memory_key_variants,
+    normalize_memory_id,
+)
 from powermem.agent.utils.retention import (
     RETENTION_ACTION_ARCHIVE,
     RETENTION_ACTION_DELETE,
@@ -620,11 +625,11 @@ class MultiUserMemoryManager(AgentMemoryManagerBase):
                         MemoryType.GROUP_CONSENSUS: {},
                     }
                 
-                normalized_id = normalize_memory_id(memory_id)
+                cache_key = memory_cache_key(memory_id)
                 for cached_type in MemoryType:
-                    for key in memory_key_variants(normalized_id):
+                    for key in memory_cache_key_variants(memory_id):
                         self.user_memories[user_id][cached_type].pop(key, None)
-                self.user_memories[user_id][memory_type][normalized_id] = memory_data
+                self.user_memories[user_id][memory_type][cache_key] = memory_data
                 
                 # Check if this memory belongs to the user
                 if memory_data['user_id'] == user_id:
