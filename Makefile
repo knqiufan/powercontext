@@ -76,7 +76,7 @@ harness-compose-down: ## Stop the selected isolated harness environment and remo
 	@e2e/bub/run.sh down
 
 .PHONY: contract-test
-contract-test: api-generate-check js-api-generate-check js-test ## Verify generated API code and contract bindings.
+contract-test: api-generate-check js-api-generate-check ## Verify generated API code and contract bindings.
 	@uv run python -m pytest tests/test_api_contract.py tests/test_js_operations.py
 
 .PHONY: api-generate
