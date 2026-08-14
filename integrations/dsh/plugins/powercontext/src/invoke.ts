@@ -88,7 +88,6 @@ export function injectScope(
   scopeId: string,
 ): JsonObject | undefined {
   if (!OPERATIONS[operationId].scope) return payload
-  if (payload && typeof payload.scope_id === 'string' && payload.scope_id.trim()) return payload
   return { ...payload, scope_id: scopeId }
 }
 

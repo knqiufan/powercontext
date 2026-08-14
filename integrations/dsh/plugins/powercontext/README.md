@@ -17,7 +17,7 @@ Before each model step it:
 1. recalls bounded context with `POST /v1/context/prepare`;
 2. captures the current user input with `POST /v1/sources/content`.
 
-Named `pc_*` tools cover Memory, handoff, experience, skill, and review. Everything else is reachable through `pc_call` by OpenAPI `operationId`. `/pc doctor` checks Server liveness and readiness.
+Named `pc_*` tools expose the agent-safe Memory, handoff, experience, skill, and read-only review operations. DSH requests one-time user approval before named mutations run. Review mutations remain explicit human `/pc review` commands; destructive and administrative OpenAPI operations are not model tools. `/pc doctor` checks Server liveness and readiness.
 
 The operations table in `src/operations.generated.ts` is generated from the repository `openapi/powercontext.yaml`. From the PowerContext root:
 

@@ -1,3 +1,4 @@
+import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { PowerContextClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import { captureUserPrompt } from './capture.ts'
@@ -9,13 +10,11 @@ import {
 import { validatePreparedContext } from './prepared-context.ts'
 
 export interface TextBlock {
-  type: string
-  text?: string
+  readonly type: string
+  readonly text?: string
 }
 
-export interface PromptMessage {
-  content: TextBlock[]
-}
+export type PromptMessage = Pick<UserMessage, 'content' | 'source'>
 
 export interface EnterDecision {
   kind: 'enter'
@@ -38,13 +37,29 @@ export interface RecallInput {
   log: (event: Record<string, unknown>) => void
 }
 
-export function messagesToQuery(messages: PromptMessage[]): string {
-  return messages
-    .flatMap((message) => message.content)
-    .filter((block): block is TextBlock & { text: string } => block.type === 'text' && typeof block.text === 'string')
+function messageText(message: PromptMessage): string {
+  return message.content
+    .filter((block): block is TextBlock & { readonly text: string } => (
+      block.type === 'text' && typeof block.text === 'string'
+    ))
     .map((block) => block.text)
     .join('')
     .trim()
+}
+
+function messagesToText(messages: readonly PromptMessage[]): string {
+  return messages
+    .map(messageText)
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+export function messagesToQuery(messages: readonly PromptMessage[]): string {
+  return messagesToText(messages)
+}
+
+export function messagesToUserPrompt(messages: readonly PromptMessage[]): string {
+  return messagesToText(messages.filter((message) => message.source.kind === 'user'))
 }
 
 export function formatUntrustedContext(content: string): string {
@@ -91,7 +106,8 @@ export async function runRecallPreStep(input: RecallInput): Promise<PreStepDecis
   if (input.messages.length === 0) return input.next()
   const query = messagesToQuery(input.messages)
   if (!query) return input.next()
-  const content = await recallThenCapture(input, query)
+  const userPrompt = messagesToUserPrompt(input.messages)
+  const content = await recallThenCapture(input, query, userPrompt)
   const downstream = await input.next()
   if (!content || downstream.kind !== 'enter') return downstream
   try {
@@ -104,21 +120,27 @@ export async function runRecallPreStep(input: RecallInput): Promise<PreStepDecis
   }
 }
 
-async function recallThenCapture(input: RecallInput, query: string): Promise<string | undefined> {
+async function recallThenCapture(
+  input: RecallInput,
+  query: string,
+  userPrompt: string,
+): Promise<string | undefined> {
   try {
     const scopeId = await input.resolveScope(input.cwd)
     const content = await recallContent(input, query, scopeId)
-    await captureUserPrompt({
-      client: input.client,
-      config: input.config,
-      scopeId,
-      prompt: query,
-      cwd: input.cwd,
-      sessionId: input.sessionId,
-      turnId: input.turnId,
-      signal: input.signal,
-      log: input.log,
-    })
+    if (userPrompt) {
+      await captureUserPrompt({
+        client: input.client,
+        config: input.config,
+        scopeId,
+        prompt: userPrompt,
+        cwd: input.cwd,
+        sessionId: input.sessionId,
+        turnId: input.turnId,
+        signal: input.signal,
+        log: input.log,
+      })
+    }
     return content
   } catch {
     return undefined

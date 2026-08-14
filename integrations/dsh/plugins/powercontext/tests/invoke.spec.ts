@@ -34,6 +34,28 @@ describe('invokeOperation', () => {
     expect(seen[1].url).toBe('http://127.0.0.1:8000/health/live')
   })
 
+  it('overwrites a caller-supplied scope_id with the derived workspace scope', async () => {
+    let body: string | undefined
+    const client = new PowerContextClient({
+      baseUrl: 'http://127.0.0.1:8000',
+      requestTimeoutMs: 1000,
+      fetch: async (_url, init) => {
+        body = init?.body ? String(init.body) : undefined
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      },
+    })
+
+    await invokeOperation(client, 'search_memory', {
+      query: 'api',
+      scope_id: 'project:attacker-controlled',
+    }, 'project:derived-workspace')
+
+    expect(JSON.parse(body ?? '{}')).toMatchObject({
+      query: 'api',
+      scope_id: 'project:derived-workspace',
+    })
+  })
+
   it('returns unavailable instead of throwing when the server is down', async () => {
     const client = new PowerContextClient({
       baseUrl: 'http://127.0.0.1:8000',
