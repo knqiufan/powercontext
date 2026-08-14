@@ -10,9 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "openapi" / "powercontext.yaml"
-GENERATED_PATH = (
-    ROOT / "integrations" / "dsh" / "plugins" / "powercontext" / "src" / "operations.generated.ts"
-)
+GENERATED_PATH = ROOT / "integrations" / "dsh" / "plugins" / "powercontext" / "src" / "operations.generated.ts"
 DRIFT_MESSAGE = "Generated JS operations drifted; run 'make js-api-generate' and review the result."
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 
@@ -50,15 +48,13 @@ def parse_operations(doc: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             parameters = _operation_parameters(doc, path_item, operation)
             body_schema = _json_body_schema(doc, operation)
-            rows.append(
-                {
-                    "operationId": operation["operationId"],
-                    "method": method.upper(),
-                    "path": path,
-                    "location": _request_location(body_schema, parameters),
-                    "scope": _operation_has_scope(doc, body_schema, parameters),
-                }
-            )
+            rows.append({
+                "operationId": operation["operationId"],
+                "method": method.upper(),
+                "path": path,
+                "location": _request_location(body_schema, parameters),
+                "scope": _operation_has_scope(doc, body_schema, parameters),
+            })
     return rows
 
 

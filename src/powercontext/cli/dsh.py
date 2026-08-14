@@ -99,11 +99,7 @@ def run_dsh_diagnostics() -> dict[str, Diagnostic]:
         "dsh": Diagnostic(status=DiagnosticStatus.OK, detail=executable),
         "plugin": Diagnostic(
             status=DiagnosticStatus.OK if installed else DiagnosticStatus.FAILED,
-            detail=(
-                f"{DSH_PLUGIN_NAME} is installed"
-                if installed
-                else "PowerContext DSH plugin is not installed"
-            ),
+            detail=(f"{DSH_PLUGIN_NAME} is installed" if installed else "PowerContext DSH plugin is not installed"),
         ),
     }
 
@@ -224,7 +220,9 @@ def _run_dsh(*arguments: str) -> str:
     except (OSError, subprocess.SubprocessError) as error:
         raise SetupError.command_unavailable(command, error) from error
     if completed.returncode != 0:
-        detail = (completed.stderr or "").strip() or (completed.stdout or "").strip() or f"exit code {completed.returncode}"
+        detail = (
+            (completed.stderr or "").strip() or (completed.stdout or "").strip() or f"exit code {completed.returncode}"
+        )
         raise SetupError.command_failed(command, detail)
     return completed.stdout or ""
 
