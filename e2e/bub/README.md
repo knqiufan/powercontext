@@ -28,9 +28,6 @@ summary.
 
 ## Layout
 
-To add another pinned sample, follow [Add an e2e sample](../../docs/en/development/add-e2e-sample.md)
-([中文](../../docs/zh/development/add-e2e-sample.md)).
-
 ```text
 e2e/bub/
   tasks/                  # PowerContext manifests and evaluation expectations
