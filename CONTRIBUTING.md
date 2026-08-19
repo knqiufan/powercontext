@@ -93,6 +93,11 @@ make unit-test
 Use `make e2e-test` for cross-component behavior, `make contract-test` for OpenAPI changes, and
 `make docs-test` for documentation changes. `make test` runs the complete pytest suite.
 
+To add a pinned e2e sample, follow [Add an e2e sample](docs/en/development/add-e2e-sample.md)
+([中文](docs/zh/development/add-e2e-sample.md)). Reuse Harbor and `powercontext-e2e acceptance`.
+Do not add a new runner, and do not treat one to three samples as a LoCoMo score. Full LoCoMo
+runs stay out of pull-request CI.
+
 Before raising a pull request you should also run tox when a change may affect supported Python versions.
 This requires you to have the relevant Python versions installed. The same version matrix runs in CI.
 
