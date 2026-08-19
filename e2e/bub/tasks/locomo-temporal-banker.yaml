@@ -14,7 +14,7 @@ provenance:
 dataset:
   path: e2e/bub/harbor-tasks
   task_id: locomo-temporal-banker
-  checksum: "0000000000000000000000000000000000000000000000000000000000000000"
+  checksum: a60f80624d3157cf32b243617b4caad1fb4340825e24f9f22036102298d9b203
 execution:
   type: bub
   model: false
