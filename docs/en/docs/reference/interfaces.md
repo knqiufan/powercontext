@@ -126,9 +126,11 @@ powercontext setup pi
 powercontext setup hermes
 powercontext setup select
 powercontext doctor
+powercontext doctor integrations
 powercontext doctor codex
 powercontext doctor claude-code
 powercontext doctor dsh
+powercontext doctor openclaw
 powercontext doctor opencode
 powercontext doctor pi
 powercontext doctor hermes
@@ -151,10 +153,11 @@ powercontext external-skill import --scope-id project:example --fingerprint SHA2
 All content commands call the configured Server. The optional `server` role adds `powercontext server run`; it does
 not create a second content profile inside the CLI.
 
-`powercontext doctor` checks the package and Server without requiring an integration. `powercontext doctor codex`
-checks the Codex CLI and PowerContext plugin explicitly. `powercontext doctor dsh` checks the DeepSeek Harness CLI
-and that dump-config lists the plugin id `powercontext-dsh`. `powercontext doctor pi` checks the Pi executable and
-that Pi lists the PowerContext package.
+`powercontext doctor` checks the package and Server without requiring an integration. `powercontext doctor integrations`
+prints a read-only matrix for every first-class host; a missing CLI is `missing` and does not fail the command.
+Each `powercontext doctor <host>` command still fails when that host CLI is missing. The matrix preserves every
+host-specific integration check, including OpenCode's separate `plugin` and `skill` results. DSH checks that
+`dump-config` lists `powercontext-dsh`; Pi checks that the CLI lists the PowerContext package.
 
 The `candidate` command group exposes the human Review Inbox. See [Review Candidates](../how-to/review-candidates.md)
 for the ordered workflow to list, inspect, revise, approve, or reject Candidates.

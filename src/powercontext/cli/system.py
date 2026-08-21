@@ -919,6 +919,20 @@ def doctor_openclaw(
         raise typer.Exit(code=1)
 
 
+@doctor_app.command("integrations")
+def doctor_integrations(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Write the result as JSON."),
+    ] = False,
+) -> None:
+    """Report first-class host CLI and integration status without failing on missing CLIs."""
+
+    from powercontext.cli.hosts import run_doctor_integrations
+
+    run_doctor_integrations(json_output=json_output)
+
+
 def install_codex_plugin(*, source: str, ref: str) -> CodexSetupResult:
     """Install the plugin from one local or Git marketplace source."""
 
