@@ -239,20 +239,18 @@ def test_setup_select_json_writes_the_matrix_without_a_prompt(monkeypatch) -> No
 def test_setup_select_passes_source_ref_and_claude_defaults(monkeypatch) -> None:
     installers = _patch_installers(monkeypatch)
 
-    result = _invoke(
-        [
-            "setup",
-            "select",
-            "--host",
-            "codex",
-            "--host",
-            "claude-code",
-            "--source",
-            "oceanbase/powercontext",
-            "--ref",
-            "tested-ref",
-        ]
-    )
+    result = _invoke([
+        "setup",
+        "select",
+        "--host",
+        "codex",
+        "--host",
+        "claude-code",
+        "--source",
+        "oceanbase/powercontext",
+        "--ref",
+        "tested-ref",
+    ])
 
     assert result.exit_code == 0
     installers["codex"].assert_called_once_with(source="oceanbase/powercontext", ref="tested-ref")
