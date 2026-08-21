@@ -1,6 +1,6 @@
 - Proposal Name: local_server_availability_and_service_installation
 - Start Date: 2026-08-21
-- RFC PR: [oceanbase/powercontext#0000](https://github.com/oceanbase/powercontext/pull/0000)
+- RFC PR: [oceanbase/powercontext#1299](https://github.com/oceanbase/powercontext/pull/1299)
 - Tracking Issue: [oceanbase/powercontext#1298](https://github.com/oceanbase/powercontext/issues/1298)
 
 # Summary
