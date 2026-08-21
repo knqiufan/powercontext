@@ -6,8 +6,8 @@
 # Summary
 
 PowerContext will separate local Server execution from installation and deployment lifecycle. The Server CLI will
-continue to provide the explicit foreground command powercontext server run. Agent integrations will fail open while
-making Server unavailability visible, and powercontext doctor will explain whether the installed service registration,
+continue to provide the explicit foreground command `powercontext server run`. Agent integrations will fail open while
+making Server unavailability visible, and `powercontext doctor` will explain whether the installed service registration,
 native service manager, Server liveness, and Server readiness agree.
 
 For a personal installation, an opt-in distribution-owned service-install layer will register the existing foreground
@@ -21,16 +21,16 @@ Linux, macOS, and Windows while allowing the accepted implementation to be split
 Agent integrations depend on a reachable PowerContext Server but do not own its process lifecycle. The normal local
 entry point is intentionally foreground:
 
-~~~text
+```text
 powercontext server run
-~~~
+```
 
 That default is inspectable and reversible, but it disappears when the terminal closes or the machine restarts. A
 later agent session can continue without recall or capture because integrations fail open. Existing structured
 diagnostics may be written to logs or stderr, but the user can still experience the failure as silent loss of
 PowerContext behavior.
 
-Putting login autostart directly under powercontext server would mix two responsibilities. The Server package owns how
+Putting login autostart directly under `powercontext server` would mix two responsibilities. The Server package owns how
 to run one configured process. Installation and distribution own whether an operating system should persistently
 launch that process. The distinction also separates two deployment profiles:
 
@@ -52,37 +52,37 @@ PowerContext documents three ways to run the Server.
 
 The existing command remains the default and keeps its current behavior:
 
-~~~text
+```text
 powercontext server run
-~~~
+```
 
-It runs in the foreground, prints logs to the terminal, and stops on Ctrl-C. Installing PowerContext or an agent
+It runs in the foreground, prints logs to the terminal, and stops on `Ctrl-C`. Installing PowerContext or an agent
 integration does not create persistent operating-system state.
 
 ### Persistent personal use
 
 A user who wants the local Server after login explicitly installs a per-user service through the distribution layer:
 
-~~~text
+```text
 powercontext service install
 powercontext service status
-~~~
+```
 
-The proposed service command group is not part of powercontext server. It manages only PowerContext-owned
-registration artifacts for the current user. Installation is off by default and does not require root, SYSTEM, or an
-administrator account.
+The public lifecycle command group is `powercontext service`. It is not part of `powercontext server` and manages only
+PowerContext-owned registration artifacts for the current user. Installation is off by default and does not require
+`root`, `SYSTEM`, or an administrator account.
 
 The installed service still executes the same Server entry point. It does not introduce a daemon inside PowerContext:
 
-~~~text
+```text
 powercontext server run
-~~~
+```
 
 To remove the registration:
 
-~~~text
+```text
 powercontext service uninstall
-~~~
+```
 
 Uninstalling the registration stops a Server instance owned by that registration and removes only artifacts created
 by PowerContext. It does not terminate an unrelated foreground Server.
@@ -91,19 +91,19 @@ by PowerContext. It does not terminate an unrelated foreground Server.
 
 The personal service installer is not a production deployment manager. A managed installation uses the project's
 container image or an administrator-managed systemd system unit, launch daemon, Windows service, or equivalent
-orchestrator. PowerContext does not install those privileged resources through powercontext service.
+orchestrator. PowerContext does not install those privileged resources through `powercontext service`.
 
 ## What users see when the Server is unavailable
 
 Agent integrations remain fail-open: failure to recall or capture does not block the host task. They must nevertheless
-surface a content-free server_unavailable diagnostic through the host's warning or diagnostic channel. An integration
+surface a content-free `server_unavailable` diagnostic through the host's warning or diagnostic channel. An integration
 must not attempt to install, start, or restart the Server from a prompt hook.
 
 The warning directs the user to:
 
-~~~text
+```text
 powercontext doctor
-~~~
+```
 
 Doctor reports separate facts rather than collapsing them into one connection error:
 
@@ -115,23 +115,23 @@ Doctor reports separate facts rather than collapsing them into one connection er
 
 Examples include:
 
-~~~text
+```text
 service_registration  not_installed  optional: run powercontext service install
 server_liveness       failed         run powercontext server run, or install the personal service
 server_readiness      skipped        not checked because Server liveness failed
-~~~
+```
 
 and:
 
-~~~text
+```text
 service_registration  installed
 service_manager       inactive       inspect the native user-service logs
 server_liveness       failed         registered service did not become reachable
 server_readiness      skipped        not checked because Server liveness failed
-~~~
+```
 
-Service status is narrower than doctor. It reports registration and manager state plus Server liveness, but it does
-not replace the Server's readiness diagnostics.
+`powercontext service status` is narrower than `powercontext doctor`. It reports registration and manager state plus
+Server liveness, but it does not replace the Server's readiness diagnostics.
 
 # Reference-level explanation
 
@@ -141,27 +141,28 @@ The accepted design assigns one owner to each concern:
 
 | Concern | Owner | Required behavior |
 | --- | --- | --- |
-| Construct and run the ASGI process | Server role | Keep powercontext server run foreground and independently usable |
+| Construct and run the ASGI process | Server role | Keep `powercontext server run` foreground and independently usable |
 | Recall and capture during an agent task | Integration | Fail open and surface Server unavailability without owning lifecycle |
 | Diagnose an installed environment | CLI diagnostics | Correlate registration, manager state, liveness, and readiness |
 | Register a personal background process | Distribution/service-install layer | Manage native per-user artifacts and execute the Server entry point |
 | Run a managed deployment | Operator or orchestrator | Use containers or administrator-managed system services |
 
 No integration imports a platform service adapter. No platform service adapter belongs to
-src/powercontext/server or changes Server application startup. The distribution layer may expose its user contract
-through the top-level powercontext CLI, but command placement does not transfer ownership to the Server role.
+`src/powercontext/server` or changes Server application startup. The distribution layer exposes its user contract
+through the top-level `powercontext service` command group, but command placement does not transfer ownership to the
+Server role.
 
 ## CLI contract
 
 The initial distribution contract is:
 
-~~~text
+```text
 powercontext service install
 powercontext service uninstall
 powercontext service status
-~~~
+```
 
-The commands apply only to the current user's personal service. There is no --system, --machine, --root, or
+The commands apply only to the current user's personal service. There is no `--system`, `--machine`, `--root`, or
 administrator installation mode.
 
 ### Install
@@ -173,7 +174,7 @@ Install performs these steps:
 3. Render and validate the registration artifact before changing native state.
 4. Create or update only the artifact identified as PowerContext's personal Server registration.
 5. Enable the registration for future user logins.
-6. Start it immediately only when the configured Server endpoint is not already live.
+6. Start it immediately by default when the configured Server endpoint is not already live.
 7. Report registration, native manager state, and liveness after the operation.
 
 Repeated installation with the same desired definition is successful and makes no semantic change. Installation with
@@ -197,12 +198,12 @@ broaden cleanup to a directory, an arbitrary task name, or an unverified process
 
 Status is read-only and has human-readable and JSON output. Its stable state model contains:
 
-~~~text
+```text
 support: supported | unsupported
 registration: installed | not_installed | invalid | unknown
 manager: active | inactive | failed | unknown
 server_liveness: live | unreachable | unknown
-~~~
+```
 
 Registration is the state of the exact PowerContext-owned native artifact. Manager state comes from the native
 manager. Liveness comes from the configured health endpoint. These values are deliberately independent: a foreground
@@ -213,24 +214,24 @@ The JSON output must not include credentials, complete process environments, or 
 ## Native personal-service adapters
 
 All adapters register the current user, execute the same absolute PowerContext Server command without a shell, and
-write logs to an operating-system-native location surfaced by status and doctor.
+write logs to an operating-system-native location surfaced by `powercontext service status` and `powercontext doctor`.
 
 ### Linux
 
-The supported adapter is systemd --user. It owns a unit under the user's systemd configuration directory and uses the
-user service manager for enable, start, stop, status, and logs. It never writes under /etc/systemd/system and never
+The supported adapter is `systemd --user`. It owns a unit under the user's systemd configuration directory and uses the
+user service manager for enable, start, stop, status, and logs. It never writes under `/etc/systemd/system` and never
 enables linger. A Linux environment without an available user systemd manager reports unsupported; the first
 implementation does not silently fall back to a shell startup file or desktop-specific autostart entry.
 
 ### macOS
 
-The supported adapter is a per-user LaunchAgent under the user's Library/LaunchAgents directory. It uses launchd's
+The supported adapter is a per-user `LaunchAgent` under the user's `Library/LaunchAgents` directory. It uses launchd's
 current-user domain and never creates a LaunchDaemon or privileged helper.
 
 ### Windows
 
-The supported adapter is a Task Scheduler task triggered when the current user logs on. It runs as that user and never
-as SYSTEM. A hidden process window is acceptable. The adapter does not install a Windows Service.
+The supported adapter is a `Task Scheduler` task triggered when the current user logs on. It runs as that user and never
+as `SYSTEM`. A hidden process window is acceptable. The adapter does not install a Windows Service.
 
 Native identifiers and paths are project constants. Each artifact carries enough static identity for status and
 uninstall to distinguish a PowerContext-owned definition from a foreign resource.
@@ -242,25 +243,25 @@ the caller's complete environment, shell profile, API keys, bearer tokens, or pr
 registration artifact.
 
 The initial personal-service profile therefore relies on configuration that is available to the native user-service
-environment. Status and doctor must detect common configuration divergence where it can be observed without reading
+environment. `powercontext service status` and `powercontext doctor` must detect common configuration divergence where
+it can be observed without reading
 secrets. Deployments that require injected credentials or environment management beyond the native user-service
 contract remain operator-managed.
 
 A portable credential store, environment snapshot, or cross-platform secret-file format is not introduced by this
-RFC. If personal service installation cannot support the project's documented inference configuration without one of
-those contracts, that configuration handoff must be resolved before the service-install implementation is declared
-generally available.
+RFC. File-backed settings and secrets remain a separate concern handled through the project's existing
+`pydantic-settings` direction; they are not a general-availability condition for this service lifecycle proposal.
 
 ## Integration availability signal
 
 Each integration already has a host-specific execution model, so the display mechanism is adapter-specific. The
 common semantic contract is:
 
-- transport failure, timeout, or HTTP 503 maps to server_unavailable;
+- transport failure, timeout, or HTTP 503 maps to `server_unavailable`;
 - recall and capture remain independently fail-open;
 - the diagnostic contains no prompt, recalled content, token, or credential;
 - the host task proceeds without injected PowerContext content;
-- the integration provides a discoverable path to powercontext doctor;
+- the integration provides a discoverable path to `powercontext doctor`;
 - the hook never starts or installs a Server.
 
 Authentication failure, version mismatch, invalid response, an empty successful result, and Server unavailability
@@ -269,7 +270,7 @@ structured diagnostics for troubleshooting.
 
 ## Doctor diagnostics
 
-Powercontext doctor remains the authoritative installed-environment diagnostic. When the service-install capability is
+`powercontext doctor` remains the authoritative installed-environment diagnostic. When the service-install capability is
 present, it adds:
 
 | Check | Meaning |
@@ -290,13 +291,15 @@ The registration points to a resolved installed entry point rather than a shell 
 recorded command still exists. Doctor reports a stale command or definition mismatch after an installation moves or
 changes materially.
 
-Updating the Python distribution does not silently rewrite operating-system state. Running service install again
+Updating the Python distribution does not silently rewrite operating-system state. Running
+`powercontext service install` again
 reconciles the registration with the currently installed distribution. Documentation must include that reconciliation
 step until the distribution has a transactional upgrade hook.
 
 ## Failure handling and observability
 
-Native start failures remain visible in native logs. Service status and doctor identify how to inspect those logs.
+Native start failures remain visible in native logs. `powercontext service status` and `powercontext doctor` identify
+how to inspect those logs.
 Platform adapters return structured failures without including secret environment values.
 
 The registered command must not create a duplicate Server when the configured endpoint is already live. Native restart
@@ -310,7 +313,7 @@ Specific restart intervals may differ by platform, but tests must cover the rend
 - No operation requests privilege elevation.
 - The registered Server retains its configured bind address; the installer does not change it to a public address.
 - The feature introduces no new HTTP, MCP, persistence, or authentication contract.
-- Server run retains its current foreground behavior.
+- `powercontext server run` retains its current foreground behavior.
 - Uninstall removes only verified PowerContext-owned artifacts.
 - Diagnostics and logs never expose credentials or captured content.
 
@@ -351,7 +354,8 @@ registration, manager, liveness, and readiness that produces a different recover
 
 ## Put autostart under the Server CLI
 
-Commands such as powercontext server autostart enable are discoverable beside server run, but they make the Server
+Commands such as `powercontext server autostart enable` are discoverable beside `powercontext server run`, but they
+make the Server
 role own installation and operating-system persistence. This RFC keeps process construction and service installation
 separate.
 
@@ -368,9 +372,9 @@ integrations and recommend explicit next steps; service installation remains opt
 
 ## Publish manual recipes only
 
-Manual systemd, launchd, and Task Scheduler instructions avoid adapter code but drift across releases and provide no
-shared status, ownership, uninstall, or doctor contract. Native managers remain the mechanism, but PowerContext owns
-the reversible personal registration.
+Manual `systemd`, `launchd`, and `Task Scheduler` instructions avoid adapter code but drift across releases and
+provide no shared status, ownership, uninstall, or doctor contract. Native managers remain the mechanism, but
+PowerContext owns the reversible personal registration.
 
 ## Install a privileged system service everywhere
 
@@ -396,9 +400,9 @@ confusing and personal registrations will continue to lack a supported diagnosti
 
 # Prior art
 
-systemd user services, macOS LaunchAgents, and per-user Task Scheduler tasks provide native login-session lifecycle,
-logging, and status without a project-specific supervisor. Developer tools commonly keep an interactive foreground
-command while offering a separate install or service command for persistent personal use.
+`systemd` user services, macOS `LaunchAgent`s, and per-user `Task Scheduler` tasks provide native login-session
+lifecycle, logging, and status without a project-specific supervisor. Developer tools commonly keep an interactive
+foreground command while offering a separate install or service command for persistent personal use.
 
 Containers and administrator-managed services are established deployment boundaries for managed workloads because
 they make identity, configuration, credentials, restart policy, and observability explicit. This RFC applies that
@@ -406,14 +410,8 @@ separation to PowerContext instead of treating every local or managed Server as 
 
 # Unresolved questions
 
-- Should the public distribution command remain powercontext service, or fit under an existing setup-oriented command
-  without implying that the Server role owns installation?
 - What host-native presentation satisfies visible but non-blocking Server-unavailable diagnostics for Codex, Claude
   Code, and DeepSeek Harness without producing warning fatigue?
-- Which documented personal configurations are guaranteed to be available inside each native user-service
-  environment, and does that require a separate non-secret configuration contract before general availability?
-- Should install start the service immediately by default, or only register it for the next login unless an explicit
-  start option is provided?
 - What stable native identifiers should be reserved on each platform to make ownership checks compatible with future
   package renames?
 
