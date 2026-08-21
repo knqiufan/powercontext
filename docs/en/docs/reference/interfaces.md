@@ -120,6 +120,7 @@ boundary flushing fail open; explicit durable writes require interactive confirm
 powercontext setup codex
 powercontext setup dsh
 powercontext setup pi
+powercontext setup select
 powercontext doctor
 powercontext doctor codex
 powercontext doctor dsh
