@@ -16,11 +16,15 @@ powercontext doctor
 `ok` 与 `status`。可单独检查可选的宿主集成：
 
 ```bash
+powercontext doctor integrations
 powercontext doctor codex
 powercontext doctor claude-code
 powercontext doctor dsh
 powercontext doctor pi
 ```
+
+`doctor integrations` 会打印全部一级宿主。CLI 不在 PATH 上时该行是 `missing`，不会让整条命令失败；已安装但异常的
+宿主仍会以状态码 1 退出。单宿主命令（如 `doctor codex`）在该 CLI 缺失时仍然失败。
 
 ## 安装时无法读取 Git 地址
 

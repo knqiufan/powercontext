@@ -61,6 +61,7 @@ disable the Dashboard explicitly.
 
 ```bash
 powercontext doctor
+powercontext doctor integrations
 powercontext doctor codex
 powercontext doctor dsh
 powercontext doctor pi
@@ -71,6 +72,7 @@ powercontext capabilities
 `doctor` checks the installed package, Server liveness, and Server readiness without requiring an integration. Server
 readiness covers the database and each configured inference provider. Runtime or database failures return
 `not_ready`; an inference failure returns `degraded` without removing database-backed operations from traffic.
+`doctor integrations` is an optional read-only overview of every first-class host; a missing CLI does not fail that command.
 `doctor codex`, `doctor dsh`, and `doctor pi` separately check their optional host CLI and PowerContext integration. The content commands exercise the
 public HTTP SDK path. `ready` and `capabilities` show the readiness and enabled capabilities of the running service. For complete status definitions and
 recovery steps, see [Troubleshoot](troubleshoot.md).

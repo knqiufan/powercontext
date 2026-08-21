@@ -16,11 +16,16 @@ The command checks the package, Server liveness, and Server readiness. It exits 
 the top-level result and every check include `ok` and `status`. Check optional host integrations separately:
 
 ```bash
+powercontext doctor integrations
 powercontext doctor codex
 powercontext doctor claude-code
 powercontext doctor dsh
 powercontext doctor pi
 ```
+
+`doctor integrations` prints every first-class host. A host whose CLI is not on PATH is `missing` and does not fail
+the command. A present host that is broken still exits 1. Single-host commands such as `doctor codex` stay fail-closed
+when that CLI is missing.
 
 ## Installation cannot read the Git URL
 

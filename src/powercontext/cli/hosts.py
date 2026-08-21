@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""First-class host catalog and opt-in multi-host setup orchestration."""
+"""First-class host catalog, opt-in multi-host setup, and read-only integration diagnostics."""
 
 from __future__ import annotations
 
@@ -20,8 +20,12 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    from powercontext.cli.system import Diagnostic
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,8 @@ FIRST_CLASS_HOSTS: tuple[HostSpec, ...] = (
 )
 HOST_NAMES: tuple[str, ...] = tuple(host.name for host in FIRST_CLASS_HOSTS)
 _HOST_INDEX: dict[str, str] = {str(index): host.name for index, host in enumerate(FIRST_CLASS_HOSTS, start=1)}
+_INTEGRATION_KEYS = frozenset({"plugin", "package"})
+_PATH_MISSING = "is not installed or is not on PATH"
 
 
 class SetupSelectError(RuntimeError):
@@ -87,6 +93,55 @@ class SetupSelectReport:
     @property
     def has_installed(self) -> bool:
         return any(row.status == "installed" for row in self.hosts)
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrationRow:
+    """One first-class host in a doctor integrations report."""
+
+    host: str
+    presence: str
+    cli_key: str
+    cli: Diagnostic
+    integration_key: str
+    integration: Diagnostic
+
+    @property
+    def failed(self) -> bool:
+        return self.presence == "present" and not (self.cli.ok and self.integration.ok)
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "presence": self.presence,
+            self.cli_key: self.cli.as_json(),
+            self.integration_key: self.integration.as_json(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrationReport:
+    """Read-only matrix of first-class host CLI and integration status."""
+
+    hosts: tuple[IntegrationRow, ...]
+
+    @property
+    def has_present_failure(self) -> bool:
+        return any(row.failed for row in self.hosts)
+
+    @property
+    def ok(self) -> bool:
+        return not self.has_present_failure
+
+    @property
+    def status(self) -> str:
+        return "failed" if self.has_present_failure else "ok"
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "ok": self.ok,
+            "status": self.status,
+            "hosts": {row.host: row.as_json() for row in self.hosts},
+        }
 
 
 def stdin_is_tty() -> bool:
@@ -257,3 +312,94 @@ def _write_host_catalog() -> None:
     for index, host in enumerate(FIRST_CLASS_HOSTS, start=1):
         typer.echo(f"  {index}) {host.label} ({host.name})")
     typer.echo("Select hosts by number or name (comma-separated), or press Enter to cancel:")
+
+
+def diagnose_host(name: str) -> dict[str, Diagnostic]:
+    """Lazily collect diagnostics for one first-class host."""
+
+    if name == "codex":
+        from powercontext.cli.system import run_codex_diagnostics
+
+        return run_codex_diagnostics()
+    if name == "claude-code":
+        from powercontext.cli.system import run_claude_code_diagnostics
+
+        return run_claude_code_diagnostics()
+    if name == "dsh":
+        from powercontext.cli.dsh import run_dsh_diagnostics
+
+        return run_dsh_diagnostics()
+    if name == "pi":
+        from powercontext.cli.pi import run_pi_diagnostics
+
+        return run_pi_diagnostics()
+    if name == "hermes":
+        from powercontext.cli.hermes import run_hermes_diagnostics
+
+        return run_hermes_diagnostics()
+    raise SetupSelectError.unknown_host(name)
+
+
+def split_host_diagnostics(
+    diagnostics: dict[str, Diagnostic],
+) -> tuple[str, Diagnostic, str, Diagnostic]:
+    """Split one host probe into the CLI check and the plugin/package check."""
+
+    integration_key = next(key for key in diagnostics if key in _INTEGRATION_KEYS)
+    cli_key = next(key for key in diagnostics if key not in _INTEGRATION_KEYS)
+    return cli_key, diagnostics[cli_key], integration_key, diagnostics[integration_key]
+
+
+def classify_host_presence(cli: Diagnostic, integration: Diagnostic) -> str:
+    """Mark a host missing only when PATH lookup failed and the integration was skipped."""
+
+    if _PATH_MISSING in cli.detail and integration.status.value == "skipped":
+        return "missing"
+    return "present"
+
+
+def build_integration_row(name: str, diagnostics: dict[str, Diagnostic]) -> IntegrationRow:
+    """Classify one host diagnostic pair without deciding the command exit code."""
+
+    cli_key, cli, integration_key, integration = split_host_diagnostics(diagnostics)
+    return IntegrationRow(
+        host=name,
+        presence=classify_host_presence(cli, integration),
+        cli_key=cli_key,
+        cli=cli,
+        integration_key=integration_key,
+        integration=integration,
+    )
+
+
+def collect_integration_diagnostics() -> IntegrationReport:
+    """Walk the shared catalog and collect a row for every first-class host."""
+
+    return IntegrationReport(
+        hosts=tuple(build_integration_row(host.name, diagnose_host(host.name)) for host in FIRST_CLASS_HOSTS)
+    )
+
+
+def format_integration_row(row: IntegrationRow) -> str:
+    return (
+        f"{row.host}: {row.presence} - cli={row.cli.status.value} {row.integration_key}={row.integration.status.value}"
+    )
+
+
+def write_integration_report(report: IntegrationReport, *, json_output: bool) -> None:
+    """Write the host matrix as JSON or one human line per host."""
+
+    if json_output:
+        typer.echo(json.dumps(report.as_json(), indent=2))
+        return
+    for row in report.hosts:
+        typer.echo(format_integration_row(row))
+
+
+def run_doctor_integrations(*, json_output: bool) -> None:
+    """Print the first-class host matrix and fail only when a present host is broken."""
+
+    report = collect_integration_diagnostics()
+    write_integration_report(report, json_output=json_output)
+    if report.has_present_failure:
+        raise typer.Exit(code=1)
