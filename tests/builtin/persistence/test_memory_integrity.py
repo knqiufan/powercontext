@@ -24,6 +24,7 @@ from powercontext.builtin.artifacts.memory import (
     MemoryChange,
     MemoryCommit,
     MemoryContent,
+    MemoryEntryInput,
     MemoryEntryVersion,
     MemoryHit,
     MemoryManifest,
@@ -313,6 +314,68 @@ def test_memory_commit_requires_the_direct_same_entry_predecessor() -> None:
             with pytest.raises(MemoryBackendConfigurationError):
                 await _commit(backend, _revision_commit(second, (second_a, first_b), skipped))
             assert await backend.latest("memory") == second
+
+    asyncio.run(scenario())
+
+
+def test_memory_commit_rejects_corrupted_history_already_referenced_by_base() -> None:
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            backend = _backend(contexts, "corrupted-base-history")
+            original = _entry()
+            base = await _commit(backend, _initial_commit(original))
+            second = _entry(
+                entry_version_id="preference-v2",
+                version=2,
+                previous_version_id=original.entry_version_id,
+                text="User prefers oolong tea.",
+                created_in_revision=2,
+            )
+            head = await _commit(backend, _revision_commit(base, (original,), second))
+            async with contexts.database.transaction() as connection:
+                await connection.execute(
+                    MEMORY_ENTRY_VERSIONS_TABLE
+                    .update()
+                    .where(
+                        MEMORY_ENTRY_VERSIONS_TABLE.c.scope_id == "corrupted-base-history",
+                        MEMORY_ENTRY_VERSIONS_TABLE.c.memory_artifact_id == base.artifact_id,
+                        MEMORY_ENTRY_VERSIONS_TABLE.c.entry_version_id == "preference-v1",
+                    )
+                    .values(previous_version_id="does-not-exist")
+                )
+
+            service = MemoryService(backend=backend)
+            with pytest.raises(MemoryBackendConfigurationError):
+                await service.remember(
+                    memory=head,
+                    entries=(MemoryEntryInput(kind="fact", text="An unrelated fact."),),
+                    mode="append",
+                )
+            assert await backend.latest(base.artifact_id) == head
+
+    asyncio.run(scenario())
+
+
+def test_memory_commit_rejects_semantic_revision_of_an_inactive_entry() -> None:
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            backend = _backend(contexts, "inactive-revision")
+            original = _entry()
+            base = await _commit(backend, _initial_commit(original))
+            service = MemoryService(backend=backend)
+            inactive = await service.forget(base, entries=(original,), reason="paused")
+            replacement = _entry(
+                entry_version_id="preference-v2",
+                version=2,
+                previous_version_id=original.entry_version_id,
+                text="User prefers green tea.",
+                created_in_revision=3,
+            )
+            candidate = _revision_commit(inactive, (original,), replacement).model_copy(update={"projections": ()})
+
+            with pytest.raises(MemoryBackendConfigurationError):
+                await _commit(backend, candidate)
+            assert await backend.latest(base.artifact_id) == inactive
 
     asyncio.run(scenario())
 

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
@@ -23,6 +24,7 @@ from typing import Any, ClassVar
 
 from pydantic import RootModel
 from sqlalchemy import delete, insert, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.artifacts import ArtifactDraft, ArtifactRef
@@ -46,8 +48,10 @@ from powercontext.builtin.artifacts.memory import (
 from powercontext.builtin.artifacts.memory.canonical import (
     canonical_embedding,
     embedding_content_hash,
+    entry_content_bytes,
     entry_content_hash,
     memory_content_hash,
+    validate_embedding,
 )
 from powercontext.builtin.artifacts.memory.errors import (
     InvalidMemoryCitationError,
@@ -67,6 +71,8 @@ from powercontext.builtin.persistence.tables import (
 )
 from powercontext.errors import ArtifactNotFoundError
 from powercontext.sources import SourceRef
+
+_UNIT_VECTOR_ABS_TOLERANCE = 1e-12
 
 
 class _SourceRefs(RootModel[tuple[SourceRef, ...]]):
@@ -580,10 +586,13 @@ class RelationalMemoryBackend:
             raise _InvalidMemoryCommitError("artifact-result")
 
         if value.entry_versions:
-            await connection.execute(
-                insert(MEMORY_ENTRY_VERSIONS_TABLE),
-                [_entry_values(self._scope_id, entry) for entry in value.entry_versions],
-            )
+            try:
+                await connection.execute(
+                    insert(MEMORY_ENTRY_VERSIONS_TABLE),
+                    [_entry_values(self._scope_id, entry) for entry in value.entry_versions],
+                )
+            except IntegrityError as error:
+                raise _InvalidMemoryCommitError("entry-identity") from error
         await connection.execute(
             delete(MEMORY_ENTRY_HEADS_TABLE).where(
                 MEMORY_ENTRY_HEADS_TABLE.c.scope_id == self._scope_id,
@@ -608,6 +617,7 @@ class RelationalMemoryBackend:
 
     async def _validate_commit_relations(self, connection: AsyncConnection, value: MemoryCommit) -> None:
         canonical_base = await self._canonical_commit_base(connection, value)
+        await self._validate_base_history(connection, canonical_base)
         new_by_entry = _validate_revision_transition(value, canonical_base)
         versions = await self._commit_versions(connection, value)
         await self._validate_new_version_history(connection, value, canonical_base, new_by_entry)
@@ -627,6 +637,41 @@ class RelationalMemoryBackend:
                 raise _InvalidMemoryCommitError("base")
             return canonical
         return None
+
+    async def _validate_base_history(self, connection: AsyncConnection, base: Memory | None) -> None:
+        if base is None:
+            return
+        rows = (
+            await connection.execute(
+                select(MEMORY_ENTRY_VERSIONS_TABLE).where(
+                    MEMORY_ENTRY_VERSIONS_TABLE.c.scope_id == self._scope_id,
+                    MEMORY_ENTRY_VERSIONS_TABLE.c.memory_artifact_id == base.artifact_id,
+                )
+            )
+        ).mappings()
+        stored = tuple(rows)
+        rows_by_id = {str(row["entry_version_id"]): row for row in stored}
+        if len(rows_by_id) != len(stored):
+            raise _InvalidMemoryCommitError("entry-history")
+        by_id: dict[str, MemoryEntryVersion] = {}
+        pending = [item.entry_version_id for item in base.content.manifest.entries]
+        while pending:
+            entry_version_id = pending.pop()
+            if entry_version_id in by_id:
+                continue
+            row = rows_by_id.get(entry_version_id)
+            if row is None:
+                continue
+            version = _decode_entry(row)
+            by_id[entry_version_id] = version
+            if version.previous_version_id is not None:
+                pending.append(version.previous_version_id)
+        for item in base.content.manifest.entries:
+            version = by_id.get(item.entry_version_id)
+            if version is None or not _manifest_entry_matches(base.as_ref(), item, version):
+                raise _InvalidMemoryCommitError("entry-history")
+            if not _entry_history_matches(base.as_ref(), item, version, by_id):
+                raise _InvalidMemoryCommitError("entry-history")
 
     async def _commit_versions(
         self,
@@ -711,6 +756,10 @@ class RelationalMemoryBackend:
                 or not _manifest_entry_matches(canonical_base.as_ref(), base_item, predecessor)
             ):
                 raise _InvalidMemoryCommitError("entry-history")
+            if base_item.state == "inactive" and (
+                change.reason != "normalize" or not _canonical_entry_content_matches(version, predecessor)
+            ):
+                raise _InvalidMemoryCommitError("entry-history")
 
     def _validate_commit_projections(
         self,
@@ -739,10 +788,9 @@ class RelationalMemoryBackend:
         if not self._index.capabilities.vector or profile is None:
             raise _InvalidMemoryCommitError("vector")
         try:
-            canonical = canonical_embedding(
+            vector = validate_embedding(
                 projection.embedding,
                 dimension=profile.dimension,
-                normalization=profile.normalization,
             )
             expected_hash = embedding_content_hash(
                 profile_id=profile.profile_id,
@@ -754,7 +802,15 @@ class RelationalMemoryBackend:
             )
         except (TypeError, ValueError) as error:
             raise _InvalidMemoryCommitError("vector") from error
-        if canonical != projection.embedding or expected_hash != projection.embedding_content_hash:
+        if (
+            profile.normalization == "unit"
+            and not math.isclose(
+                math.hypot(*vector),
+                1.0,
+                rel_tol=0.0,
+                abs_tol=_UNIT_VECTOR_ABS_TOLERANCE,
+            )
+        ) or expected_hash != projection.embedding_content_hash:
             raise _InvalidMemoryCommitError("vector")
 
 
@@ -993,23 +1049,84 @@ def _manifest_entry_matches(
         or version.created_in_revision > memory_ref.revision
     ):
         return False
+    return _entry_declared_hash_matches(version)
+
+
+def _entry_history_matches(
+    memory_ref: ArtifactRef,
+    item: MemoryManifestEntry,
+    head: MemoryEntryVersion,
+    versions: Mapping[str, MemoryEntryVersion],
+) -> bool:
+    current = head
+    expected_version = head.version
+    visited: set[str] = set()
+    while True:
+        if current.entry_version_id in visited:
+            return False
+        visited.add(current.entry_version_id)
+        if (
+            current.memory_artifact_id != memory_ref.artifact_id
+            or current.entry_id != item.entry_id
+            or current.version != expected_version
+            or current.created_in_revision < 1
+            or current.created_in_revision > memory_ref.revision
+            or not _entry_declared_hash_matches(current)
+        ):
+            return False
+        if expected_version == 1:
+            return current.previous_version_id is None
+        if current.previous_version_id is None:
+            return False
+        predecessor = versions.get(current.previous_version_id)
+        if predecessor is None or predecessor.created_in_revision >= current.created_in_revision:
+            return False
+        current = predecessor
+        expected_version -= 1
+
+
+def _entry_declared_hash_matches(version: MemoryEntryVersion) -> bool:
     try:
         actual_hash = entry_content_hash(
             kind=version.kind,
             text=version.text,
-            source_refs=tuple({"source_type": ref.source_type, "source_id": ref.source_id} for ref in version.sources),
-            artifact_refs=tuple(
-                {
-                    "family": ref.family,
-                    "artifact_id": ref.artifact_id,
-                    "revision": ref.revision,
-                }
-                for ref in version.artifacts
-            ),
+            source_refs=_entry_source_refs(version),
+            artifact_refs=_entry_artifact_refs(version),
         )
     except (TypeError, ValueError):
         return False
-    return actual_hash == item.entry_content_hash
+    return actual_hash == version.entry_content_hash
+
+
+def _canonical_entry_content_matches(left: MemoryEntryVersion, right: MemoryEntryVersion) -> bool:
+    try:
+        return _canonical_entry_bytes(left) == _canonical_entry_bytes(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def _canonical_entry_bytes(version: MemoryEntryVersion) -> bytes:
+    return entry_content_bytes(
+        kind=version.kind,
+        text=version.text,
+        source_refs=_entry_source_refs(version),
+        artifact_refs=_entry_artifact_refs(version),
+    )
+
+
+def _entry_source_refs(version: MemoryEntryVersion) -> tuple[dict[str, str], ...]:
+    return tuple({"source_type": ref.source_type, "source_id": ref.source_id} for ref in version.sources)
+
+
+def _entry_artifact_refs(version: MemoryEntryVersion) -> tuple[dict[str, str | int], ...]:
+    return tuple(
+        {
+            "family": ref.family,
+            "artifact_id": ref.artifact_id,
+            "revision": ref.revision,
+        }
+        for ref in version.artifacts
+    )
 
 
 def _validate_manifest_entry(
