@@ -17,18 +17,21 @@ from __future__ import annotations
 import json
 from unittest.mock import Mock
 
+import pytest
 from typer.testing import CliRunner
 
 import powercontext.cli.dsh as dsh_cli
 import powercontext.cli.hermes as hermes_cli
 import powercontext.cli.hosts as hosts_cli
+import powercontext.cli.openclaw as openclaw_cli
+import powercontext.cli.opencode as opencode_cli
 import powercontext.cli.pi as pi_cli
 import powercontext.cli.system as system_cli
 from powercontext.cli.app import create_cli
 from powercontext.cli.hosts import parse_host_selection
-from powercontext.cli.system import SetupError, setup_app
+from powercontext.cli.system import Diagnostic, DiagnosticStatus, SetupError, setup_app
 
-FIRST_CLASS_HOSTS = ("codex", "claude-code", "dsh", "pi", "hermes")
+FIRST_CLASS_HOSTS = ("codex", "claude-code", "dsh", "openclaw", "opencode", "pi", "hermes")
 
 
 def _cli():
@@ -40,10 +43,13 @@ def _invoke(arguments: list[str], *, stdin_text: str | None = None):
 
 
 def _patch_installers(monkeypatch, **replacements: Mock) -> dict[str, Mock]:
+    _patch_diagnostics(monkeypatch)
     installers = {
         "codex": Mock(name="install_codex_plugin", return_value=object()),
         "claude-code": Mock(name="install_claude_code_plugin", return_value=object()),
         "dsh": Mock(name="install_dsh_plugin", return_value=object()),
+        "openclaw": Mock(name="install_openclaw_plugin", return_value=object()),
+        "opencode": Mock(name="install_opencode_plugin", return_value=object()),
         "pi": Mock(name="install_pi_plugin", return_value=object()),
         "hermes": Mock(name="install_hermes_plugin", return_value=object()),
     }
@@ -51,9 +57,28 @@ def _patch_installers(monkeypatch, **replacements: Mock) -> dict[str, Mock]:
     monkeypatch.setattr(system_cli, "install_codex_plugin", installers["codex"])
     monkeypatch.setattr(system_cli, "install_claude_code_plugin", installers["claude-code"])
     monkeypatch.setattr(dsh_cli, "install_dsh_plugin", installers["dsh"])
+    monkeypatch.setattr(openclaw_cli, "install_openclaw_plugin", installers["openclaw"])
+    monkeypatch.setattr(opencode_cli, "install_opencode_plugin", installers["opencode"])
     monkeypatch.setattr(pi_cli, "install_pi_plugin", installers["pi"])
     monkeypatch.setattr(hermes_cli, "install_hermes_plugin", installers["hermes"])
     return installers
+
+
+def _patch_diagnostics(monkeypatch, **replacements: Mock) -> dict[str, Mock]:
+    diagnostics = {
+        "codex": Mock(return_value={"plugin": Diagnostic(DiagnosticStatus.OK, "installed")}),
+        "dsh": Mock(return_value={"plugin": Diagnostic(DiagnosticStatus.OK, "installed")}),
+        "opencode": Mock(return_value={"plugin": Diagnostic(DiagnosticStatus.OK, "installed")}),
+        "pi": Mock(return_value={"package": Diagnostic(DiagnosticStatus.OK, "installed")}),
+        "hermes": Mock(return_value={"plugin": Diagnostic(DiagnosticStatus.OK, "installed")}),
+    }
+    diagnostics.update(replacements)
+    monkeypatch.setattr(system_cli, "run_codex_diagnostics", diagnostics["codex"])
+    monkeypatch.setattr(dsh_cli, "run_dsh_diagnostics", diagnostics["dsh"])
+    monkeypatch.setattr(opencode_cli, "run_opencode_diagnostics", diagnostics["opencode"])
+    monkeypatch.setattr(pi_cli, "run_pi_diagnostics", diagnostics["pi"])
+    monkeypatch.setattr(hermes_cli, "run_hermes_diagnostics", diagnostics["hermes"])
+    return diagnostics
 
 
 def _assert_not_called(*installers: Mock) -> None:
@@ -115,13 +140,21 @@ def test_setup_select_installs_only_the_requested_hosts(monkeypatch) -> None:
             {"host": "codex", "status": "installed"},
             {"host": "claude-code", "status": "skipped"},
             {"host": "dsh", "status": "installed"},
+            {"host": "openclaw", "status": "skipped"},
+            {"host": "opencode", "status": "skipped"},
             {"host": "pi", "status": "skipped"},
             {"host": "hermes", "status": "skipped"},
         ]
     }
     installers["codex"].assert_called_once()
     installers["dsh"].assert_called_once()
-    _assert_not_called(installers["claude-code"], installers["pi"], installers["hermes"])
+    _assert_not_called(
+        installers["claude-code"],
+        installers["openclaw"],
+        installers["opencode"],
+        installers["pi"],
+        installers["hermes"],
+    )
 
 
 def test_setup_select_continues_after_a_selected_host_fails(monkeypatch) -> None:
@@ -142,6 +175,8 @@ def test_setup_select_continues_after_a_selected_host_fails(monkeypatch) -> None
                 "status": "failed",
                 "error": "DeepSeek Harness CLI is not installed or is not on PATH.",
             },
+            {"host": "openclaw", "status": "skipped"},
+            {"host": "opencode", "status": "skipped"},
             {"host": "pi", "status": "skipped"},
             {"host": "hermes", "status": "installed"},
         ]
@@ -189,7 +224,13 @@ def test_setup_select_reads_a_tty_selection_by_number(monkeypatch) -> None:
     assert "claude-code: skipped" in result.output
     installers["codex"].assert_called_once()
     installers["dsh"].assert_called_once()
-    _assert_not_called(installers["claude-code"], installers["pi"], installers["hermes"])
+    _assert_not_called(
+        installers["claude-code"],
+        installers["openclaw"],
+        installers["opencode"],
+        installers["pi"],
+        installers["hermes"],
+    )
 
 
 def test_setup_select_cancels_an_empty_tty_selection(monkeypatch) -> None:
@@ -236,7 +277,7 @@ def test_setup_select_json_writes_the_matrix_without_a_prompt(monkeypatch) -> No
     installers["codex"].assert_called_once()
 
 
-def test_setup_select_passes_source_ref_and_claude_defaults(monkeypatch) -> None:
+def test_setup_select_passes_source_ref_and_host_specific_defaults(monkeypatch) -> None:
     installers = _patch_installers(monkeypatch)
 
     result = _invoke([
@@ -246,6 +287,10 @@ def test_setup_select_passes_source_ref_and_claude_defaults(monkeypatch) -> None
         "codex",
         "--host",
         "claude-code",
+        "--host",
+        "openclaw",
+        "--host",
+        "opencode",
         "--source",
         "oceanbase/powercontext",
         "--ref",
@@ -260,6 +305,99 @@ def test_setup_select_passes_source_ref_and_claude_defaults(monkeypatch) -> None
         server_url="http://127.0.0.1:8000",
         capture_prompts=True,
     )
+    installers["openclaw"].assert_called_once_with(
+        source="oceanbase/powercontext",
+        ref="tested-ref",
+        server_url="http://127.0.0.1:8000",
+        scope_mode="agent",
+    )
+    installers["opencode"].assert_called_once_with(source="oceanbase/powercontext", ref="tested-ref")
+
+
+def test_setup_select_passes_server_and_scope_overrides_to_openclaw(monkeypatch) -> None:
+    installers = _patch_installers(monkeypatch)
+
+    result = _invoke([
+        "setup",
+        "select",
+        "--host",
+        "openclaw",
+        "--server-url",
+        "https://memory.example",
+        "--scope-mode",
+        "project",
+    ])
+
+    assert result.exit_code == 0
+    installers["openclaw"].assert_called_once_with(
+        source="oceanbase/powercontext",
+        ref="master",
+        server_url="https://memory.example",
+        scope_mode="project",
+    )
+
+
+@pytest.mark.parametrize(
+    ("host", "module", "attribute"),
+    [
+        ("codex", system_cli, "run_codex_diagnostics"),
+        ("dsh", dsh_cli, "run_dsh_diagnostics"),
+        ("opencode", opencode_cli, "run_opencode_diagnostics"),
+        ("pi", pi_cli, "run_pi_diagnostics"),
+        ("hermes", hermes_cli, "run_hermes_diagnostics"),
+    ],
+)
+def test_setup_select_fails_a_row_when_post_install_verification_fails(
+    monkeypatch,
+    host: str,
+    module: object,
+    attribute: str,
+) -> None:
+    installers = _patch_installers(monkeypatch)
+    verification = Mock(
+        return_value={"plugin": Diagnostic(DiagnosticStatus.FAILED, "PowerContext plugin is not loaded")}
+    )
+    monkeypatch.setattr(module, attribute, verification)
+
+    result = _invoke(["setup", "select", "--host", host, "--json"])
+
+    assert result.exit_code == 1
+    row = next(row for row in json.loads(result.output)["hosts"] if row["host"] == host)
+    assert row == {
+        "host": host,
+        "status": "failed",
+        "error": "post-install verification failed: plugin: PowerContext plugin is not loaded",
+    }
+    installers[host].assert_called_once()
+    verification.assert_called_once_with()
+
+
+def test_setup_select_continues_after_post_install_verification_fails(monkeypatch) -> None:
+    installers = _patch_installers(monkeypatch)
+    monkeypatch.setattr(
+        system_cli,
+        "run_codex_diagnostics",
+        Mock(return_value={"plugin": Diagnostic(DiagnosticStatus.FAILED, "plugin is not loaded")}),
+    )
+
+    result = _invoke(["setup", "select", "--host", "codex", "--host", "openclaw", "--json"])
+
+    assert result.exit_code == 1
+    rows = {row["host"]: row for row in json.loads(result.output)["hosts"]}
+    assert rows["codex"]["status"] == "failed"
+    assert rows["openclaw"] == {"host": "openclaw", "status": "installed"}
+    installers["openclaw"].assert_called_once()
+
+
+def test_setup_select_prints_hermes_specific_next_step_only_when_installed(monkeypatch) -> None:
+    _patch_installers(monkeypatch)
+
+    installed = _invoke(["setup", "select", "--host", "hermes"])
+    skipped = _invoke(["setup", "select", "--host", "openclaw"])
+
+    assert installed.exit_code == 0
+    assert "`hermes memory setup`" in installed.output
+    assert "`hermes memory setup`" not in skipped.output
 
 
 def test_setup_dsh_still_fails_closed_when_the_cli_is_missing(monkeypatch) -> None:
@@ -273,6 +411,8 @@ def test_setup_dsh_still_fails_closed_when_the_cli_is_missing(monkeypatch) -> No
 
 def test_parse_host_selection_accepts_names_and_reorders_to_the_catalog() -> None:
     assert parse_host_selection("dsh,codex") == ("codex", "dsh")
-    assert parse_host_selection("5") == ("hermes",)
+    assert parse_host_selection("4") == ("openclaw",)
+    assert parse_host_selection("5") == ("opencode",)
+    assert parse_host_selection("7") == ("hermes",)
     assert parse_host_selection("") is None
     assert parse_host_selection("  ") is None

@@ -24,12 +24,18 @@ powercontext setup dsh --source oceanbase/powercontext --ref <ref>
 powercontext setup pi --source oceanbase/powercontext --ref <ref>
 ```
 
-单宿主命令仍是显式路径。若要一次安装多个一级宿主，可重复传入 `--host`；在 TTY 上省略 `--host` 则从目录中选择。
-不带子命令的 `powercontext setup` 仍然只打印帮助：
+单宿主命令仍是显式路径。一级宿主目录包含 `codex`、`claude-code`、`dsh`、`openclaw`、`opencode`、`pi`
+和 `hermes`。若要一次安装多个宿主，可重复传入 `--host`；在 TTY 上省略 `--host` 则从目录中选择。不带子命令的
+`powercontext setup` 仍然只打印帮助：
 
 ```bash
 powercontext setup select --host codex --host dsh --source oceanbase/powercontext --ref <ref>
 ```
+
+未传入 `--server-url` 时，Claude Code 和 OpenClaw 保留 `http://127.0.0.1:8000` 默认值；显式传入该选项时会覆盖
+两个被选中宿主的地址。OpenClaw 的 `--scope-mode` 默认值为 `agent`。Codex、DSH、OpenCode、Pi 和 Hermes 只有在
+通过现有安装后诊断后才会报告为 installed。安装 Hermes 后，还需运行 `hermes memory setup` 并选择 PowerContext，
+然后再启动 Hermes。
 
 宿主专有选项见[配置 Codex](configure-codex.md)和[配置 DeepSeek Harness](configure-dsh.md)。
 

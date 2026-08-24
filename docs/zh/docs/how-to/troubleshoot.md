@@ -33,7 +33,7 @@ git ls-remote https://github.com/oceanbase/powercontext.git HEAD
 如果失败，请配置 Git 使用的 credential helper 或 SSH key，再重新运行 `uv tool install`。`uv` 使用 Git
 凭据配置；PowerContext 不接收或保存仓库凭据。
 
-## 找不到 `powercontext`、`codex`、`claude`、`dsh` 或 `pi`
+## 找不到 PowerContext 或宿主 CLI
 
 执行：
 
@@ -43,13 +43,17 @@ command -v powercontext
 command -v codex
 command -v claude
 command -v dsh
+command -v openclaw
+command -v opencode
 command -v pi
+command -v hermes
 ```
 
 必要时把 uv tool bin 目录加入 `PATH`。宿主 CLI 不可用时，`powercontext setup codex`、
-`powercontext setup claude-code`、`powercontext setup dsh` 和 `powercontext setup pi` 都会报告错误，而不会尝试安装。
-`powercontext setup select` 只安装你选中的宿主。某个选中宿主未安装时，该行失败，但不会阻塞其余选中项；未选中的
-宿主即使已在 `PATH` 上也不会安装。
+`powercontext setup claude-code`、`powercontext setup dsh`、`powercontext setup openclaw`、
+`powercontext setup opencode`、`powercontext setup pi` 和 `powercontext setup hermes` 都会报告错误，而不会尝试安装。
+`powercontext setup select` 只安装你选中的宿主。某个选中宿主未安装时，该行失败，但不会阻塞其余选中项；
+未选中的宿主即使已在 `PATH` 上也不会安装。
 
 ## 插件缺失或版本不一致
 

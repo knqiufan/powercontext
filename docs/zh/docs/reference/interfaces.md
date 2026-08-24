@@ -104,13 +104,20 @@ Pi transcript。召回、采集和边界 flush 都会正常降级；显式持久
 
 ```text
 powercontext setup codex
+powercontext setup claude-code
 powercontext setup dsh
+powercontext setup openclaw
+powercontext setup opencode
 powercontext setup pi
+powercontext setup hermes
 powercontext setup select
 powercontext doctor
 powercontext doctor codex
+powercontext doctor claude-code
 powercontext doctor dsh
+powercontext doctor opencode
 powercontext doctor pi
+powercontext doctor hermes
 powercontext server run
 powercontext ready
 powercontext capabilities

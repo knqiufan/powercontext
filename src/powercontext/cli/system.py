@@ -40,6 +40,9 @@ from powercontext.paths import powercontext_data_dir
 HELP_OPTION_NAMES = ("-h", "--help")
 DEFAULT_MARKETPLACE_SOURCE = "oceanbase/powercontext"
 DEFAULT_MARKETPLACE_REF = "master"
+DEFAULT_CLAUDE_CODE_SERVER_URL = "http://127.0.0.1:8000"
+DEFAULT_OPENCLAW_SERVER_URL = "http://127.0.0.1:8000"
+DEFAULT_OPENCLAW_SCOPE_MODE = "agent"
 PLUGIN_NAME = "powercontext"
 CLAUDE_MARKETPLACE_NAME = "powercontext"
 _GITHUB_REPOSITORY = re.compile(r"^[^/\s]+/[^/\s]+$")
@@ -281,6 +284,10 @@ class SetupError(RuntimeError):
         return cls(f"Integration CLI did not return {name}")
 
     @classmethod
+    def post_install_verification(cls, failures: list[str]) -> SetupError:
+        return cls(f"post-install verification failed: {'; '.join(failures)}")
+
+    @classmethod
     def claude_plugin_not_enabled(cls) -> SetupError:
         return cls("Claude Code did not report an enabled PowerContext plugin after installation.")
 
@@ -428,7 +435,7 @@ def setup_claude_code(
     server_url: Annotated[
         str,
         typer.Option(help="PowerContext Server base URL configured for the plugin."),
-    ] = "http://127.0.0.1:8000",
+    ] = DEFAULT_CLAUDE_CODE_SERVER_URL,
     capture_prompts: Annotated[
         bool,
         typer.Option(help="Capture Claude Code user prompts as ordinary Source evidence."),
@@ -514,11 +521,11 @@ def setup_openclaw(
     server_url: Annotated[
         str,
         typer.Option(help="PowerContext Server base URL configured for the plugin."),
-    ] = "http://127.0.0.1:8000",
+    ] = DEFAULT_OPENCLAW_SERVER_URL,
     scope_mode: Annotated[
         str,
         typer.Option("--scope-mode", help="Memory scope mode: agent or project."),
-    ] = "agent",
+    ] = DEFAULT_OPENCLAW_SCOPE_MODE,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Write the result as JSON."),
@@ -685,9 +692,13 @@ def setup_select(
         typer.Option(help="Git ref used for a remote source."),
     ] = DEFAULT_MARKETPLACE_REF,
     server_url: Annotated[
+        str | None,
+        typer.Option(help="PowerContext Server base URL override for Claude Code and OpenClaw."),
+    ] = None,
+    scope_mode: Annotated[
         str,
-        typer.Option(help="PowerContext Server base URL configured for Claude Code."),
-    ] = "http://127.0.0.1:8000",
+        typer.Option("--scope-mode", help="OpenClaw memory scope mode: agent or project."),
+    ] = DEFAULT_OPENCLAW_SCOPE_MODE,
     capture_prompts: Annotated[
         bool,
         typer.Option(help="Capture Claude Code user prompts as ordinary Source evidence."),
@@ -706,6 +717,7 @@ def setup_select(
         source=source,
         ref=ref,
         server_url=server_url,
+        scope_mode=scope_mode,
         capture_prompts=capture_prompts,
         json_output=json_output,
     )

@@ -118,13 +118,20 @@ boundary flushing fail open; explicit durable writes require interactive confirm
 
 ```text
 powercontext setup codex
+powercontext setup claude-code
 powercontext setup dsh
+powercontext setup openclaw
+powercontext setup opencode
 powercontext setup pi
+powercontext setup hermes
 powercontext setup select
 powercontext doctor
 powercontext doctor codex
+powercontext doctor claude-code
 powercontext doctor dsh
+powercontext doctor opencode
 powercontext doctor pi
+powercontext doctor hermes
 powercontext server run
 powercontext ready
 powercontext capabilities

@@ -25,13 +25,18 @@ powercontext setup dsh --source oceanbase/powercontext --ref <ref>
 powercontext setup pi --source oceanbase/powercontext --ref <ref>
 ```
 
-Per-host commands remain the explicit path. To install more than one first-class host in one run, pass `--host`
-repeatedly, or omit `--host` on a TTY to choose from the catalog. `powercontext setup` with no subcommand still
-prints help:
+Per-host commands remain the explicit path. The first-class catalog contains `codex`, `claude-code`, `dsh`,
+`openclaw`, `opencode`, `pi`, and `hermes`. To install more than one in one run, pass `--host` repeatedly, or omit
+`--host` on a TTY to choose from the catalog. `powercontext setup` with no subcommand still prints help:
 
 ```bash
 powercontext setup select --host codex --host dsh --source oceanbase/powercontext --ref <ref>
 ```
+
+Without `--server-url`, Claude Code and OpenClaw keep their `http://127.0.0.1:8000` defaults. An explicit
+`--server-url` overrides both selected hosts. OpenClaw's `--scope-mode` defaults to `agent`. Selected Codex, DSH,
+OpenCode, Pi, and Hermes integrations pass their existing post-install diagnostics before they are reported as
+installed. After installing Hermes, run `hermes memory setup` and select PowerContext before starting Hermes.
 
 For host-specific options, see [Configure Codex](configure-codex.md) and
 [Configure DeepSeek Harness](configure-dsh.md).

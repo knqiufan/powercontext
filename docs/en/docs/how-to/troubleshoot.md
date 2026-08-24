@@ -33,7 +33,7 @@ git ls-remote https://github.com/oceanbase/powercontext.git HEAD
 If this fails, configure the credential helper or SSH key used by Git, then rerun `uv tool install`. `uv` uses Git's
 credential configuration; PowerContext does not accept or store repository credentials.
 
-## `powercontext`, `codex`, `claude`, `dsh`, or `pi` is not found
+## A PowerContext or host CLI is not found
 
 Run:
 
@@ -43,14 +43,17 @@ command -v powercontext
 command -v codex
 command -v claude
 command -v dsh
+command -v openclaw
+command -v opencode
 command -v pi
+command -v hermes
 ```
 
 Add the uv tool bin directory to `PATH` if needed. `powercontext setup codex`, `powercontext setup claude-code`,
-`powercontext setup dsh`, and `powercontext setup pi` report an error rather than attempting installation when the host
-CLI is unavailable. `powercontext setup select` installs only the hosts you choose. A selected host that is missing
-still fails that row and does not block the other selected hosts. An unselected host is skipped even if its CLI is on
-`PATH`.
+`powercontext setup dsh`, `powercontext setup openclaw`, `powercontext setup opencode`, `powercontext setup pi`, and
+`powercontext setup hermes` report an error rather than attempting installation when the host CLI is unavailable.
+`powercontext setup select` installs only the hosts you choose. A selected host that is missing still fails that row
+and does not block the other selected hosts. An unselected host is skipped even if its CLI is on `PATH`.
 
 ## The plugin is missing or stale
 

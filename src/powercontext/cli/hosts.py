@@ -36,6 +36,8 @@ FIRST_CLASS_HOSTS: tuple[HostSpec, ...] = (
     HostSpec("codex", "Codex"),
     HostSpec("claude-code", "Claude Code"),
     HostSpec("dsh", "DeepSeek Harness"),
+    HostSpec("openclaw", "OpenClaw"),
+    HostSpec("opencode", "OpenCode"),
     HostSpec("pi", "Pi"),
     HostSpec("hermes", "Hermes"),
 )
@@ -88,6 +90,11 @@ class SetupSelectReport:
     def has_installed(self) -> bool:
         return any(row.status == "installed" for row in self.hosts)
 
+    def is_installed(self, host: str) -> bool:
+        """Return whether one host completed installation and verification."""
+
+        return any(row.host == host and row.status == "installed" for row in self.hosts)
+
 
 def stdin_is_tty() -> bool:
     """Return True when the current stdin can prompt for a host selection."""
@@ -121,7 +128,8 @@ def run_setup_select(
     hosts: Sequence[str] | None,
     source: str,
     ref: str,
-    server_url: str,
+    server_url: str | None,
+    scope_mode: str,
     capture_prompts: bool,
     json_output: bool,
 ) -> None:
@@ -139,6 +147,7 @@ def run_setup_select(
         source=source,
         ref=ref,
         server_url=server_url,
+        scope_mode=scope_mode,
         capture_prompts=capture_prompts,
     )
     write_setup_select_report(report, json_output=json_output)
@@ -164,7 +173,8 @@ def setup_selected_hosts(
     selected: Sequence[str],
     source: str,
     ref: str,
-    server_url: str,
+    server_url: str | None,
+    scope_mode: str,
     capture_prompts: bool,
 ) -> SetupSelectReport:
     """Install selected hosts and isolate failures from sibling hosts."""
@@ -183,8 +193,10 @@ def setup_selected_hosts(
                 source=source,
                 ref=ref,
                 server_url=server_url,
+                scope_mode=scope_mode,
                 capture_prompts=capture_prompts,
             )
+            verify_host(host.name)
         except SetupError as error:
             rows.append(HostSetupRow(host=host.name, status="failed", error=str(error)))
             continue
@@ -197,7 +209,8 @@ def install_host(
     *,
     source: str,
     ref: str,
-    server_url: str,
+    server_url: str | None,
+    scope_mode: str,
     capture_prompts: bool,
 ) -> object:
     """Call the existing installer for one first-class host."""
@@ -207,18 +220,32 @@ def install_host(
 
         return install_codex_plugin(source=source, ref=ref)
     if name == "claude-code":
-        from powercontext.cli.system import install_claude_code_plugin
+        from powercontext.cli.system import DEFAULT_CLAUDE_CODE_SERVER_URL, install_claude_code_plugin
 
         return install_claude_code_plugin(
             source=source,
             ref=ref,
-            server_url=server_url,
+            server_url=server_url if server_url is not None else DEFAULT_CLAUDE_CODE_SERVER_URL,
             capture_prompts=capture_prompts,
         )
     if name == "dsh":
         from powercontext.cli.dsh import install_dsh_plugin
 
         return install_dsh_plugin(source=source, ref=ref)
+    if name == "openclaw":
+        from powercontext.cli.openclaw import install_openclaw_plugin
+        from powercontext.cli.system import DEFAULT_OPENCLAW_SERVER_URL
+
+        return install_openclaw_plugin(
+            source=source,
+            ref=ref,
+            server_url=server_url if server_url is not None else DEFAULT_OPENCLAW_SERVER_URL,
+            scope_mode=scope_mode,
+        )
+    if name == "opencode":
+        from powercontext.cli.opencode import install_opencode_plugin
+
+        return install_opencode_plugin(source=source, ref=ref)
     if name == "pi":
         from powercontext.cli.pi import install_pi_plugin
 
@@ -228,6 +255,41 @@ def install_host(
 
         return install_hermes_plugin(source=source, ref=ref)
     raise SetupSelectError.unknown_host(name)
+
+
+def verify_host(name: str) -> None:
+    """Run the post-install diagnostics used by the matching single-host setup command."""
+
+    from powercontext.cli.system import SetupError
+
+    if name == "codex":
+        from powercontext.cli.system import run_codex_diagnostics
+
+        diagnostics = run_codex_diagnostics()
+    elif name == "dsh":
+        from powercontext.cli.dsh import run_dsh_diagnostics
+
+        diagnostics = run_dsh_diagnostics()
+    elif name == "pi":
+        from powercontext.cli.pi import run_pi_diagnostics
+
+        diagnostics = run_pi_diagnostics()
+    elif name == "hermes":
+        from powercontext.cli.hermes import run_hermes_diagnostics
+
+        diagnostics = run_hermes_diagnostics()
+    elif name == "opencode":
+        from powercontext.cli.opencode import run_opencode_diagnostics
+
+        diagnostics = run_opencode_diagnostics()
+    elif name in {"claude-code", "openclaw"}:
+        return
+    else:
+        raise SetupSelectError.unknown_host(name)
+
+    failures = [f"{check}: {diagnostic.detail}" for check, diagnostic in diagnostics.items() if not diagnostic.ok]
+    if failures:
+        raise SetupError.post_install_verification(failures)
 
 
 def write_setup_select_report(report: SetupSelectReport, *, json_output: bool) -> None:
@@ -243,6 +305,8 @@ def write_setup_select_report(report: SetupSelectReport, *, json_output: bool) -
         typer.echo(f"{row.host}: {row.status}")
     if report.has_installed:
         typer.echo("Next: run `powercontext server run`, then start a new host session.")
+    if report.is_installed("hermes"):
+        typer.echo("Hermes: run `hermes memory setup` and select PowerContext before starting Hermes.")
 
 
 def _resolve_host_token(token: str) -> str:
