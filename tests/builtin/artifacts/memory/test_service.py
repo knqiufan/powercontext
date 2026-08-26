@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import struct
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -95,6 +96,36 @@ class _RecordingVectorIndex(NoMemoryIndex):
         self.projections = projections
 
 
+class _Float32VectorIndex(_RecordingVectorIndex):
+    async def hydrate(
+        self,
+        _connection: AsyncConnection,
+        _scope_id: str,
+        projections: tuple[MemoryProjection, ...],
+        /,
+    ) -> tuple[MemoryProjection, ...]:
+        stored = {projection.entry_version.entry_version_id: projection for projection in self.projections}
+        hydrated = []
+        for projection in projections:
+            previous = stored.get(projection.entry_version.entry_version_id)
+            if previous is None or previous.embedding is None:
+                hydrated.append(projection)
+                continue
+            embedding = struct.unpack(
+                f"={len(previous.embedding)}f",
+                struct.pack(f"={len(previous.embedding)}f", *previous.embedding),
+            )
+            hydrated.append(
+                projection.model_copy(
+                    update={
+                        "embedding": embedding,
+                        "embedding_content_hash": previous.embedding_content_hash,
+                    }
+                )
+            )
+        return tuple(hydrated)
+
+
 def test_memory_search_applies_injected_reranker_after_coarse_fusion() -> None:
     async def scenario() -> None:
         reranker = _SelectingReranker()
@@ -145,6 +176,37 @@ def test_memory_remember_accepts_a_dense_unit_embedding_after_service_normalizat
                 0.24071214897248938,
                 -0.9705965492093231,
             )
+
+    asyncio.run(scenario())
+
+
+def test_memory_append_reuses_a_storage_rounded_unit_embedding() -> None:
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            index = _Float32VectorIndex()
+            backend = RelationalMemoryBackend(
+                database=contexts.database,
+                scope_id="storage-rounded-vector",
+                artifacts=contexts.repositories.artifacts,
+                index=index,
+            )
+            service = MemoryService(backend=backend, embedding_model=_DenseEmbeddingModel())
+            first = await service.remember(
+                memory=None,
+                entries=(MemoryEntryInput(kind="preference", text="User prefers dense vectors."),),
+                mode="append",
+            )
+            assert first is not None
+
+            second = await service.remember(
+                memory=first,
+                entries=(MemoryEntryInput(kind="fact", text="Storage uses float32 vectors."),),
+                mode="append",
+            )
+
+            assert second is not None
+            assert second.revision == 2
+            assert len(index.projections) == 2
 
     asyncio.run(scenario())
 

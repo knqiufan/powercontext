@@ -72,7 +72,9 @@ from powercontext.builtin.persistence.tables import (
 from powercontext.errors import ArtifactNotFoundError
 from powercontext.sources import SourceRef
 
-_UNIT_VECTOR_ABS_TOLERANCE = 1e-12
+# OceanBase VECTOR and SQLite Vec1 hydrate float32 values, so a valid unit
+# vector can drift slightly after a storage round trip.
+_UNIT_VECTOR_ABS_TOLERANCE = 1e-6
 
 
 class _SourceRefs(RootModel[tuple[SourceRef, ...]]):
