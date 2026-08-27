@@ -57,8 +57,11 @@ type Registrations = {
 }
 
 abstract class RegistrationService<T> extends Service {
-  constructor(ctx: Context, name: string, private readonly registrations: T[]) {
+  private readonly registrations: T[]
+
+  constructor(ctx: Context, name: string, registrations: T[]) {
     super(ctx, name)
+    this.registrations = registrations
   }
 
   protected registerOwned(value: T, label: string): () => void {

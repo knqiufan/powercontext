@@ -14,18 +14,6 @@
  * limitations under the License.
  */
 
-declare module '@deepseek-ai/cordis' {
-  export interface Context {
-    tools: { register(tool: unknown): () => void }
-    commands: { register(definition: Record<string, unknown>): unknown }
-    skills: { register(skill: Record<string, unknown>): unknown }
-    systemPrompt: { section(section: { name: string; order: number; text: string }): unknown }
-    on(event: string, handler: (...args: never[]) => unknown): () => void
-    get(name: string): unknown
-    logger: { warn(message: string): void; debug?(message: string): void }
-  }
-}
-
 declare module '@deepseek-ai/schemastery' {
   type Schema<T = unknown> = {
     (value: unknown): T
