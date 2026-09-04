@@ -1,6 +1,6 @@
 - 提案名称：`desktop_control_center`
 - 开始日期：2026-09-04
-- RFC PR：尚未创建
+- RFC PR：[oceanbase/powercontext#1455](https://github.com/oceanbase/powercontext/pull/1455)
 - Tracking Issue：[oceanbase/powercontext#1428](https://github.com/oceanbase/powercontext/issues/1428)
 - 状态：提案
 

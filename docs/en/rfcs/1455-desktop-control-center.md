@@ -1,6 +1,6 @@
 - Proposal Name: `desktop_control_center`
 - Start Date: 2026-09-04
-- RFC PR: Not opened
+- RFC PR: [oceanbase/powercontext#1455](https://github.com/oceanbase/powercontext/pull/1455)
 - Tracking Issue: [oceanbase/powercontext#1428](https://github.com/oceanbase/powercontext/issues/1428)
 - Status: Proposed
 
