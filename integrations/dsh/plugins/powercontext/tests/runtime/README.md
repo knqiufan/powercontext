@@ -1,5 +1,8 @@
 # DSH runtime acceptance
 
+The [2026-09-04 acceptance record](acceptance/2026-09-04.md) includes build identity, automated results,
+actual Web checks, a snapshot screenshot, and the outstanding live-model authentication blocker.
+
 Run from the PowerContext checkout after `uv sync --frozen` and building the plugin:
 
 ```bash
