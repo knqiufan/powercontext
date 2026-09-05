@@ -177,6 +177,7 @@ async def open_builtin_runtime(
     scope_cache_observer: ScopeCacheObserver | None = None,
     tracing: RuntimeTracing | None = None,
     source_registry: SourceDefinitionRegistry | None = None,
+    cursor_secret: bytes | None = None,
 ) -> AsyncIterator[BuiltinRuntime]:
     """Open the selected database, inference adapters, and built-in runtime."""
 
@@ -253,6 +254,7 @@ async def open_builtin_runtime(
                 token_estimator=token_estimator,
                 memory_reranker=configured_reranker,
                 source_registry=configured_source_registry,
+                cursor_secret=cursor_secret,
             )
         )
         readiness_probes: dict[str, ReadinessProbeDefinition] = {
@@ -306,6 +308,7 @@ async def open_builtin_runtime(
                 skill_publication_service=contexts.skill_publications,
                 remote_skill_distribution=contexts.remote_skill_distribution(),
                 statistics_service=contexts.statistics,
+                record_service=contexts.records,
                 recall_token_estimator=contexts.estimate_recall_tokens,
                 publication_application=contexts.publications,
                 scope_application=contexts.scopes,
@@ -348,6 +351,7 @@ async def open_builtin_contexts(
     token_estimator: TokenEstimator | None = None,
     memory_reranker: MemoryReranker | None = None,
     source_registry: SourceDefinitionRegistry | None = None,
+    cursor_secret: bytes | None = None,
 ) -> AsyncIterator[RelationalContexts]:
     """Open the selected database and expose scope-bound PowerContext providers."""
 
@@ -383,6 +387,7 @@ async def open_builtin_contexts(
                 memory_reranker=memory_reranker,
                 memory_rerank_candidate_limit=config.runtime.memory_rerank_candidate_limit,
                 source_registry=source_registry,
+                cursor_secret=cursor_secret,
             )
             await contexts.scopes.bootstrap_default()
             yield contexts
@@ -419,6 +424,7 @@ async def open_builtin_contexts(
             memory_reranker=memory_reranker,
             memory_rerank_candidate_limit=config.runtime.memory_rerank_candidate_limit,
             source_registry=source_registry,
+            cursor_secret=cursor_secret,
         )
         await contexts.scopes.bootstrap_default()
         yield contexts
@@ -653,6 +659,29 @@ async def _generation_pipelines(
     )
 
 
+async def preflight_builtin_runtime(config: BuiltinConfig) -> None:
+    """Validate Runtime composition without opening persistence or making requests."""
+
+    async with AsyncExitStack() as resources:
+        await _generation_pipelines(
+            config.inference,
+            config.runtime,
+            resources,
+            None,
+            BUILTIN_SOURCE_REGISTRY,
+        )
+        if config.inference.embedding_model is not None:
+            await _embedding_models(config.inference, resources, None)
+        if config.runtime.schedule_seconds is not None and config.inference.generation_model is None:
+            raise BuiltinConfigurationError("scheduled-pipeline")
+        if config.runtime.experience_schedule_seconds is not None and config.inference.generation_model is None:
+            raise BuiltinConfigurationError("scheduled-experience-pipeline")
+        if config.runtime.memory_rerank_enabled and (
+            config.inference.generation_model is None and config.inference.rerank_model is None
+        ):
+            raise BuiltinConfigurationError("memory-reranker")
+
+
 async def _open_pydantic_ai_model(
     model_name: str,
     *,
@@ -849,4 +878,4 @@ def _search_modes(capabilities: MemoryCapabilities) -> tuple[MemorySearchMode, .
     return tuple(modes)
 
 
-__all__ = ["BuiltinConfigurationError", "open_builtin_contexts", "open_builtin_runtime"]
+__all__ = ["BuiltinConfigurationError", "open_builtin_contexts", "open_builtin_runtime", "preflight_builtin_runtime"]

@@ -227,7 +227,6 @@ ARTIFACT_HEADS_TABLE = Table(
     ),
 )
 
-
 ARTIFACT_LINEAGE_SOURCES_TABLE = Table(
     "pc_artifact_lineage_sources",
     SHARED_METADATA,
