@@ -51,6 +51,11 @@ with broader queries or list, which remains visible as a failed bounded scenario
 are retained as failures, not excluded to improve the score. Additional description constraints address supplied facts,
 temporary handoffs, and exact Handoff evidence; broad model compliance remains subject to qualification.
 
+Description-boundary qualification with the final tool descriptions passed **48/48** Handoff and preview scenarios
+across OpenClaw, Hermes, OpenCode, and the Agent Plugin, in English/Chinese and all three Skill states. These runs
+cover the supplied-fact, temporary-handoff, and exact-evidence constraints. The earlier failing observations and
+missing-tool stress results remain in the evidence; this does not certify every model/capability combination.
+
 ## Execution and regression evidence
 
 - Actual DSH 0.1.2-rc.1 SDK/host requests contained the system guidance and all 19 native PowerContext tools before a
