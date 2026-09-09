@@ -34,6 +34,12 @@ test('documented setup installs the matched plugin, diagnoses the running host a
     })
     const first = await instance.run('For this project: ' + CANARY + ' Reply with an acknowledgement.')
     assert.ok(first.finalResponse)
+    const request = env.modelRequests.find(r => r.stream)
+    const catalog = new Set(request.tools.map(tool => tool.function.name))
+    const system = request.messages.filter(message => message.role === 'system')
+    const references = JSON.stringify(system).match(/\bpc_[a-z_]+\b/g) ?? []
+    assert.ok(references.length > 0, 'PowerContext guidance must reach the model before any Skill load')
+    for (const name of references) assert.ok(catalog.has(name), `guidance refers to unavailable DSH tool: ${name}`)
     assert.equal(injected(first).length, 0)
     assert.ok(env.calls.some(call => call.path === '/v1/sources/content' && call.status === 202))
     assert.ok(env.calls.some(call => call.path === '/v1/memory/flush' && call.status === 200))

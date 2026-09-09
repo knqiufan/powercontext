@@ -19,6 +19,8 @@ import importlib
 import importlib.util
 import json
 import logging
+import os
+import re
 import sys
 import threading
 import types
@@ -1300,3 +1302,23 @@ def test_http_client_forwards_authorization_and_preserves_access_denial(hermes_m
     assert caught.value.status == 403
     assert caught.value.code == "access_denied"
     assert caught.value.server_message == "scope access denied"
+
+
+def test_guidance_references_available_provider_tools_without_a_skill(hermes_modules) -> None:
+    plugin, _ = hermes_modules
+    provider = plugin.PowerContextMemoryProvider({})
+    guidance = provider.system_prompt_block()
+    tools = provider.get_tool_schemas()
+    names = {tool["name"] for tool in tools}
+    references = set(re.findall(r"\bpowercontext_[a-z_]+\b", guidance))
+    assert references <= names
+    assert references
+    if directory := os.environ.get("POWERCONTEXT_GUIDANCE_EXPORT"):
+        skill = HERMES_ROOT / "plugins/powercontext/skills/powercontext/SKILL.md"
+        catalog = {
+            "host": "hermes",
+            "guidance": guidance,
+            "tools": tools,
+            "skill": {"name": "powercontext", "content": skill.read_text(encoding="utf-8")},
+        }
+        (Path(directory) / "hermes.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
