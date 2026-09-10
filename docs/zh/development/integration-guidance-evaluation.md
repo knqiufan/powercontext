@@ -75,7 +75,7 @@ list，仍保留为有限预算场景的失败。服务超时和空回答也计�
 | OpenCode | 3/12 | `structured-native-parameters` |
 | Pi | 5/12 | `structured-native-parameters` |
 
-[原始 JSONL 证据](../../../e2e/integration-guidance/results/step37-handoff-20260910.jsonl) 保留全部批次，包括最初的
+[原始 JSONL 证据](https://github.com/knqiufan/powercontext/blob/bcfdc9fc726021fce3b20a46f3788096794a2b60/e2e/integration-guidance/results/step37-handoff-20260910.jsonl) 保留全部批次，包括最初的
 WorkClaim 探测和中间失败。各批次包含导出的目录及模型配置。DSH 最终批次使用真实 SDK 编译后的模型请求；中间
 批次从注册声明导出目录，不能证明运行时契约。包括 DSH 最终批次在内，这里的模型调用仍然使用受控返回结果。
 

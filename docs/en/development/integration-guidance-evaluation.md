@@ -88,7 +88,7 @@ a single simultaneous run or an all-host acceptance result.
 | OpenCode | 3/12 | `structured-native-parameters` |
 | Pi | 5/12 | `structured-native-parameters` |
 
-The [raw JSONL evidence](../../../e2e/integration-guidance/results/step37-handoff-20260910.jsonl) retains all batches,
+The [raw JSONL evidence](https://github.com/knqiufan/powercontext/blob/bcfdc9fc726021fce3b20a46f3788096794a2b60/e2e/integration-guidance/results/step37-handoff-20260910.jsonl) retains all batches,
 including the initial WorkClaim probe and intermediate failures. Each batch includes its exported catalogs and model
 configuration. DSH's final batch uses the actual compiled SDK model request; intermediate DSH catalogs were exported
 from registration specifications and do not establish that runtime contract. Model calls still receive controlled
