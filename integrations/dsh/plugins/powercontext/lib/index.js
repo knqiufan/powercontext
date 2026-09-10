@@ -184,10 +184,19 @@ const OPERATIONS = {
 	list_scopes: {
 		method: "GET",
 		path: "/v1/scopes",
-		location: null,
+		location: "query",
 		scopeMode: "none",
 		pathParameters: [],
-		queryParams: [],
+		queryParams: [
+			"query",
+			"query_field",
+			"parent_scope_id",
+			"external_reference_kind",
+			"binding_integration",
+			"binding_kind",
+			"limit",
+			"cursor"
+		],
 		headerParams: [],
 		successStatuses: [200],
 		emptyStatuses: []
@@ -947,6 +956,17 @@ const OPERATIONS = {
 		scopeMode: "selection",
 		pathParameters: [],
 		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_sources: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/sources",
+		location: "query",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: ["limit", "cursor"],
 		headerParams: [],
 		successStatuses: [200],
 		emptyStatuses: []
@@ -2393,10 +2413,22 @@ function optionalText(value) {
 	const trimmed = value?.trim();
 	return trimmed ? trimmed : void 0;
 }
+function contextAssembly(raw, fallback) {
+	let value;
+	try {
+		value = raw === void 0 ? fallback : JSON.parse(raw);
+	} catch {
+		throw new Error("PowerContext context assembly must be a JSON object");
+	}
+	if (value === void 0) return void 0;
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("PowerContext context assembly must be a JSON object");
+	return structuredClone(value);
+}
 function resolveConfig(config = {}, env = process.env) {
 	const maxBytes = config.maxBytes ?? DEFAULTS.maxBytes;
 	if (maxBytes < 512 || maxBytes > 32768) throw new Error("maxBytes must be between 512 and 32768");
 	return {
+		contextAssembly: contextAssembly(envString(env, "POWERCONTEXT_DSH_CONTEXT_ASSEMBLY"), config.contextAssembly),
 		sources: {
 			baseUrl: envString(env, "POWERCONTEXT_DSH_BASE_URL") ? "environment" : config.baseUrl ? "plugin" : "default",
 			authorization: envString(env, "POWERCONTEXT_DSH_AUTHORIZATION") ? "environment" : optionalText(config.authorization) ? "plugin" : "default",
@@ -2524,7 +2556,8 @@ async function recallContent(input, query, scopeId) {
 		const result = await input.client.request("prepare_context", {
 			scope_id: scopeId,
 			query,
-			max_bytes: input.config.maxBytes
+			max_bytes: input.config.maxBytes,
+			...input.config.contextAssembly === void 0 ? {} : { assembly: input.config.contextAssembly }
 		}, input.signal);
 		if (input.signal?.aborted) throw new TransportError("", input.signal.reason);
 		const prepared = validatePreparedContext(result.kind === "json" ? result.value : void 0, "/v1/context/prepare", input.config.maxBytes);
@@ -2706,7 +2739,7 @@ Use pc_memory_list for an explicit inventory or audit ("list saved memories / �
 An explicit "remember this / 记住这个供以后使用" requires pc_remember and its successful result. Automatic Source capture or a verbal acknowledgement does not satisfy that request. Ordinary instructions and preview-only requests do not authorize a write. Never store secrets or duplicate prompts.
 Summarizing or drafting from facts supplied in the current turn needs no retrieval or Scope resolution. An empty search does not authorize an inventory. If inventory or Handoff is unavailable, do not emulate it with Memory search or storage.
 Tool names in this guidance describe possible capabilities, not proof of availability. Before selecting an operation, check that its exact name appears in the current tool catalog. If absent, stop that operation and explicitly report it unavailable and incomplete. Never emit a call to an absent tool, simulate a call in text, or substitute another persistence operation.
-Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source_ref; no preliminary Memory search or inventory is needed.
+Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source as boundary_source (or wrap it as {kind: "source", source_ref: source} for evidence); no preliminary Memory search or inventory is needed.
 For a requested handoff, capture the inspected boundary, activate it, inspect a generated Draft, then finalize the exact Draft for transfer. Commit only for an explicitly requested durable milestone. A temporary handoff is not a committed Revision or proof the receiver acted.
 Use pc_review_list / pc_review_get to inspect candidates. Generated candidates are not approved artifacts. Review decisions belong to the human /pc review command; never self-approve, install, publish, or execute a candidate.
 Revising or retiring Memory requires the exact current citation and the requested change. Preserve host approval checks.
@@ -2923,7 +2956,8 @@ function contextTools(runtime, defineTool) {
 		} },
 		execute: (args, exec) => run(runtime, exec, "prepare_context", {
 			query: args.query,
-			max_bytes: runtime.config.maxBytes
+			max_bytes: runtime.config.maxBytes,
+			...runtime.config.contextAssembly === void 0 ? {} : { assembly: runtime.config.contextAssembly }
 		})
 	}), pcTool(defineTool, {
 		name: "pc_capture_source",
@@ -2953,6 +2987,46 @@ function contextTools(runtime, defineTool) {
 		})
 	})];
 }
+const SOURCE_REFERENCE = {
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		name: {
+			type: "string",
+			required: true
+		},
+		source_id: {
+			type: "string",
+			required: true
+		}
+	},
+	description: "Exact returned data.source object, containing both name and source_id. Never invent either field."
+};
+const HANDOFF_EVIDENCE = {
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		kind: {
+			type: "string",
+			required: true,
+			enum: [
+				"source",
+				"artifact",
+				"memory"
+			]
+		},
+		source_ref: SOURCE_REFERENCE,
+		artifact_ref: {
+			type: "object",
+			additionalProperties: true
+		},
+		memory_citation: {
+			type: "object",
+			additionalProperties: true
+		}
+	},
+	description: "For captured evidence use {kind: \"source\", source_ref: data.source}, copying the exact result. No raw facts."
+};
 function handoffTools(runtime, defineTool) {
 	return [
 		pcTool(defineTool, {
@@ -2961,9 +3035,8 @@ function handoffTools(runtime, defineTool) {
 			kind: "edit",
 			parameters: {
 				boundary_source: {
-					type: "object",
-					required: true,
-					additionalProperties: true
+					...SOURCE_REFERENCE,
+					required: true
 				},
 				objective: {
 					type: "string",
@@ -2971,10 +3044,7 @@ function handoffTools(runtime, defineTool) {
 				},
 				evidence: {
 					type: "array",
-					items: {
-						type: "object",
-						additionalProperties: true
-					}
+					items: HANDOFF_EVIDENCE
 				}
 			},
 			execute: (args, exec) => run(runtime, exec, "activate_handoff", {
@@ -2985,7 +3055,7 @@ function handoffTools(runtime, defineTool) {
 		}),
 		pcTool(defineTool, {
 			name: "pc_handoff_prepare",
-			description: "Requires exact returned Source or Artifact citations, never raw facts. If no Source reference exists, call pc_capture_source first. Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and grants no authority; preparation is not a durable commit or proof that a receiver continued the work.",
+			description: "Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: \"source\", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and grants no authority; preparation is not a durable commit or proof that a receiver continued the work.",
 			kind: "read",
 			parameters: {
 				objective: {
@@ -2995,10 +3065,7 @@ function handoffTools(runtime, defineTool) {
 				evidence: {
 					type: "array",
 					required: true,
-					items: {
-						type: "object",
-						additionalProperties: true
-					}
+					items: HANDOFF_EVIDENCE
 				}
 			},
 			execute: (args, exec) => run(runtime, exec, "prepare_handoff", {

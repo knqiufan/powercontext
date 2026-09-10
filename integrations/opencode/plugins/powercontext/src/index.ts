@@ -34,7 +34,7 @@ Ordinary coding needs no routine PowerContext call. Use sufficient current conte
 An explicit "remember this / 记住这个供以后使用" requires pc_remember and confirmation of its result. Current-turn instructions, conceptual questions, and previews do not authorize persistence. Never store secrets or duplicate automatic prompt capture. Preserve OpenCode confirmation for named mutations.
 Summarizing or drafting from facts supplied in the current turn needs no retrieval or Scope resolution. An empty search does not authorize an inventory. If inventory or Handoff is unavailable, do not emulate it with Memory search or storage.
 Tool names in this guidance describe possible capabilities, not proof of availability. Before selecting an operation, check that its exact name appears in the current tool catalog. If absent, stop that operation and explicitly report it unavailable and incomplete. Never emit a call to an absent tool, simulate a call in text, or substitute another persistence operation.
-Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source_ref; no preliminary Memory search or inventory is needed.
+Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source as boundary_source (or wrap it as {kind: "source", source_ref: source} for evidence); no preliminary Memory search or inventory is needed.
 For a requested handoff, capture the inspected boundary, activate, inspect the generated Draft, and finalize the exact Draft. Commit only for an explicitly requested durable milestone. Preserve the exact returned transfer value; preparation is not commitment or receiver execution.
 Use pc_review_list / pc_review_get for requested candidate inspection. Generation and reading do not approve, install, publish, or execute artifacts. Candidate-review mutations are not model tools in this host; do not invent them or grant new approval authority.
 Memory correction or retirement requires the requested change and exact current citation. Empty retrieval is normal. On failure, denial, or missing Scope, report the operation and safe returned reason without guessing causes or claiming saved/restored context. Avoid repeated failed calls and continue ordinary work.
@@ -181,6 +181,7 @@ async function prepareTurn(
         scope_id: context.scopeId,
         query: input.prompt,
         max_bytes: runtime.config.maxBytes,
+        ...(runtime.config.contextAssembly === undefined ? {} : { assembly: runtime.config.contextAssembly }),
       }, signal)
       const prepared = validatePreparedContext(result.value, runtime.config.maxBytes)
       content = prepared.status === 'ready' ? prepared.content ?? undefined : undefined
@@ -276,6 +277,13 @@ function createRuntime(input: PluginInput, config: ResolvedConfig): Runtime {
 
 const z = tool.schema
 const jsonObject = () => z.record(z.string(), z.unknown())
+const sourceReference = z.object({ name: z.string(), source_id: z.string() })
+  .describe('Copy the exact returned data.source object, including name and source_id.')
+const handoffEvidence = z.union([
+  z.object({ kind: z.literal('source'), source_ref: sourceReference }),
+  z.object({ kind: z.literal('artifact'), artifact_ref: jsonObject() }),
+  z.object({ kind: z.literal('memory'), memory_citation: jsonObject() }),
+])
 const memoryKind = z.enum(['decision', 'constraint', 'current-state', 'task-outcome', 'next-step', 'agent-note'])
 const searchMode = z.enum(['auto', 'fts', 'vector', 'hybrid'])
 
@@ -393,7 +401,11 @@ function createTools(runtime: Runtime) {
         'injection. Empty context is normal; use only the evidence actually returned.',
       args: { query: z.string() },
       operationId: 'prepare_context',
-      payload: (args) => ({ query: args.query, max_bytes: runtime.config.maxBytes }),
+      payload: (args) => ({
+        query: args.query,
+        max_bytes: runtime.config.maxBytes,
+        ...(runtime.config.contextAssembly === undefined ? {} : { assembly: runtime.config.contextAssembly }),
+      }),
     }),
     pc_capture_source: operationTool(runtime, {
       description:
@@ -411,18 +423,18 @@ function createTools(runtime: Runtime) {
         'a generated Draft before finalizing it. An ignored boundary does not establish a new handoff; ' +
         'do not claim a committed milestone. Conceptual or preview-only requests do not authorize this ' +
         'write.',
-      args: { boundary_source: jsonObject(), objective: z.string(), evidence: z.array(jsonObject()).optional() },
+      args: { boundary_source: sourceReference, objective: z.string(), evidence: z.array(handoffEvidence).optional() },
       operationId: 'activate_handoff',
       payload: (args) => ({ boundary_source: args.boundary_source, objective: args.objective, evidence: args.evidence ?? [] }),
     }),
     pc_handoff_prepare: operationTool(runtime, {
       description:
-        'Requires exact returned Source or Artifact citations, never raw facts. If no Source reference exists, call pc_capture_source first. ' +
+        'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
         'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested ' +
         'transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is ' +
         'temporary and grants no authority; preparation is not a durable commit or proof that a ' +
         'receiver continued the work.',
-      args: { objective: z.string(), evidence: z.array(jsonObject()) },
+      args: { objective: z.string(), evidence: z.array(handoffEvidence) },
       operationId: 'prepare_handoff',
       payload: (args) => ({ objective: args.objective, evidence: args.evidence }),
     }),

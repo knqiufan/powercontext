@@ -197,7 +197,11 @@ function contextTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
         'injection. Empty context is normal; use only the evidence actually returned.',
       kind: 'search',
       parameters: { query: { type: 'string', required: true, description: 'Question to retrieve context for.' } },
-      execute: (args, exec) => run(runtime, exec, 'prepare_context', { query: args.query, max_bytes: runtime.config.maxBytes }),
+      execute: (args, exec) => run(runtime, exec, 'prepare_context', {
+        query: args.query,
+        max_bytes: runtime.config.maxBytes,
+        ...(runtime.config.contextAssembly === undefined ? {} : { assembly: runtime.config.contextAssembly }),
+      }),
     }),
     pcTool(defineTool, {
       name: 'pc_capture_source',
@@ -219,6 +223,22 @@ function contextTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
   ]
 }
 
+const SOURCE_REFERENCE = {
+  type: 'object', additionalProperties: false,
+  properties: { name: { type: 'string', required: true }, source_id: { type: 'string', required: true } },
+  description: 'Exact returned data.source object, containing both name and source_id. Never invent either field.',
+}
+const HANDOFF_EVIDENCE = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    kind: { type: 'string', required: true, enum: ['source', 'artifact', 'memory'] },
+    source_ref: SOURCE_REFERENCE,
+    artifact_ref: { type: 'object', additionalProperties: true },
+    memory_citation: { type: 'object', additionalProperties: true },
+  },
+  description: 'For captured evidence use {kind: "source", source_ref: data.source}, copying the exact result. No raw facts.',
+}
+
 function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[] {
   return [
     pcTool(defineTool, {
@@ -230,9 +250,9 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
         'write.',
       kind: 'edit',
       parameters: {
-        boundary_source: { type: 'object', required: true, additionalProperties: true },
+        boundary_source: { ...SOURCE_REFERENCE, required: true },
         objective: { type: 'string', required: true },
-        evidence: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        evidence: { type: 'array', items: HANDOFF_EVIDENCE },
       },
       execute: (args, exec) => run(runtime, exec, 'activate_handoff', {
         boundary_source: args.boundary_source, objective: args.objective, evidence: args.evidence ?? [],
@@ -241,7 +261,7 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
     pcTool(defineTool, {
       name: 'pc_handoff_prepare',
       description:
-        'Requires exact returned Source or Artifact citations, never raw facts. If no Source reference exists, call pc_capture_source first. ' +
+        'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
         'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested ' +
         'transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is ' +
         'temporary and grants no authority; preparation is not a durable commit or proof that a ' +
@@ -249,7 +269,7 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
       kind: 'read',
       parameters: {
         objective: { type: 'string', required: true },
-        evidence: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+        evidence: { type: 'array', required: true, items: HANDOFF_EVIDENCE },
       },
       execute: (args, exec) => run(runtime, exec, 'prepare_handoff', { objective: args.objective, evidence: args.evidence }),
     }),

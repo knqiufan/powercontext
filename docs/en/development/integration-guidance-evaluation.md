@@ -15,6 +15,8 @@ and no forced tool selection. Fixtures use fictional Aurora facts and an isolate
 The [recorded calls, arguments, controlled results, and replies](https://github.com/oceanbase/powercontext/blob/master/e2e/integration-guidance/results/step37-20260909.jsonl)
 retain failures. These measurements are **not an all-pass certification**, and a prompt is not an authorization mechanism.
 The initial matrix uses 11 English/Chinese scenarios with the Skill loaded and unloaded, 44 observations per host.
+Handoff scores in this matrix measure the first selected operation only; they do not establish successful arguments,
+execution results, finalization, or the absence of a later commit.
 
 | Surface | Accepted routing / observations |
 | --- | --- |
@@ -51,10 +53,52 @@ with broader queries or list, which remains visible as a failed bounded scenario
 are retained as failures, not excluded to improve the score. Additional description constraints address supplied facts,
 temporary handoffs, and exact Handoff evidence; broad model compliance remains subject to qualification.
 
-Description-boundary qualification with the final tool descriptions passed **48/48** Handoff and preview scenarios
-across OpenClaw, Hermes, OpenCode, and the Agent Plugin, in English/Chinese and all three Skill states. These runs
-cover the supplied-fact, temporary-handoff, and exact-evidence constraints. The earlier failing observations and
-missing-tool stress results remain in the evidence; this does not certify every model/capability combination.
+The description-boundary sample recorded **48/48 first-turn selections** for Handoff and preview requests across
+OpenClaw, Hermes, OpenCode, and the Agent Plugin, in English/Chinese and all three Skill states. It did not continue
+Handoff calls through tool results or inspect subsequent writes. This score is **not multi-turn Handoff acceptance**
+and does not qualify exact evidence, finalization, or temporary-versus-durable behavior. Original observations remain
+available, including failures and missing-tool stress results.
+
+## Multi-turn Handoff qualification
+
+The evaluator validates each model call against the exported catalog and generated HTTP request model, returns
+contract-valid controlled results, and continues through capture, activation/preparation, and finalization, or the
+high-level current-work operation. It rejects unavailable tools, foreign Scopes, invalid arguments, invented evidence,
+altered Drafts, parallel dependent writes, and any commit in a temporary or ordinary transfer request. A pass also
+requires a terminal answer containing the complete unchanged prepared carrier. Result wording and the truth of the
+supplied facts still require inspection; these are controlled-result measurements, not native-host execution.
+
+The `handoff` and `handoff_request` cases cover explicitly temporary transfers and ordinary handoff imperatives.
+The fixture uses the HTTP response field `source`, while evidence wraps it as `{kind: "source", source_ref: source}`.
+The high-level input uses WorkClaims with `text`, `basis`, and `evidence`; inspected facts without exact existing
+PowerContext references use `declared` and an empty evidence list. Skill discovery names remain unchanged.
+
+The 2026-09-10 Step 3.7 Flash qualification uses two cases, two languages, and three Skill states per surface.
+The latest observation for each condition totals **64/96**, composed from the recorded batches below; it is not
+a single simultaneous run or an all-host acceptance result.
+
+| Surface | Complete sequences / observations | Evidence batch |
+| --- | --- | --- |
+| Codex MCP catalog | 12/12 | `contract-sequence` |
+| Claude Code MCP catalog | 11/12 | `contract-sequence` |
+| WorkBuddy MCP catalog | 8/12 | `contract-sequence` |
+| Portable Agent Plugin with MCP | 10/12 | `contract-sequence` |
+| Hermes | 10/12 | `structured-native-parameters` |
+| DSH | 5/12 | `real-dsh-model-request` |
+| OpenCode | 3/12 | `structured-native-parameters` |
+| Pi | 5/12 | `structured-native-parameters` |
+
+The [raw JSONL evidence](../../../e2e/integration-guidance/results/step37-handoff-20260910.jsonl) retains all batches,
+including the initial WorkClaim probe and intermediate failures. Each batch includes its exported catalogs and model
+configuration. DSH's final batch uses the actual compiled SDK model request; intermediate DSH catalogs were exported
+from registration specifications and do not establish that runtime contract. Model calls still receive controlled
+results in this evaluation, including in the final DSH batch.
+
+Remaining failures include invalid provenance, malformed or unfinished Drafts, and incomplete or changed carriers.
+The exact-carrier check also rejects omitted nullable fields. No commit call occurred in these latest 96 observations,
+but early failures truncate those sequences and cannot establish the behavior of a later successful continuation.
+These model scenarios remain unqualified; deterministic schema and runtime regression checks do not convert them
+into passes.
 
 ## Execution and regression evidence
 

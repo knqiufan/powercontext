@@ -272,8 +272,72 @@ paths:
         Inspect available Scopes for an explicit navigation or organization request. Do not enumerate Scopes to bypass
         the current session binding or search another work context implicitly. Reuse the host-selected Scope for
         ordinary data-plane operations.
+        Discover Scope descriptors with an explicit literal-substring field and exact relationship filters.
+        Query matches the selected original field using the database's native substring operation.
+        Regular expressions and wildcard syntax are not supported. Case, accent, and full-width/half-width
+        matching follow the underlying database collation; results need not be identical across backends.
+        Requests without query parameters preserve the existing complete-list behavior.
       operationId: list_scopes
       x-powercontext-access: {action: server.observe, resource: {type: server}}
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+        - name: query_field
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ScopeQueryField"
+        - name: parent_scope_id
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: '.*\S.*'
+        - name: external_reference_kind
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '.*\S.*'
+        - name: binding_integration
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '.*\S.*'
+        - name: binding_kind
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            pattern: '.*\S.*'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
       responses:
         "200":
           description: Durable Scope metadata in deterministic identity order.
@@ -281,12 +345,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ScopePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "410":
+          $ref: "#/components/responses/CursorExpired"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
         "503":
           $ref: "#/components/responses/Unavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       tags: [scopes]
       summary: Create an independent Scope boundary
@@ -858,6 +930,11 @@ paths:
         the inspected boundary of a requested work transfer and prepare its Handoff. Use a unique source_id, exact
         evidence where available, and declared facts otherwise. The returned handoff member is the temporary carrier;
         commit only for an authorized durable milestone. A preview-only request makes no write.
+        The handoff input contains schema="powercontext.current-work-handoff.v1", trust="untrusted_input",
+        objective, state, disposition, next_action, and omissions. Each state item and non-null next_action is a
+        WorkClaim with text, basis, and evidence (not citations). Facts inspected in the conversation or repository
+        use basis="declared" and evidence=[] unless an exact existing PowerContext citation was returned.
+        Never fabricate a citation for the new source_id or mark a claim verified with empty evidence.
       operationId: handoff_current_work
       x-powercontext-access: {action: scope.contribute, resource: {type: scope, scope-id-from: scope_id}}
       x-powercontext-scope-mode: current
@@ -2847,6 +2924,62 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
   /v1/scopes/{scope_id}/sources:
+    get:
+      tags: [sources]
+      summary: List public Sources in one Scope
+      description: List a snapshot-bounded page of public Content Sources in ascending journal position.
+      operationId: list_sources
+      x-powercontext-access: {resolver: path_scope_read_access}
+      parameters:
+        - name: scope_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: '.*\S.*'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+      responses:
+        "200":
+          description: One stable page of public Content Sources.
+          headers:
+            X-PowerContext-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/CursorExpired"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       tags: [sources]
       summary: Create a durable Source
@@ -4516,6 +4649,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ScopeDescriptor"
+        next_cursor:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 4096
+    ScopeQueryField:
+      type: string
+      enum: [scope_id, title, summary, external_reference_value, binding_external_id]
     CreateScopeRequest:
       type: object
       additionalProperties: false
@@ -5602,6 +5743,9 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
+          description: >-
+            Raw integration content. Server-reserved payload schemas, including handoff receipts, are rejected on
+            this generic capture operation and must be created through their dedicated workflow.
         metadata:
           type: object
           additionalProperties: true
@@ -7552,6 +7696,54 @@ components:
           minimum: 512
           maximum: 32768
           default: 8000
+        assembly:
+          $ref: "#/components/schemas/ContextAssembly"
+    ContextAssemblySection:
+      type: object
+      additionalProperties: false
+      required: [family, limit]
+      properties:
+        family:
+          $ref: "#/components/schemas/ContextAssemblyFamily"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: Maximum included entries. Each Profile entry is one Scope snapshot. Experience is limited to two. All section limits together must not exceed the Server's runtime.context_assembly_max_entries policy (default 8); exceeding it returns HTTP 422 before recall. The byte budget may reduce the actual output count.
+    ContextAssembly:
+      type: object
+      additionalProperties: false
+      description: Explicitly opt into grouped Markdown context. Omit assembly to preserve the existing context format; null is invalid.
+      properties:
+        format:
+          allOf:
+            - $ref: "#/components/schemas/ContextAssemblyFormat"
+          default: markdown
+        sections:
+          type: array
+          maxItems: 4
+          description: Unique families in output and byte-budget priority order. Profile explicitly includes the latest committed snapshot from the current Scope and direct Context References, in that order, without query filtering or generation. Topic Memory searches only the current Scope and includes title, summary, and an optional matching snippet, with an exact revision citation. An empty array disables candidate recall.
+          default:
+            - {family: memory, limit: 6}
+            - {family: experience, limit: 2}
+          items:
+            $ref: "#/components/schemas/ContextAssemblySection"
+        show:
+          type: array
+          maxItems: 2
+          uniqueItems: true
+          default: []
+          items:
+            $ref: "#/components/schemas/ContextAssemblyMetadata"
+    ContextAssemblyFamily:
+      type: string
+      enum: [memory, experience, profile, topic-memory]
+    ContextAssemblyFormat:
+      type: string
+      enum: [markdown]
+    ContextAssemblyMetadata:
+      type: string
+      enum: [confidence, recall_rank]
     ProposeExperienceRequest:
       type: object
       additionalProperties: false
@@ -8144,7 +8336,9 @@ components:
           enum: [content]
           default: content
         content:
-          description: JSON value persisted by the built-in content Source adapter.
+          description: >-
+            JSON value persisted by the built-in content Source adapter. Server-reserved payload schemas, including
+            handoff receipts, are rejected and must be created through their dedicated workflow.
     TaggableArtifactFamily:
       type: string
       description: Artifact families supporting logical tags; Prompt configurations are excluded.
@@ -8315,6 +8509,66 @@ components:
         content:
           $ref: "#/components/schemas/PromptContent"
     ListArtifactRevisionsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          nullable: true
+    ListScopesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          maxLength: 256
+          nullable: true
+        query_field:
+          allOf:
+            - $ref: "#/components/schemas/ScopeQueryField"
+          nullable: true
+        parent_scope_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '.*\S.*'
+          nullable: true
+        external_reference_kind:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '.*\S.*'
+          nullable: true
+        binding_integration:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '.*\S.*'
+          nullable: true
+        binding_kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '.*\S.*'
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          nullable: true
+    ListSourcesRequest:
       type: object
       additionalProperties: false
       properties:
@@ -8562,6 +8816,18 @@ components:
         content_digest:
           type: string
           pattern: '^sha256:[0-9a-f]{64}$'
+    SourcePage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceRecord"
+        next_cursor:
+          type: string
+          nullable: true
     SourceTypeReference:
       type: object
       additionalProperties: false

@@ -23,11 +23,9 @@ from typing import Any
 
 from .client import PowerContextError, PowerContextHTTPError
 from .helpers import (
-    DEFAULT_MAX_BYTES,
     DEFAULT_RETRIEVAL_LIMIT,
     as_int,
     citation_from_args,
-    config_value,
 )
 from .operations import OPERATION_REQUIRED_FIELDS, OPERATION_TOOL_MAP
 
@@ -125,15 +123,8 @@ def request_operation(provider: Any, operation: str, payload: dict[str, Any] | N
         raise ValueError(f"Missing required arguments: {', '.join(missing)}")  # noqa: TRY003
 
     if operation == "prepare_context":
-        operation_payload.setdefault(
-            "max_bytes",
-            as_int(
-                config_value(provider._config, "max_bytes", "POWERCONTEXT_HERMES_MAX_BYTES", DEFAULT_MAX_BYTES),
-                DEFAULT_MAX_BYTES,
-                minimum=512,
-                maximum=32768,
-            ),
-        )
+        for key, value in provider._prepare_options().items():
+            operation_payload.setdefault(key, value)
     elif operation == "capture_content_source":
         operation_payload.setdefault("metadata", {"origin": "hermes"})
     operation_payload["scope_id"] = provider._scope_id
@@ -485,6 +476,34 @@ def _operation_schema(
 
 def get_tool_schemas() -> list[dict[str, Any]]:
     citation = citation_properties()
+    work_claim = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "text": {"type": "string", "minLength": 1},
+            "basis": {"type": "string", "enum": ["declared", "verified"]},
+            "evidence": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Empty for declared facts; verified facts require exact existing PowerContext citations.",
+            },
+        },
+        "required": ["text", "basis", "evidence"],
+    }
+    current_work_handoff = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "schema": {"type": "string", "enum": ["powercontext.current-work-handoff.v1"]},
+            "trust": {"type": "string", "enum": ["untrusted_input"]},
+            "objective": {"type": "string", "minLength": 1},
+            "state": {"type": "array", "minItems": 1, "items": work_claim},
+            "disposition": {"type": "string", "enum": ["continuable", "blocked", "complete"]},
+            "next_action": {"anyOf": [work_claim, {"type": "null"}]},
+            "omissions": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["schema", "trust", "objective", "state", "disposition", "next_action", "omissions"],
+    }
     schemas = [
         {
             "name": "powercontext_search_memory",
@@ -641,9 +660,14 @@ def get_tool_schemas() -> list[dict[str, Any]]:
                 "Capture the inspected boundary of a requested work transfer and prepare its Handoff. Use a unique "
                 "source_id, exact evidence where available, and declared facts otherwise. The returned handoff member "
                 "is the temporary carrier; commit only for an authorized durable milestone. A preview-only request "
-                "makes no write."
+                "makes no write. The handoff object requires schema='powercontext.current-work-handoff.v1', "
+                "trust='untrusted_input', objective, state, disposition, next_action, and omissions. Each state item "
+                "and non-null next_action has text, basis, and evidence (not citations). Facts inspected in the "
+                "conversation or repository use basis='declared' and evidence=[] unless an exact existing "
+                "PowerContext citation was returned. Never invent evidence for the new source_id or mark a claim "
+                "verified with empty evidence."
             ),
-            {"source_id": {"type": "string"}, "handoff": json_object},
+            {"source_id": {"type": "string"}, "handoff": current_work_handoff},
             ("source_id", "handoff"),
         ),
         _operation_schema(

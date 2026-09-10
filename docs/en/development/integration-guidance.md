@@ -56,6 +56,8 @@ actual guidance, tool definitions, and packaged Skill:
 ```sh
 uv run pytest tests/test_mcp.py tests/integrations/test_hermes_provider.py
 pnpm --dir integrations/dsh/plugins/powercontext test
+pnpm --dir integrations/dsh/plugins/powercontext/tests/runtime install --frozen-lockfile
+pnpm --dir integrations/dsh/plugins/powercontext test:e2e:runtime
 pnpm --dir integrations/opencode/plugins/powercontext test
 pnpm --dir integrations/pi/plugins/powercontext test
 pnpm --dir integrations/openclaw/plugins/memory-powercontext test
@@ -83,3 +85,11 @@ recorded arguments and final responses as well as the automatic routing verdict.
 truncation, and endpoint failures must not be reported as successful acceptance. Skill body presence is controlled;
 this does not establish automatic Skill discovery or full execution in every host. See the
 [evaluation record](integration-guidance-evaluation.md) for measured scope and limits.
+
+For multi-turn Handoff qualification, add `--cases handoff handoff_request`. The evaluator checks the full
+controlled-result sequence and exact returned carrier, including calls after preparation; a first tool selection
+is insufficient. It does not execute persistence or certify native host behavior. Ordinary handoff imperatives use
+the temporary path; only an explicit durable-milestone request authorizes a commit.
+
+DSH exports its compiled tool schemas and system context from an actual SDK model request. The package registration
+test alone does not export a model catalog. Install the pinned runtime test dependencies before exporting DSH.

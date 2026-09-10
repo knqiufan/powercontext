@@ -55,6 +55,14 @@ const SEARCH_MODES = Type.Union([
 ])
 const CITATION = Type.Object({}, { additionalProperties: true, description: 'Exact citation returned by PowerContext.' })
 const JSON_OBJECT = Type.Object({}, { additionalProperties: true })
+const SOURCE_REFERENCE = Type.Object({ name: Type.String(), source_id: Type.String() }, {
+  additionalProperties: false, description: 'Copy the exact returned data.source object, including name and source_id.',
+})
+const HANDOFF_EVIDENCE = Type.Union([
+  Type.Object({ kind: Type.Literal('source'), source_ref: SOURCE_REFERENCE }),
+  Type.Object({ kind: Type.Literal('artifact'), artifact_ref: JSON_OBJECT }),
+  Type.Object({ kind: Type.Literal('memory'), memory_citation: JSON_OBJECT }),
+])
 
 function render(result: ToolResult) {
   return {
@@ -225,7 +233,11 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
       'context is normal; use only the evidence actually returned.',
     parameters: Type.Object({ query: Type.String({ description: 'Question to retrieve context for.' }) }),
     operationId: 'prepare_context',
-    payload: (params) => ({ query: params.query, max_bytes: runtime.config.maxBytes }),
+    payload: (params) => ({
+      query: params.query,
+      max_bytes: runtime.config.maxBytes,
+      ...(runtime.config.contextAssembly !== undefined ? { assembly: runtime.config.contextAssembly } : {}),
+    }),
   })
 
   registerOperationTool(pi, runtime, {
@@ -259,9 +271,9 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
       'not claim a committed milestone. Conceptual or preview-only requests do not authorize this ' +
       'write.',
     parameters: Type.Object({
-      boundary_source: JSON_OBJECT,
+      boundary_source: SOURCE_REFERENCE,
       objective: Type.String(),
-      evidence: Type.Optional(Type.Array(JSON_OBJECT)),
+      evidence: Type.Optional(Type.Array(HANDOFF_EVIDENCE)),
     }),
     operationId: 'activate_handoff',
     payload: (params) => ({
@@ -276,14 +288,14 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
     name: 'pc_handoff_prepare',
     label: 'PowerContext Handoff Prepare',
     description:
-      'Requires exact returned Source or Artifact citations, never raw facts. If no Source reference exists, call pc_capture_source first. ' +
+      'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
         'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. ' +
       'Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and ' +
       'grants no authority; preparation is not a durable commit or proof that a receiver continued the ' +
       'work.',
     parameters: Type.Object({
       objective: Type.String(),
-      evidence: Type.Array(JSON_OBJECT),
+      evidence: Type.Array(HANDOFF_EVIDENCE),
     }),
     operationId: 'prepare_handoff',
     payload: (params) => ({ objective: params.objective, evidence: params.evidence }),

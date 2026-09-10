@@ -33,7 +33,9 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import httpx
+import jsonschema
 from dotenv import dotenv_values
+from integration_guidance_handoff import HandoffFixture
 
 ROUTES = {
     "search": {"pc_search", "search_memory", "powercontext_search_memory", "powercontext_memory_search"},
@@ -96,9 +98,19 @@ CASES = {
         (
             "Prepare a temporary handoff of this work; do not commit a durable milestone. Objective: document Aurora. "
             "Verified progress: the README is complete and its links passed validation. Next action: review the examples. "
-            "No blockers or code changes. Use these inspected facts.",
+            "No blockers or code changes. Use these inspected facts. Return the complete prepared carrier as JSON.",
             "把这项工作准备成临时交接，不要提交持久里程碑。目标是编写 Aurora 文档；已核实进展：README 已完成，链接验证通过。"
-            "下一步是审查示例。没有阻塞，也没有代码改动。使用这些已检查的事实。",
+            "下一步是审查示例。没有阻塞，也没有代码改动。使用这些已检查的事实。以 JSON 返回完整的临时交接载体。",
+        ),
+    ),
+    "handoff_request": (
+        "handoff",
+        (
+            "Handoff this work. Objective: document Aurora. Inspected progress: the README is complete and its links "
+            "passed validation. Next action: review the examples. No blockers or code changes. "
+            "Return the complete prepared carrier as JSON.",
+            "交接当前工作。目标是编写 Aurora 文档；已检查的进展：README 已完成，链接验证通过。下一步是审查示例。"
+            "没有阻塞，也没有代码改动。以 JSON 返回完整的临时交接载体。",
         ),
     ),
     "review": (
@@ -208,6 +220,15 @@ def controlled_reply(case: str) -> dict[str, Any]:
     return {"ok": True, "data": {"status": "saved", "entry": {"text": "Aurora deploys on violet-cedar-1520."}}}
 
 
+def catalog_arguments(call: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
+    name = call["function"]["name"]
+    if name not in catalog:
+        raise ValueError("Selected an unavailable tool: " + name)
+    arguments = json.loads(call["function"]["arguments"])
+    jsonschema.validate(arguments, catalog[name].get("parameters", {}))
+    return arguments
+
+
 def append_results(messages: list[dict[str, Any]], response: dict[str, Any], case: str) -> None:
     calls = validate_message(response)
     messages.append(response)
@@ -273,6 +294,9 @@ async def run_scenario(
         ):
             # MCP Skills legitimately resolve the host binding before selecting a scoped operation.
             record["scope_resolution"] = initial
+            catalog_tools = {tool["name"]: tool for tool in tools}
+            for call in initial:
+                catalog_arguments(call, catalog_tools)
             append_results(messages, response, "scope")
             response = await model.complete(messages, tools)
         record.update(
@@ -284,11 +308,55 @@ async def run_scenario(
             bool(actual) and actual <= expected if expected else not actual and bool(response.get("content"))
         )
         record["final_response"] = response.get("content")
-        if calls and case in ("save", "failed_save", "empty_search"):
+        if route == "handoff" and calls:
+            await check_handoff_sequence(model, record, messages, tools, response)
+        elif calls and case in ("save", "failed_save", "empty_search"):
             await check_result_reporting(model, record, messages, tools, response, expected)
-    except (TypeError, ValueError, KeyError, RuntimeError, httpx.HTTPError) as error:
-        record.update(routing_passed=False, error=type(error).__name__ + ": " + str(error))
+    except (TypeError, ValueError, KeyError, RuntimeError, httpx.HTTPError, jsonschema.ValidationError) as error:
+        detail = (
+            f"{list(error.absolute_path)}: {error.message}"
+            if isinstance(error, jsonschema.ValidationError)
+            else str(error)
+        )
+        record.update(routing_passed=False, error=type(error).__name__ + ": " + detail)
     return record
+
+
+async def check_handoff_sequence(
+    model: CompletionModel,
+    record: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    response: dict[str, Any],
+) -> None:
+    fixture = HandoffFixture()
+    catalog = {tool["name"]: tool for tool in tools}
+    record["handoff_steps"] = steps = []
+    record["controlled_results"] = results = []
+    record["routing_passed"] = False
+    # Capture, activate/prepare, finalize, and a terminal response fit this budget.
+    # Inspect every response, including calls after the successful preparation.
+    for _ in range(6):
+        calls = validate_message(response)
+        record["final_response"] = response.get("content")
+        if not calls:
+            record["routing_passed"] = fixture.carrier_returned(response.get("content") or "")
+            if not record["routing_passed"]:
+                record["handoff_failure"] = "No complete, exact prepared carrier was returned"
+            return
+        steps.append({"content": response.get("content"), "calls": calls})
+        if len(calls) != 1:
+            message = "Handoff operations require the preceding result; parallel writes are not valid"
+            raise ValueError(message)
+        call = calls[0]
+        name = call["function"]["name"]
+        arguments = catalog_arguments(call, catalog)
+        result = fixture.respond(name, arguments)
+        reply = {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)}
+        results.append(reply)
+        messages.extend([response, reply])
+        response = await model.complete(messages, tools)
+    record["handoff_failure"] = "Handoff exceeded the bounded multi-turn evaluation budget"
 
 
 async def evaluate(args: argparse.Namespace) -> int:
@@ -303,6 +371,7 @@ async def evaluate(args: argparse.Namespace) -> int:
     output: list[dict[str, Any]] = []
     gate = asyncio.Semaphore(args.concurrency)
     report = {
+        "evaluation_version": "handoff-contract-sequence-v1",
         "model": model_name,
         "provider_host": urlsplit(base_url).hostname,
         "method": "Live model over exported host catalogs; controlled tool replies; no mutations executed",

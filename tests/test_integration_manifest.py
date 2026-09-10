@@ -259,7 +259,7 @@ def test_unimplemented_status_pointers_must_have_their_required_evidence(
             "kind": "agent_host",
             "availability": "unsupported",
             "capabilities": ["memory_read"],
-            "rationale": "docs/en/docs/reference/interfaces.md",
+            "rationale": "docs/en/docs/develop/interfaces.md",
         },
         {
             "id": "unsupported-without-rationale",
@@ -270,7 +270,7 @@ def test_unimplemented_status_pointers_must_have_their_required_evidence(
             "id": "unsupported-with-implementation",
             "kind": "agent_host",
             "availability": "unsupported",
-            "rationale": "docs/en/docs/reference/interfaces.md",
+            "rationale": "docs/en/docs/develop/interfaces.md",
             "evidence": {"implementation": ["src/powercontext/integration_manifest.py"]},
         },
     ],

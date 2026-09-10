@@ -43,6 +43,7 @@ from powercontext.builtin.runtime import (
 from powercontext.builtin.runtime.application import ScheduledExperienceRunner, ScheduledSourceRunner
 from powercontext.builtin.runtime.composition import open_builtin_runtime
 from powercontext.builtin.runtime.config import BuiltinConfig
+from powercontext.builtin.runtime.processing_registry import processing_capabilities
 from powercontext.builtin.sources import CONTENT_SOURCE_NAME
 from powercontext.http import (
     Capabilities,
@@ -71,12 +72,13 @@ from powercontext.server.authz import (
 from powercontext.server.authz.composition import open_builtin_access_control
 from powercontext.server.context import current_principal, current_request_id
 from powercontext.server.cursor_secret import resolve_cursor_secret
+from powercontext.server.dashboard import mount_dashboard
 from powercontext.server.mcp import mount_mcp
 from powercontext.server.metrics import CONTENT_TYPE_LATEST, HttpMetricsMiddleware, ServerMetrics
 from powercontext.server.middleware import AuthenticationMiddleware
+from powercontext.server.processing_security import build_worker_security
 from powercontext.server.settings import MissingAuthenticationProviderError, ServerSettings
 from powercontext.server.tracing import HttpTracingMiddleware, ServerTracing
-from powercontext.server.web import mount_web_ui
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,9 @@ class _MetricsEndpoint:
                     request_id=current_request_id(),
                 ),
             )
+        runtime = request.app.state.application
+        supervisor = None if runtime is None else runtime.artifact_processing_supervisor
+        self._metrics.set_processing_families({} if supervisor is None else supervisor.family_status)
         return Response(self._metrics.render(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -131,6 +136,8 @@ def create_server_app(  # noqa: C901
     """Build the Server process and mount MCP when configured."""
 
     resolved = ServerSettings() if settings is None else settings
+    if resolved.dashboard.enabled and (authentication_provider is not None or access_control is not None):
+        raise ValueError("Dashboard supports only the built-in static Bearer profile")  # noqa: TRY003
     if resolved.runtime.artifact_processing_role == "background":
         raise BackgroundRoleRequiresBackgroundRunnerError
     static_principal, configured_authentication, configured_access_control, legacy_static_admin = (
@@ -179,6 +186,13 @@ def create_server_app(  # noqa: C901
                 active_access_control,
                 legacy_static_principal=static_principal if legacy_static_admin else None,
             )
+            worker_security = build_worker_security(
+                resolved,
+                active_access_control,
+                legacy_static_principal=static_principal if legacy_static_admin else None,
+                enabled=config.runtime.artifact_processing_role != "api" and bool(processing_capabilities(config)),
+                injected=configured_access_control is not None,
+            )
             runtime = await resources.enter_async_context(
                 open_builtin_runtime(
                     config,
@@ -197,6 +211,7 @@ def create_server_app(  # noqa: C901
                     tracing=resolved_tracing,
                     scheduled_source_runner=scheduled_source_runner,
                     scheduled_experience_runner=scheduled_experience_runner,
+                    worker_security=worker_security,
                     scheduled_profile_runner=_scheduled_profile_runner(
                         resolved,
                         active_access_control,
@@ -211,6 +226,14 @@ def create_server_app(  # noqa: C901
                     ),
                 )
             )
+            if active_access_control is not None:
+                migrated, unresolved = await runtime._records().migrate_handoff_receipts(
+                    active_access_control.committed_receipt_identity,
+                )
+                _log_lifecycle(
+                    "server.receipt_migration",
+                    f"Receipt migration: {migrated} attested, {unresolved} pending in pc_receipt_migration_review",
+                )
             readiness_probe.bind(runtime)
             app.state.application = runtime
             app.state.access_control = active_access_control
@@ -245,6 +268,7 @@ def create_server_app(  # noqa: C901
             Middleware(
                 AuthenticationMiddleware,
                 provider=configured_authentication,
+                dashboard_enabled=resolved.dashboard.enabled,
             ),
         )
 
@@ -260,7 +284,6 @@ def create_server_app(  # noqa: C901
         authentication_provider=configured_authentication,
         allow_insecure_remote_http=resolved.allow_insecure_http,
     )
-    _mount_optional_web_ui(app, resolved)
     if metrics is not None:
         app.add_api_route(
             "/metrics",
@@ -293,6 +316,8 @@ def create_server_app(  # noqa: C901
             metrics=metrics,
             tracing=resolved_tracing,
         )
+    if resolved.dashboard.enabled:
+        mount_dashboard(app)
     return app
 
 
@@ -450,35 +475,6 @@ def _memory_resource(scope_id: str, entry: MemoryEntryRecord) -> ResourceRef:
         artifact_id=citation.memory_ref.artifact_id,
         selector=MemoryEntrySelector(entry_id=citation.entry_id),
     )
-
-
-def _mount_optional_web_ui(app: FastAPI, settings: ServerSettings) -> None:
-    app.state.dashboard_started = False
-    app.state.dashboard_startup_error = None
-    if not (settings.dashboard.enabled or settings.handoff_report.enabled):
-        return
-    try:
-        mount_web_ui(
-            app,
-            dashboard_enabled=settings.dashboard.enabled,
-            handoff_report_enabled=settings.handoff_report.enabled,
-            authentication_required=settings.access.mode == "enforced",
-            agent_skill_targets=settings.external_skills.agent_targets,
-            public_server_url=settings.public_url,
-            allow_insecure_http=settings.allow_insecure_http,
-        )
-        if settings.dashboard.enabled:
-            app.state.dashboard_started = True
-    except Exception as error:
-        app.state.dashboard_startup_error = str(error)
-        unit = "Dashboard" if settings.dashboard.enabled else "Handoff Report"
-        log_safely(
-            logger,
-            logging.WARNING,
-            f"PowerContext {unit} failed to start: {error}",
-            exc_info=error,
-            extra={"event": "web_ui.start_failed", "unit": "web_ui"},
-        )
 
 
 class _ServerReadinessProbe:

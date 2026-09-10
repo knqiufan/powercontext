@@ -54,6 +54,18 @@ references, then bind the host identity when the integration supports durable
 binding. Creating or switching a Scope is a host action, not an implicit result
 of an ordinary Memory or Handoff call.
 
+## Current-work Handoff input
+
+Use `handoff_current_work` with a unique `source_id` and a `handoff` object
+containing `schema: "powercontext.current-work-handoff.v1"`, `trust: "untrusted_input"`,
+`objective`, `state`, `disposition`, `next_action`, and `omissions`. Both state
+items and a non-null next action are WorkClaims: `{text, basis, evidence}`.
+Use `basis: "declared"` and `evidence: []` for facts inspected in the current
+conversation or repository without an existing exact PowerContext citation.
+Do not use `citations` in a WorkClaim, invent evidence for the new `source_id`,
+or call a fact `verified` merely because the user checked it. Preserve the
+returned carrier unchanged, including its Server-created evidence references.
+
 ## Read Memory
 
 - Use `search_memory` with a focused query, `mode: "auto"`, and no more than

@@ -15,6 +15,7 @@ StepFun endpoint 上的 `step-3.7-flash`，temperature 为 0，输出预算为 6
 [调用、参数、受控返回及回复记录](https://github.com/oceanbase/powercontext/blob/master/e2e/integration-guidance/results/step37-20260909.jsonl)
 保留了失败结果。**这些数据不表示模型场景全部通过，提示词也不承担权限执行职责。**
 初始矩阵含 11 个中英文场景，分别加载和不加载 Skill，每个宿主 44 次观察。
+其中 Handoff 分数仅衡量首个操作选择，不证明参数有效、执行成功、完成 finalize 或后续没有误提交。
 
 | 入口 | 工具选择通过 / 观察次数 |
 | --- | --- |
@@ -45,9 +46,42 @@ DSH 基线在 Skill 未加载时出现了预览请求多余检索和过早准备
 list，仍保留为有限预算场景的失败。服务超时和空回答也计为失败。工具描述补充了当前事实、临时交接和精确 Handoff
 证据的限制；不能据此保证所有模型都遵循指引。
 
-最终工具描述的边界验证通过 **48/48**：覆盖 OpenClaw、Hermes、OpenCode、Agent Plugin 的中英文 Handoff 与预览，
-以及三种 Skill 状态，检查当前事实、临时交接和精确证据的约束。此前失败和缺失工具压力结果仍完整保留；这不代表
-所有模型与能力组合都已通过验证。
+描述边界样本记录了 **48/48 首步选择通过**，覆盖 OpenClaw、Hermes、OpenCode、Agent Plugin 的中英文 Handoff
+与预览，以及三种 Skill 状态。该测量未在交接调用后返回执行结果，也未检查后续写入，**不能作为多轮 Handoff 验收**，
+不能证明精确证据、finalize 或临时交接与持久提交边界正确。原始观测和失败记录完整保留。
+
+## 多轮 Handoff 验证
+
+验证器逐次检查模型调用是否符合导出目录及生成的 HTTP 请求模型，返回符合契约的受控结果，并继续执行捕获、
+激活或准备、finalize，或高层当前工作交接路径。缺失工具、跨 Scope、无效参数、伪造证据、改写 Draft、并行依赖写入，
+以及普通或临时交接中的任何 commit 均判为失败。通过还要求最终回答包含完整且未改写的临时载体。
+结果措辞和输入事实仍须人工审查；这是使用受控返回的模型测量，不等于原生宿主执行验收。
+
+`handoff` 和 `handoff_request` 分别覆盖明确临时交接与普通交接指令。捕获结果使用 HTTP 的 `source` 字段，
+作为 evidence 时包装为 `{kind: "source", source_ref: source}`。高层输入的 WorkClaim 使用 `text`、`basis`、
+`evidence`；没有现成 PowerContext 精确引用的已检查事实使用 `declared` 和空 evidence。Skill 名称保持不变。
+
+2026-09-10 的 Step 3.7 Flash 验证对每个宿主覆盖两个场景、两种语言和三种 Skill 状态。按各条件最近一次观测
+合计 **64/96**，由下表列出的批次组成，并非一次同步运行，也不代表所有宿主验收通过。
+
+| 宿主 | 完整交接通过 / 观测数 | 证据批次 |
+| --- | --- | --- |
+| Codex MCP 目录 | 12/12 | `contract-sequence` |
+| Claude Code MCP 目录 | 11/12 | `contract-sequence` |
+| WorkBuddy MCP 目录 | 8/12 | `contract-sequence` |
+| 通用 Agent Plugin + MCP | 10/12 | `contract-sequence` |
+| Hermes | 10/12 | `structured-native-parameters` |
+| DSH | 5/12 | `real-dsh-model-request` |
+| OpenCode | 3/12 | `structured-native-parameters` |
+| Pi | 5/12 | `structured-native-parameters` |
+
+[原始 JSONL 证据](../../../e2e/integration-guidance/results/step37-handoff-20260910.jsonl) 保留全部批次，包括最初的
+WorkClaim 探测和中间失败。各批次包含导出的目录及模型配置。DSH 最终批次使用真实 SDK 编译后的模型请求；中间
+批次从注册声明导出目录，不能证明运行时契约。包括 DSH 最终批次在内，这里的模型调用仍然使用受控返回结果。
+
+剩余失败包括无效的事实依据、格式错误或未完成的 Draft，以及不完整或被改写的载体。精确载体检查也会拒绝省略
+可空字段的回答。最近这 96 条观测没有出现 commit 调用，但较早失败会截断序列，不能证明后续成功路径的行为。
+这些模型场景仍未通过验收，确定性的 schema 与运行时回归检查不能将其转换成通过。
 
 ## 执行与回归证据
 

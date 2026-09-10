@@ -1,6 +1,6 @@
 ---
 name: project-context
-description: Create and commit a current-work Handoff when the user says "交接", "交接当前工作", "handoff this work", or equivalent; also restore project memory and continue prior work through PowerContext.
+description: Use PowerContext for explicit memory search/save and current-work handoffs (搜索记忆、记住、交接). Return a temporary handoff for ordinary transfer requests; commit only when the user explicitly requests a durable milestone. Use relevant history when current context is insufficient.
 ---
 
 # Project Context
@@ -69,6 +69,18 @@ Scope explicitly. If the current binding is not the intended boundary, ask the
 user or host for the exact Scope ID, bind it, and verify the resolver result
 before any Handoff write. Never infer a Scope from a report view.
 
+## Current-work Handoff input
+
+Use `handoff_current_work` with a unique `source_id` and a `handoff` object
+containing `schema: "powercontext.current-work-handoff.v1"`, `trust: "untrusted_input"`,
+`objective`, `state`, `disposition`, `next_action`, and `omissions`. Both state
+items and a non-null next action are WorkClaims: `{text, basis, evidence}`.
+Use `basis: "declared"` and `evidence: []` for facts inspected in the current
+conversation or repository without an existing exact PowerContext citation.
+Do not use `citations` in a WorkClaim, invent evidence for the new `source_id`,
+or call a fact `verified` merely because the user checked it. Preserve the
+returned carrier unchanged, including its Server-created evidence references.
+
 ## Read
 
 - Use `search_memory` with a focused query, `mode: "auto"`, and no more than
@@ -81,10 +93,19 @@ before any Handoff write. Never infer a Scope from a report view.
 
 ## Complete a one-turn durable Handoff
 
-Treat an imperative such as `交接`, `交接当前工作`, `把当前工作交接出去`,
-`handoff this work`, or `commit a handoff` as explicit authorization to create
-and commit one durable Handoff milestone in the current scope. A question about
-Handoff, a design discussion, or a preview request does not authorize a write.
+Use this flow only when the user explicitly requests a durable milestone, such
+as `commit a durable handoff` or `保存持久交接里程碑`. Ordinary `交接`,
+`交接当前工作`, and `handoff this work` requests authorize a temporary transfer,
+not a commit. Explicit temporary or no-commit constraints always remain in force.
+Do not ask the user to restate inspectable facts, and do not ask for a second confirmation
+of an already authorized durable milestone. A conceptual question, design discussion,
+or preview-only request makes no PowerContext write.
+
+For an ordinary transfer, inspect the facts, call `handoff_current_work`, inspect
+its result, and return the complete unchanged `handoff` member as the canonical
+temporary carrier. Report preparation only after success. The receiver can use
+`continue_handoff` with `selection: "prepared"` and that exact value. Do not call
+`commit_handoff` or claim a committed Revision for this path.
 
 When the one-turn flow applies:
 

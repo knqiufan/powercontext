@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { PowerContextClient } from '../src/client.ts'
 import { resolveConfig } from '../src/config.ts'
@@ -42,14 +40,5 @@ it('exposes independently available guidance whose tool references resolve in th
     expect(names.has(name), `unavailable tool referenced in DSH guidance: ${name}`).toBe(true)
   }
   registerSkill(ctx)
-  const output = process.env.POWERCONTEXT_GUIDANCE_EXPORT
-  if (output) writeFileSync(join(output, 'dsh.json'), JSON.stringify({
-    host: 'dsh', guidance: sections.map(section => section.text).join('\n'), skill: skills[0],
-    tools: tools.map(tool => ({ name: tool.name, description: tool.description, parameters: {
-      type: 'object', properties: Object.fromEntries(Object.entries(tool.parameters).map(([name, raw]) => {
-        const { required: _, ...schema } = raw as Record<string, unknown>
-        return [name, schema]
-      })), required: Object.entries(tool.parameters).filter(([, raw]) => (raw as any).required).map(([name]) => name),
-    } })),
-  }, null, 2))
+  expect(skills[0].name).toBe('project-context')
 })

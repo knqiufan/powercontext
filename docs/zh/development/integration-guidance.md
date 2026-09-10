@@ -50,6 +50,8 @@ Scope 由宿主和 Server 决定。复用解析后的绑定，不猜测身份或
 ```sh
 uv run pytest tests/test_mcp.py tests/integrations/test_hermes_provider.py
 pnpm --dir integrations/dsh/plugins/powercontext test
+pnpm --dir integrations/dsh/plugins/powercontext/tests/runtime install --frozen-lockfile
+pnpm --dir integrations/dsh/plugins/powercontext test:e2e:runtime
 pnpm --dir integrations/opencode/plugins/powercontext test
 pnpm --dir integrations/pi/plugins/powercontext test
 pnpm --dir integrations/openclaw/plugins/memory-powercontext test
@@ -73,3 +75,10 @@ uv run python scripts/evaluate_integration_guidance.py \
 脚本使用受控工具返回，不执行真实写入。除了自动工具选择判定，还须审查实际参数与最终回答。模型异常、空回答、
 截断和服务连接失败不能算通过。Skill 正文是否出现由验证条件控制，这不等于各宿主自动发现 Skill 或完整执行验收。
 具体测量范围及限制见[验证记录](integration-guidance-evaluation.md)。
+
+多轮交接验证使用 `--cases handoff handoff_request`。验证器检查完整受控返回链、精确载体，以及准备完成后的
+后续调用；只选对第一个工具不能算通过。该测量不执行持久化，也不证明原生宿主行为。普通交接指令走临时路径，
+只有明确要求持久里程碑才授权 commit。
+
+DSH 从真实 SDK 模型请求导出编译后的工具 Schema 和系统上下文。单独运行包注册测试不导出模型目录；
+导出 DSH 前须安装固定版本的 runtime 测试依赖并运行上述 runtime 命令。
