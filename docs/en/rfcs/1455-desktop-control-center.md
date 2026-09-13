@@ -11,7 +11,8 @@ description: "A Tauri desktop client with explicit API, identity, installation, 
 
 # Summary
 
-Build **PowerContext Desktop** with Tauri 2, a trusted bundled client UI, and the existing independent Python Server.
+Build **PowerContext Desktop** with Tauri 2, a trusted bundled React + TypeScript UI built with Vite, and the existing
+independent Python Server.
 The desktop manages connections, local installation and service health, Scopes, assets, Review, and supported Handoff
 workflows through public contracts. Rust owns constrained native capabilities and credential-bearing transport;
 the Server owns domain behavior, authorization, persistence, and durable processing.
@@ -114,9 +115,16 @@ Installer          -> verified runtime/Agent artifacts and installation journal
 Personal Dashboard -> its own server-rendered pages -> public API authorization
 ```
 
-Add `desktop/`, with `desktop/src-tauri/` for the native host and `desktop/ui/` for the client entry. Begin with HTML/CSS
-and ES modules using a desktop-only build. A framework change needs demonstrated UI requirements, not a compulsory
-Dashboard migration. Domain rules stay on the Server; installation and service logic stay with their existing owners.
+Add `desktop/`, with `desktop/src-tauri/` for the native host and `desktop/ui/` for a **React + TypeScript + Vite** client.
+React organizes pages, reusable components and interactive state for configuration forms, Review, installation progress
+and connection switching. TypeScript checks frontend and API/IPC types; public operation schemas remain derived from
+OpenAPI. Vite provides the development server and builds static HTML/CSS/JavaScript bundled into the Tauri application.
+The installed frontend needs no Node.js server, SSR or Next.js runtime; setup/recovery works before Python is installed.
+
+Keep the desktop build independent of the documentation website. React does not migrate Jinja/HTMX pages automatically
+or require a Dashboard rewrite. State and request handling must still enforce connection/identity isolation; adopting
+React does not replace native validation or Server authorization. Domain rules stay on the Server; installation and
+service logic stay with their existing owners. Qualify frontend dependencies and rendering costs under the P0 budgets.
 
 Initially share brand assets, design conventions, translations and suitable display components. Shared code must have
 one canonical source, deterministic build/copy and drift verification. The extraction PR identifies files and licenses.

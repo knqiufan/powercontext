@@ -11,7 +11,8 @@ description: "采用 Tauri 构建桌面客户端，明确 API、身份、安装�
 
 # 概要
 
-采用 **Tauri 2、打包的可信客户端 UI、现有独立 Python Server** 构建 **PowerContext Desktop**。
+采用 **Tauri 2、由 Vite 构建并打包的可信 React + TypeScript 客户端 UI、现有独立 Python Server**
+构建 **PowerContext Desktop**。
 桌面通过公开契约管理连接、本地安装与服务健康、Scope、资产、Review 和受支持的 Handoff 流程。
 Rust 负责受限原生能力和携带凭据的传输；Server 负责业务语义、授权、持久化和持久处理。
 
@@ -105,9 +106,15 @@ Scope 集成绑定与 Access 角色绑定是分别命名的概念。
 个人 Dashboard     -> 自身的服务端渲染页面 -> 公开 API 授权
 ```
 
-新增 `desktop/`，原生宿主位于 `desktop/src-tauri/`，客户端入口位于 `desktop/ui/`。起步采用 HTML/CSS 和 ES
-modules，使用桌面专属构建。引入前端框架需要实际 UI 需求支撑，不要求先迁移 Dashboard。业务规则保留在 Server，
-安装和服务逻辑保留在原负责层。
+新增 `desktop/`，原生宿主位于 `desktop/src-tauri/`，`desktop/ui/` 使用 **React + TypeScript + Vite**。
+React 组织页面、可复用组件，以及配置表单、审核、安装进度和连接切换的交互状态。TypeScript 检查前端和
+API/IPC 类型；公开操作 schema 仍从 OpenAPI 派生。Vite 提供开发服务器，并构建随 Tauri 应用打包的静态
+HTML/CSS/JavaScript。安装后的前端不需要 Node.js 服务、SSR 或 Next.js runtime；Python 未安装时，安装和
+恢复界面仍可使用。
+
+桌面构建独立于文档网站。采用 React 不会自动迁移 Jinja/HTMX 页面，也不要求重写 Dashboard。状态和请求处理
+仍须保证连接/身份隔离，React 不替代原生校验或 Server 授权。业务规则保留在 Server，安装和服务逻辑保留在
+原负责层。前端依赖和渲染成本纳入 P0 预算验收。
 
 初期共享品牌资源、设计规则、翻译和适合复用的展示组件。共享代码必须有唯一源、确定的构建/复制和漂移检查；提取
 PR 说明文件与许可证。服务端模板/静态资源仍位于 `src/powercontext/server/dashboard/`，随 Python wheel
