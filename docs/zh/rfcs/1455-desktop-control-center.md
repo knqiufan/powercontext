@@ -1,3 +1,8 @@
+---
+title: "RFC 1455：桌面控制中心"
+description: "采用 Tauri 构建桌面客户端，明确 API、身份、安装和投递边界。"
+---
+
 - 提案名称：`desktop_control_center`
 - 开始日期：2026-09-04
 - RFC PR：[oceanbase/powercontext#1455](https://github.com/oceanbase/powercontext/pull/1455)
@@ -6,664 +11,567 @@
 
 # 概要
 
-采用 **Tauri 2、共享 Web 管理界面、独立运行的现有 Python Server**，构建 PowerContext 桌面控制中心。
-用户可以在一个应用里安装和诊断 PowerContext，连接本地或远程 Server，组织 Scope，查看和管理 Memory 及经过
-Review 的资产，处理 Handoff 和 Review 待办。Rust 只负责范围明确的桌面系统能力；业务行为、持久化、授权和持久任务
-仍由 Server 负责。安装和原生服务管理继续使用各自已有的负责层。
+采用 **Tauri 2、打包的可信客户端 UI、现有独立 Python Server** 构建 **PowerContext Desktop**。
+桌面通过公开契约管理连接、本地安装与服务健康、Scope、资产、Review 和受支持的 Handoff 流程。
+Rust 负责受限原生能力和携带凭据的传输；Server 负责业务语义、授权、持久化和持久处理。
 
-建议首个完成正式验收的平台为 **Windows 11 x64，本地使用 SQLite 后端**。macOS 和 Linux 沿用同一架构，但需要分别
-完成安装、安全、升级和可用性验收。个人预览版可以提前交付；完成 #1428 还需要本文规定的授权和持久 Handoff 投递依赖。
-合并这份 RFC 不代表关闭该 Tracking Issue。
+复用个人 Dashboard 的品牌资源、展示规则、翻译和适合共享的展示组件。它的 Jinja/HTMX 页面不是可直接移植的
+桌面应用。桌面有独立的客户端管理入口，不以共享整套 Web 管理应用为前提。
 
-# 动机
+建议首个完成正式验收的平台为 **Windows 11 x64 + SQLite**。可以先交付“连接已有 Server”的预览，再完成受管
+安装；授权资源浏览可以先于持久 Handoff 投递。完成 #1428 需要一个平台上的完整安装包流程，接受 RFC 或发布
+预览本身不关闭该 issue。
 
-PowerContext 已有 Python SDK、HTTP API、Agent 集成、Server 托管的 Web UI 和原生用户级服务管理。用户要回答一些
-基本问题，仍然需要理解多套安装、配置、版本和诊断入口：Server 是否运行？Agent 是否使用了正确的 Scope？哪些内容
-需要 Review？Handoff 发到了哪里？升级会不会丢数据？
+# 动机与用户流程
 
-桌面端应让用户在一个应用中回答这些问题。它的价值在于原生安装与服务状态管理、安全保存凭据、系统通知和一致的管理
-界面，同时保留 PowerContext 在没有打开任何应用窗口时，仍能独立服务多个 Agent 的能力。
+用户应能在一个应用里确认 PowerContext 是否安装、Agent 是否使用正确 Scope、哪些内容需要审核、Handoff 发到
+哪里，以及升级失败后如何恢复。原生凭据、文件选择、服务检查、托盘和通知构成桌面的价值。关闭桌面后，独立
+Server 仍须继续服务 Agent。
 
-本提案面向三类用户：
+产品面向新个人用户、连接已有安装的用户，以及认证团队 Server 的用户。它不是聊天客户端、IDE、Agent Runtime、
+编排器或数据库副本，也不是 CLI/SDK/MCP 的前提。它不执行下载的 Skill，也不自动启动 Agent 任务。
 
-- 新个人用户：不准备 Python 环境、不编译源码，就能用上本地 Server 和自己选择的 Agent 集成。
-- 已有 CLI 或 Web 用户：方便地管理现有部署，不被自动迁移数据或替换配置。
-- 团队 Server 用户：通过认证和授权，访问共享工作以及精确版本的 Handoff。
+1. 选择“这台电脑”或“远程 Server”。仅连接远程不需要本地 Python。受管本地安装先展示安装器计划，包括不可变
+   发行版本、组件、所选宿主、位置和恢复方式，由用户确认。
+2. 通过受支持接口连接或安装。受管安装尚不可用时，明确说明“仅连接”的范围并提供安装指引，不放置无效安装按钮。
+3. 分别检查身份、授权模式、就绪和能力。不配置模型也可在同一精确 Scope 显式保存一条小型 Memory，并全文召回。
+4. 单独检查所选 Agent：“已安装”“观察到宿主加载”“实际 capture/recall 通过”是不同事实。未观察的检查保留为
+   未验证；依赖模型的功能说明前置条件。
+5. 浏览资产、审核受支持 Candidate。投递能力具备后，从收件箱打开精确 Handoff。接收 Source 不代表提取已完成。
+6. 找到脱敏诊断、本地数据位置、恢复，以及分别命名的桌面/服务移除操作。
 
-本提案不增加聊天客户端、IDE、Agent Runtime、自主任务编排器、新的 Memory 引擎或桌面数据库副本，也不让桌面端
-成为 SDK、CLI、Server 或集成的必需依赖。
+| 页面 | 首版行为 |
+| --- | --- |
+| 总览 | 当前连接/身份、就绪、本地服务事实、可用能力、覆盖范围内的待办和恢复 |
+| 项目与工作流 | Scope 目录与组织关系；观察选择与精确写入/绑定目标分开 |
+| Memory 与资产 | 支持的目录、搜索、精确详情、来源/历史；显式 Memory 保存、修订、退役 |
+| Review | Experience、Skill、Profile 的类型化详情与批准/拒绝/修订，保留版本检查 |
+| Handoff | 已提交精确详情、授权共享、只读报告，以及单独设门槛的投递收件箱 |
+| Sources 与集成 | 确认后的文本导入、Source 发现、Agent 声明能力与实际诊断 |
+| 设置与诊断 | 连接、原生凭据引用、语言、通知范围、版本、升级和脱敏导出 |
 
-# 面向使用者的说明
+通过受支持契约读取 Topic Memory 和 Profile。首版不包含 Prompt 编辑、Dream 管理、连接器市场、Handoff 编辑器
+或任意 Skill 执行。未知类型不能获得通用编辑/批准能力。已有进程可以只连接而不接管；本地控制必须核验归属。
 
-## 用户安装什么，运行在哪里
-
-用户安装一个名为 **PowerContext Desktop** 的原生应用，它有独立窗口、应用图标，以及平台支持时的托盘入口。源码
-放在 PowerContext 同一个仓库内。桌面发行物包含可信的本地 UI 和原生宿主；本地模式还通过统一安装器安装独立版本化
-的 Python 运行环境。仅连接远程 Server 时，不需要安装本地 Python 环境或本地 PowerContext Server。
-
-应用提供两种连接选择：
-
-| 选择 | 用户体验 | 由谁管理 |
-| --- | --- | --- |
-| 这台电脑 | 安装或连接当前系统用户的本地 Server，查看服务和集成状态 | 已有服务层和操作系统服务管理器管理 Server |
-| 远程 Server | 输入 HTTPS 地址和凭据，查看所连接的 Server 及自己有权访问的资源 | 远程运维方管理运行环境、数据和服务生命周期 |
-
-连接配置保存地址设置和受保护凭据的引用。窗口明确显示当前连接及其 Scope 选择。只有经过核验、由本机管理的安装才
-提供本地服务控制。远程连接的配置不会被转换成本机服务定义。
-
-## 第一次成功使用
-
-1. 应用解释本地和远程模式。本地安装时，先展示发行版本、组件、数据位置、所选 Agent 宿主，以及安装器计划修改的内容。
-2. 用户确认这个具体计划。安装器校验不可变发行物，安装运行环境和所选集成，注册用户级服务，并报告各组件结果。
-   失败时保留明确的恢复入口。
-3. 用户可以不填写模型，先用最小配置启动。显式保存 Memory 和可用的全文检索构成首次成功路径。生成、提取、向量检索
-   等依赖模型的功能，按实际能力显示要求。
-4. 用户选择或创建 Scope，显式保存一条小型 Memory，并在相同 Scope 中召回它。也可以导入 Source，但接收 Source
-   不等于已提取出 Memory。
-5. 单独检查所选 Agent 集成。界面区分“已安装”“宿主已成功加载”“实际 capture/recall 检查通过”，不把未检查的集成
-   标成健康。
-6. 用户可以找到待 Review 内容，以及支持时的 Handoff 收件箱。点击通知后，应用先刷新状态，再打开对应的精确授权项。
-
-对于已有安装，先发现和检查，再提出修改计划。可访问但归属未知的进程可以作为连接目标；桌面不能擅自终止它、替换其
-运行环境或接管其端口。
-
-## 主要界面
-
-| 界面 | 必需行为 | 边界 |
-| --- | --- | --- |
-| 总览 | 当前连接、Server 就绪状态、本地服务状态、支持的功能、待处理事项、恢复操作 | 就绪、安装、认证、授权是不同状态 |
-| 项目与工作流 | 展示 Scope 及组织关系，提供 `all` / `subtree` / `exact` 观察视图，管理支持的绑定 | 项目和工作流是 Scope 的展示名称，不增加第二套身份体系 |
-| Memory 与资产 | 列表、搜索、读取 Memory；通过已有 API 显式记忆、修订、退役；查看 Experience、Skill、来源与生命周期 | 保留精确引用，以及既有 Review 和发布规则 |
-| Review | 筛选和查看 Candidate，批准、拒绝、修订，并显示冲突 | 针对当前展示的 Candidate 版本，由 Server 授权执行 |
-| Handoff | 精确授权的 Handoff 详情、只读报告，以及能力就绪后的投递收件箱 | 授权发现、投递、查看、确认接收和任务结果保持区分 |
-| Sources 与连接器 | 导入所选内容，查看支持的 Source 状态，以及可用的连接器健康和恢复信息 | 后台摄取由 Server/连接器 worker 承担；缺少管理 API 时明确显示不可用 |
-| Agent 与集成 | 选择维护中的发行物，查看声明能力、安装版本、诊断结果，以及授权允许的绑定修改 | 复用分发和安装契约，不重写宿主适配器 |
-| 设置与诊断 | 连接、凭据、语言、通知、数据位置、版本、升级和脱敏诊断 | 远程管理操作需要独立声明并授权的 API |
-
-首版不承诺完整的连接器市场、Handoff 编辑器、任意 Skill 执行能力，或覆盖 SDK 的每一个操作。但已支持的页面必须
-完成所声明的用户流程，不能把不可用功能伪装成能工作的占位按钮。
-
-## 关闭窗口和离线使用
-
-有托盘时，关闭最后一个窗口默认隐藏应用；明确选择“退出”才结束桌面进程。没有托盘时，窗口应说明关闭行为，并提供
-清晰的退出入口。两种操作都不注销或终止独立管理的 Server。桌面开机启动和 Server 随用户登录启动是两个独立设置。
-
-首版系统通知要求桌面进程仍在运行。桌面关闭期间，Server 保留持久任务和 Handoff 收件箱；重新打开应用时刷新权威
-状态。远程连接离线时明确显示断连，不排队保存业务写操作。本地 Server 仍可提供不依赖失联模型或远程服务的能力。
+有托盘时，关闭最后一个窗口隐藏应用；“退出”结束应用。没有托盘时，关闭最后一个窗口退出，并明确说明该行为。
+两者都不停止独立 Server。桌面登录启动与 Server 登录启动分别设置。通知需要桌面运行；Server 持久工作和已实现
+的收件箱在退出后仍保留。远程离线时不排队写入。
 
 # 技术设计
 
-## 1. 当前基线与相关工作
+## 1. 当前基线与负责方依赖
 
-本提案核验的实现基线为 2026-09-04 的上游 `master`：
-[`f0f288abecaccb97e1fe97d991b87b808bbebfbd`](https://github.com/oceanbase/powercontext/commit/f0f288abecaccb97e1fe97d991b87b808bbebfbd)。
-下表描述该基线已有的实现，不表示桌面产品已经发布：
+源码基线为 2026-09-13 核验的上游 `master`：
+[`62e4c821709c18b832c77363fdd428765bee6a96`](https://github.com/oceanbase/powercontext/commit/62e4c821709c18b832c77363fdd428765bee6a96)。
+PowerContext 1.0.0 已发布，但源码基线中的能力不自动等于每个发行版本都具备。每次桌面发行都要固定并验收所支持
+的 Server 与 Agent 发行物。
 
-| 已有部分 | 可以复用的能力 | 与本提案相关的缺口 |
+| 已有部分 | 可复用实现 | 剩余边界 |
 | --- | --- | --- |
-| 公开 HTTP 契约 | Scope 与绑定、Memory、Source 摄取、Candidate、Skill、精确 Handoff 操作、统计和报告 | 没有桌面兼容性握手或持久 Handoff 投递收件箱契约 |
-| Web UI | 总览、Skill、Review、Handoff Report 的 Jinja 模板和 JavaScript 模块 | 部分辅助路由位于 `/dashboard`；桌面业务访问必须使用公开 API |
-| 原生服务层 | `service install`、`service status --json`、`service uninstall`；独立的用户级服务注册 | 尚无公开的 `service start/stop/restart --json` 接口 |
-| 配置 | 不配置推理也可校验最小 Server 配置；模型能力可选 | 尚无桌面引导和受保护的配置编辑流程 |
-| 认证 | 可选的部署级静态 Bearer 认证 | 此基线尚未实现资源级 Principal/角色授权 |
-| 集成清单和诊断 | 随版本维护的能力声明与结构化集成检查 | 二者都不是实时 Handoff 接收端注册表 |
-| 已发布软件包 | 已发布的 `0.1.0` 与开发中的 `master` 明确区分 | `0.1.0` 不包含原生 `service` 命令 |
+| 公开 API | Scope/Source 发现、通用 Artifact/revision 读取、Memory、Review、精确 Handoff 和 Access API | 尚无兼容握手或持久投递收件箱；Memory entry/history 缺分页 |
+| 个人 Dashboard | 默认关闭的静态 token 查看器；Jinja2/HTMX/Tabler/Surreal 和 Python ASGI API 传输 | 不是共享管理 SPA；注入团队 Provider 的部署保持关闭 |
+| 授权 | RFC 1396 与 [#1398](https://github.com/oceanbase/powercontext/pull/1398) 已实现；身份、检查、资源、绑定和审计 | 静态 Bearer 是一个共享服务身份；桌面认证传输需要验收 |
+| 个人服务 | 安装、状态 JSON、卸载、Windows 登录启动选择 | 安装/卸载缺结构化结果选项；无公开 start/stop/restart |
+| 配置与 Agent | 引导配置、受保护环境、按 URL 绑定的宿主凭据、结构化诊断 | 交互向导不是桌面机器接口 |
+| 资产与处理 | Profile、Topic Memory、Prompt、标签、Dream 和处理监督器 | 各 family 写入规则与维护迁移仍是权威 |
+| 分发 | 版本化 Python 发行和维护中的集成清单 | 统一安装器仍是依赖工作；当前 Windows 支持为 experimental |
 
-最新安装文档已经区分发布版本与未发布代码的安装路径。桌面必须选择在 manifest 中明确支持所需 runtime/service 契约
-的发行版本，或清楚标注锁定版本的预发布包。不能静默安装持续变化的 `master`，不能拼接不相关的集成和 runtime 版本，
-也不能声称 `0.1.0` 已具备 service 能力。
+以下是向原负责方提出的要求，**不是已经实现的接口**。每项负责方要在消费者交付前确定 schema、负责人和一致性
+测试；缺失的依赖只阻塞表中对应能力。
 
-| 依赖 | 基线时的状态 | 需要协调的内容 |
-| --- | --- | --- |
-| [RFC 1299](1299_local_server_availability_and_service_installation.md) | 服务架构及实现已进入 `master` | 保留唯一服务管理层和结构化状态语义 |
-| [RFC 1345](1345_scope_organization_and_agent_integration.md) | Scope 模型及集成契约已具备 | 复用 Scope 身份、组织、绑定和显式发布 |
-| [RFC 1396](1396_handoff_access_control.md)、实现 [#1398](https://github.com/oceanbase/powercontext/pull/1398) | RFC 已合并，实现 PR 仍开放 | 团队和资源共享验收依赖 Server 强制授权与授权后发现 |
-| [#1419](https://github.com/oceanbase/powercontext/issues/1419) | Handoff 投递 Tracking Issue 仍开放 | 负责接收端登记、envelope、持久收件箱、投递状态、重试、过期和恢复 |
-| [#1406](https://github.com/oceanbase/powercontext/issues/1406)、RFC [#1408](https://github.com/oceanbase/powercontext/pull/1408) | 安装 Tracking Issue 与 RFC PR 仍开放 | 负责 bootstrap、安装计划、组件安装、版本记录和恢复 |
-| [#1405](https://github.com/oceanbase/powercontext/issues/1405)、RFC [#1410](https://github.com/oceanbase/powercontext/pull/1410) | 分发 Tracking Issue 与 RFC PR 仍开放 | 负责标准 Agent 发行物、target profile 和宿主配置规则 |
-| [RFC 1400](1400_source_definition_and_observation_model.md) | Source 身份和观察模型设计已在仓库中 | 保持 Source 语义；连接器管理需要独立的受支持接口 |
+| ID | 负责方与相关工作 | 所需契约 | 门槛 |
+| --- | --- | --- | --- |
+| D1 | Server/API | `server-info`、部署身份生命周期、明确兼容配置 | P1/P2 中依赖兼容性的控制 |
+| D2 | Server/Memory | 授权且有界的 entry 列表；历史 UI 交付前的有界 change/history 查询 | P2 完整 Memory 浏览 |
+| D3 | 服务/配置，[RFC 1299](1299_local_server_availability_and_service_installation.md) | 非交互结构化修改、受保护输入、归属和恢复 | P3 受管服务/配置修改 |
+| D4 | 安装器 [#1406](https://github.com/oceanbase/powercontext/issues/1406)、RFC [#1408](https://github.com/oceanbase/powercontext/pull/1408) | 核验 bootstrap、计划、锁、持久操作/状态与恢复 | P3 受管安装/升级 |
+| D5 | 分发 [#1405](https://github.com/oceanbase/powercontext/issues/1405)、RFC [#1410](https://github.com/oceanbase/powercontext/pull/1410) | 不可变宿主发行物、兼容性和宿主负责的安装适配器 | P3 所选宿主安装 |
+| D6 | 投递 [#1419](https://github.com/oceanbase/powercontext/issues/1419) | 接收方关联、envelope、持久收件箱、精确引用、去重和恢复 | P4 投递消费 |
+| D7 | 桌面/发行维护者 | 具名负责人、Windows/宿主验收、支持版本和实测预算 | P0 退出与 P5 发行 |
+| D8 | Server/连接器负责方 | 若提供管理功能，需公开的连接器发现、健康与管理操作 | 仅对应的连接器控制 |
 
-开放提案提供协调约束，不代表协议已经实现。最终由负责方确定的契约，优先于本文用于说明的名称。个人预览版可以先用
-已有的单部署能力；依赖通过验收之前，不能宣称已支持资源隔离的团队共享或可靠投递。
+本基线下 D4/D5 RFC 和 D6 Tracking Issue 仍开放。已有授权无需等待 D6，应在各消费阶段验收。
+Scope 集成绑定与 Access 角色绑定是分别命名的概念。
 
-## 2. 组件职责与仓库位置
+## 2. 组件与 UI 共享
 
 ```text
-可信 Web UI（共享展示和页面行为）
-    浏览器适配器 ---------------------> 公开 Python Server HTTP API
-    桌面适配器 -> 受限 Rust 桥接层 ------> 公开 Python Server HTTP API
-                      |
-                      +-> 系统凭据库、托盘、通知、文件选择器
-                      +-> 统一安装器和已有服务接口
-
-操作系统服务管理器 -> 独立 Python Server -> 业务持久化和持久 worker
-统一安装器         -> 已验证的 runtime/集成发行物与安装记录
+打包的桌面 UI -> 类型化 Rust IPC -> 公开 Server HTTP API
+                       |
+                       +-> 系统凭据、托盘、通知、文件句柄
+                       +-> 安装器/服务/配置机器接口
+操作系统服务管理器 -> 独立 Python Server -> 持久化与持久处理
+安装器             -> 已核验 runtime/Agent 发行物和安装日志
+个人 Dashboard     -> 自身的服务端渲染页面 -> 公开 API 授权
 ```
 
-| 组件 | 负责 | 不应负责 |
-| --- | --- | --- |
-| 共享 Web UI | 导航、本地化展示、表单、受支持的用户操作 | 授权裁决、业务持久化、后台摄取 |
-| Rust 桌面宿主 | 受限系统集成、受保护凭据访问、认证传输、有限本地偏好 | Memory/Handoff 语义、数据库访问、第二套安装器或服务监管器 |
-| Python Server | 公开 API、Runtime 能力、业务校验、授权、持久化、持久处理 | 依赖桌面窗口保持打开 |
-| 安装与分发层 | 发行物身份、bootstrap、安装计划、宿主配置、归属记录、升级恢复 | 桌面专属业务规则 |
-| 已有服务层与系统管理器 | 用户级注册、服务身份、状态和生命周期 | 另一套争用相同端点的桌面守护进程 |
+新增 `desktop/`，原生宿主位于 `desktop/src-tauri/`，客户端入口位于 `desktop/ui/`。起步采用 HTML/CSS 和 ES
+modules，使用桌面专属构建。引入前端框架需要实际 UI 需求支撑，不要求先迁移 Dashboard。业务规则保留在 Server，
+安装和服务逻辑保留在原负责层。
 
-在现有仓库中增加 `desktop/`，其中 `desktop/src-tauri/` 放 Tauri 宿主，另放桌面入口资源、打包配置和桌面验收工具。
-首次实现从已有 Web UI 中提取可复用的展示与传输边界。Server 托管的模板和静态资源继续位于
-`src/powercontext/server/`，继续随 Python wheel 分发。
+初期共享品牌资源、设计规则、翻译和适合复用的展示组件。共享代码必须有唯一源、确定的构建/复制和漂移检查；提取
+PR 说明文件与许可证。服务端模板/静态资源仍位于 `src/powercontext/server/dashboard/`，随 Python wheel
+分发。用户安装 Python 包或运行 Dashboard 不需要 Node、Rust 或本地桌面构建。
 
-桌面是独立构建的应用，可以引入自己的前端构建过程，但不能让 Python 包安装或现有 Server UI 运行依赖 Node、Rust
-或桌面依赖。无需先迁移 React/Vue：在出现明确需求之前，现有 HTML、CSS 和 JavaScript 模块可以继续使用。生成的
-桌面入口标记应来自同一份共享源，并在发布前构建；安装后的桌面无需执行 Jinja 或连接 Server，就能显示安装和恢复页面。
+不复制运行期 Jinja、Python `DashboardAPI`、HTMX `/dashboard/*` 导航、cookie 登录或内联脚本到桌面。
+改由客户端渲染和类型化 API 操作完成。安装/恢复页在没有 Python 和 Server 时可用。未来若共享完整 Web 管理
+客户端，需要与 [#1341](https://github.com/oceanbase/powercontext/issues/1341) 协调；本 RFC 不扩大个人
+Dashboard 的阅读定位，也不在团队 Provider 部署中启用它。
 
-Tauri capability、插件、依赖和锁文件需要审查并锁定。桌面专属 CI 与日常 Python 开发分开；修改共享 UI/API 时，仍须
-通过原有测试要求。
+## 3. 公开操作矩阵与有界浏览
 
-## 3. 公开 API 复用与兼容性
+桌面不导入 Runtime 对象、不打开数据库、不抓取 HTML、不消费 Dashboard 私有路由。
+从 `openapi/powercontext.yaml` 生成或校验 operation ID、schema、路径编码与响应类型，避免分别手工维护
+Rust/JavaScript 路由目录。契约变更交付前运行 `make api-generate` 和 `make contract-test`。
+下表权限列指出相关检查，不替代完整 Server 策略；组合证据、目标、发布和当前状态检查仍须执行。
 
-桌面是公开 API 的客户端，不能导入 Python Runtime 对象、打开业务数据库、抓取渲染后的 HTML，或依赖私有的
-`/dashboard/*` 辅助端点。共享页面通过传输适配器调用接口：浏览器使用 Web 部署的认证流程，桌面使用原生桥接层。
-页面代码不自行保存凭据或拼装路由。
+| UI 行为 | 已有 operation ID | 授权/一致性 | 阶段或缺口 |
+| --- | --- | --- | --- |
+| 连接 | `get_liveness`、`get_readiness`、`get_capabilities`、`get_access_principal` | 健康不等于身份；受保护调用遵守当前策略 | P1；D1 握手 |
+| Scope 目录 | `list_scopes`、`get_scope`、`get_default_scope`、`resolve_scope_selection` | 授权发现、不透明 cursor 和实际选择语义 | P2 |
+| Scope/绑定修改 | `create_scope`、`update_scope`、`set_scope_binding`、`clear_scope_binding`、`resolve_scope_binding` | 创建/admin 检查、已定义的预期版本、精确目标 | P2；不承诺全局绑定列表 |
+| Memory | `remember_memory`、`search_memory`、`list_memory_entries`、`get_memory_entry`、`revise_memory_entry`、`retire_memory_entry`、`list_memory_changes` | 相应 Scope/资源检查、精确 citation | P1 保存/搜索；D2 完整浏览/历史 |
+| Source | `list_sources`、`get_source`、`capture_content_source` | 授权 Scope/Source 访问、分页、不可变 capture 身份 | P2 |
+| Artifact 浏览 | `list_artifacts`、`get_artifact`、`get_artifact_revision`、`list_artifact_revisions` | Family 策略、精确 revision、ETag、不透明分页 | P2 |
+| Topic Memory 详情/搜索 | `get_topic_memory`、`search_topic_memory` | 专用选择/搜索限制和当前 family 策略 | P2 只读；不手工写入/flush |
+| 标签 | `get_artifact_tags`、`replace_artifact_tags`、`get_memory_entry_tags`、`replace_memory_entry_tags`、`query_artifact_tags` | 受支持可打标签 family、精确逻辑目标、必需的标签状态 `If-Match` | P2；标签不改变内容 revision |
+| Review | `list_artifact_candidates`、`get_artifact_candidate`、`approve_artifact_candidate`、`reject_artifact_candidate`、`revise_artifact_candidate` | 读取/审核和 proposal/证据检查；`expected_version` | P2；列表要求精确 Scope |
+| Skill 生命周期/包 | `list_managed_skills`、`update_skill_lifecycle`、`get_skill_package_manifest`、`download_skill_package` | 资源检查、`expected_generation`、精确已审包 | P2；不执行下载代码 |
+| 发布 | `publish_artifact`、`publish_remote_skill` | 共享/目标管理与发布策略；精确引用/generation | P2，仅已验收目标 |
+| 共享 | `get_access_principal`、`check_access`、`list_access_resources` | 当前 Principal、安全过滤、精确共享单位 | P2；不含角色管理 UI |
+| Handoff | `get_handoff_report`、`continue_handoff`、`acknowledge_handoff`、`record_task_outcome` | 区分报告与精确证据/receipt 权限；接收方观察 | P2 读取；P4 受支持接收动作 |
+| 统计 | `get_stats` | 授权投影和支持的选择；缺失不是零 | P2 |
+| 本地管理 | 负责层机器接口；`service status --json`、`doctor integrations --json` | 核验本地归属、受保护配置 | P1 读取；P3 修改 |
 
-已有 API 覆盖了初期管理的大部分操作：
+当前 Memory entry 列表返回完整集合，没有 cursor/limit；changes 也缺分页。客户端分页或限制响应大小不能解决
+这个问题。D2 明确服务端限制/过滤、稳定排序、cursor 过期/快照、并发 revision 和授权。Artifact 分页不能为
+Memory Artifact 内部的 entry 分页。D2 前提供有界搜索和精确详情；若提供小数据目录，必须说明上限并报告限制，
+不能截断或伪造总数。历史页等待有界接口。
 
-| 领域 | 已有公开接口 | 桌面实现要求 |
-| --- | --- | --- |
-| 健康和能力 | `/health/live`、`/health/ready`、`/v1/capabilities` | 区分进程存活、runtime 就绪、功能可用 |
-| Scope | `/v1/scopes/*`、`/v1/scope-bindings/*`、Artifact 发布 API | 复用精确身份，以及支持的选择和绑定操作 |
-| Memory | `/v1/memory/*` | 遵守大小限制、citation、修订冲突和已声明的搜索模式 |
-| Review | `/v1/artifact-candidates/*` | 传递预期 Candidate 版本，显示冲突而非覆盖 |
-| Skill 与 Experience | `/v1/skill/*`、`/v1/experience/*` | 保留受管生命周期、精确包引用和 Review 要求 |
-| Handoff 与工作 | `/v1/handoff/*`、`/v1/work/*`、`/v1/handoff-reports/get` | 复用精确继续、确认接收、结果和只读报告 |
-| Source | `/v1/sources/content`、Source 定义、观察、连接器 checkpoint | 使用受支持的摄取契约；checkpoint API 不是连接器管理面 |
-| 统计 | `/v1/stats` | 使用 Server 授权的投影，不在客户端聚合未限制的记录 |
+不通过 Candidate 历史反推资产，不把所有通用列表解释为时间排序。Scope 绑定页解析已知宿主绑定，不虚构全局
+注册表。搜索结果上限和支持模式应明确呈现。
 
-缺失的公开投影必须先加入 `openapi/powercontext.yaml`，再运行 `make api-generate` 和 `make contract-test`，之后
-才可交付对应桌面功能。其他客户端也能使用相同路由和授权规则。本 RFC 本身不增加已实现的端点。
+## 4. 握手与兼容性
 
-本提案建议新增受认证保护的 **`GET /v1/server-info`** 握手，初始契约包含 `schema_version`、`product`、持久化的
-不透明 `server_id`、`package_version`、`api_contract_version` 和版本化的 `feature_contracts`。这些字段描述部署
-身份和协议兼容性；运行时 provider 是否可用仍通过 `/v1/capabilities` 获取。该接口不能暴露文件路径、凭据、用户清单
-或未经授权的资源元数据。它遵守 Server 的认证策略，只提供认证客户端建立连接所需的最小元数据。
+D1 提议增加受认证保护的 `GET /v1/server-info`，包含 `schema_version`、`product`、持久不透明 `server_id`、
+`package_version`、`api_contract_version`、`feature_contracts`。协议版本使用明确的 major/minor：major
+改变必需语义，minor 增加兼容的可选字段/能力。桌面只接受支持的 major 和所需最低 minor，忽略未知可选字段，
+只开启已测试的操作组。能力名称与精确 OpenAPI 类型由 D1 确定；本 RFC 本身不增加端点。
 
-精确的 OpenAPI schema 和兼容性标识由 Server 负责，属于前置工作。每个桌面版本声明自己理解的契约版本和可选能力，
-不能仅比较软件包版本字符串来判断兼容性。未知的可选能力可以忽略；必需契约不兼容时，阻止相关操作并解释升级要求。
-没有握手的旧 Server 应标记为“旧版/兼容性未知”，只提供明确测试过的支持，不能根据猜测版本开启功能。
+`server-info` 说明部署/协议身份；`access/me` 提供 Principal、模式、Provider/family 访问能力；
+`capabilities` 提供运行期功能。每项操作同时要求桌面支持、契约兼容、运行能力可用和当前授权。解释失败条件，
+不连带禁用独立功能。
 
-`server_id` 是关联标识，不是归属或认证证明。凭据、经过验证的 TLS，以及核验过的本地安装/服务记录共同构成连接
-信任依据。Server 身份意外变化时，使待执行操作和缓存选择失效，要求用户明确重新连接。握手不能触发自动 runtime
-升级、凭据转移或远程部署迁移。
-
-## 4. 连接配置、传输与原生桥接
-
-连接配置持久化本地不透明 profile ID、显示名称、规范化地址及受支持的 base path、连接模式、凭据引用、TLS 信任配置
-和已观察到的兼容信息，不保存业务记录。远程配置不能选择本地可执行文件或服务环境。
-
-首版每个窗口只有一个活动连接，每个系统用户、每个发行通道只运行一个桌面实例。再次启动通过限定当前系统用户的原生
-IPC 激活已有实例，不额外开放 HTTP 管理监听端口。切换配置时递增连接 generation，取消未完成的读取，清理私有视图，
-丢弃旧 generation 的迟到响应。已提交的写入始终关联原端点、Principal、Scope 和精确项，不能因切换连接而改投另一处。
-
-传输层必须遵守现有客户端的 loopback 规则，包括 `tests/fixtures/transport_loopback_vectors.json` 中的公共用例：
-
-- 非 loopback 地址必须使用 HTTPS，并正常校验主机名与证书。允许现有客户端规则认可的 loopback HTTP；仅能访问
-  loopback 并不能证明 Server 可信。
-- 拒绝地址中的用户信息、查询参数和 fragment，凭据不得放进 URL。保留受支持的 API base path，同时避免操作路径
-  逃逸该前缀。
-- 首版拒绝认证 API 请求重定向，不向其他主机、协议或端口转发凭据。如支持自定义 CA，只能显式绑定某个连接配置，
-  不提供持久化的“关闭证书校验”开关。
-- 限制连接/读取超时、报文大小和分页，支持取消。分别呈现传输失败、证书失败、认证失败、无权访问、冲突、协议不兼容
-  和服务不可用。
-- 远程配置从提供凭据开始。公开健康检查成功不足以证明管理访问已通过认证；多用户使用还必须满足第 7 节资源授权契约。
-
-Rust 在请求中注入所选凭据。WebView 只得到数据和安全错误，不提供读取凭据的 API。桥接命令限定为允许的公开操作 ID
-及类型化参数、连接选择、只写凭据替换、有边界的文件选择/导入、诊断，以及支持的安装和服务操作。
-
-不提供任意 `fetch(url)`、shell 执行、原始文件系统、终止进程或数据库桥接。渲染层不能自行决定可执行文件、命令行、
-发行源、目标路径或凭据请求头。原生侧独立校验所选连接、操作、参数、限制和当前操作上下文，不能只依赖 UI 按钮约束。
-文件操作使用系统选择的句柄或受限目标位置，不接受渲染层传入的任意路径。
-
-只有随应用打包的本地 UI 文档拥有 Tauri capability。远程 Server 响应视为不可信数据，不在有原生权限的窗口中加载
-远程 HTML。使用严格 CSP，禁止远程脚本和不受限内联执行。以不可执行的方式安全渲染文本和支持的 Markdown；导入内容
-不能启动命令、加载远程图片、导航特权窗口，或通过嵌入标记调用 IPC。只有用户明确操作才在系统浏览器打开外部 HTTP(S)
-链接；其他 URL scheme 需要单独审查并加入允许列表。
-
-## 5. 本地服务生命周期与安装控制
-
-本地 Server 保持 RFC 1299 的用户级身份：Linux 使用 systemd user service，macOS 使用 LaunchAgent，Windows
-使用 Task Scheduler。桌面安装不请求 root、SYSTEM 或第二套机器级服务。服务配置仍只面向本地 loopback，来源于
-经过验证的本机安装环境。
-
-已有结构化状态字段保持独立：
-
-| 字段 | 对桌面的含义 |
+| 结果 | 行为 |
 | --- | --- |
-| `support` | 当前平台/环境是否支持原生服务注册 |
-| `registration` | 注册是否存在、是否合法 |
-| `definition` | 可执行文件和环境身份是否仍然有效 |
-| `manager_ownership` | 系统管理器加载的条目是否属于 PowerContext |
-| `manager` | active/inactive/failed/unknown 管理器状态 |
-| `server_liveness` | 端点 live/unreachable/unknown |
-| `endpoint`、`log_location`、`recovery_action` | 本地检查和恢复信息，按需脱敏展示 |
+| 握手受支持 | 校验 product/schema 与操作组兼容性 |
+| 握手 404 | 仅使用用户明确选择、随桌面发布且测试过的旧版兼容配置，否则只提供诊断 |
+| 401 | 停止受保护重试，请求有效凭据；不能推断过期 |
+| 403 | 解释拒绝；不降级匿名访问或换端点 |
+| 503 / 认证服务不可用 | 显示故障、有界重试；保留凭据/身份选择 |
+| 未知必需 major/product/feature | 阻止相关操作，解释兼容版本要求 |
+| 可选能力缺失 | 独立受支持功能仍可用 |
+| Server 身份变化 | 使待执行上下文/选择失效，要求明确重新连接 |
 
-`service status --json` 即使返回非零退出码，也可能包含合法的“不健康”结构化结果。应先解析约定结果，再判断是否
-执行失败。端点存活但归属 foreign 或 unknown，不代表受管安装健康。不能终止占用端口的进程、删除其他注册，或替换
-归属不明的可执行文件。
+旧版兼容配置记录测试过的 tag/commit、schema 发行物和操作。1.0.0 是初始验收候选，不代表兼容当前主线所有
+能力。用户选择版本和成功探测都不能证明远程二进制身份。不猜测支持、不执行未测试修改、不自动升级；旧版连接
+重连时不复用持久通知游标。
 
-通过已有服务层使用 `service install` 的校准能力和 `service uninstall` 语义。如果产品需要显式启动、停止或重启，
-必须先在该服务层补充操作和机器可读结果，当前 CLI 尚未提供。能力就绪前隐藏这些控制，并提供受支持的恢复入口，
-不能用“卸载服务”实现“停止”。
+提议的 `server_id` 识别逻辑部署：重启、受支持升级和恢复同一部署时保留；克隆为另一部署时，在服务客户端前
+生成新 ID。同一部署的副本共享该身份。D1 定义持久化、备份/恢复和克隆初始化。它不是 Access 中可配置的
+`deployment_id`，也不是信任证明。TLS、凭据和核验后的本地归属仍是信任依据。握手不暴露路径、秘密和未授权清单。
 
-桌面消费 #1406 及其安装 RFC 所负责的安装计划、核验后的组件结果和恢复语义。桌面管理安装的前提是提供版本化、
-非交互的机器接口。桌面不能另写安装引擎，也不能只凭退出码推断成功。特别是 #1408 提出的阶段和结构化输出，尚未
-定义公开的 `plan/apply/status` 命令或 JSON schema。
+## 5. 传输、连接隔离与 IPC
 
-该接口需要提供可审查的计划、不可变组件身份、受影响位置、归属和兼容性检查、可观察进度、取消边界、持久操作身份、
-组件结果，以及客户端中断后的恢复能力。resolve/preflight 不修改安装；应用过期计划之前重新核验。并发操作锁和
-持久 journal 由安装器维护，不同入口不能竞争修改同一个安装。
+连接配置持久化不透明 ID、名称、规范化端点/base path、模式、凭据引用、TLS 设置和已观察的兼容信息。
+一个窗口只有一个活动连接；每个系统用户/通道一个实例，通过当前用户原生 IPC 激活，不增加 HTTP 管理监听。
 
-Runtime 和各宿主组件可以分别成功。`uncertain` 必须先核验再重试；`installed` 不证明宿主已经加载成功。桌面如实
-展示负责方定义的 `unsupported`、`skipped`、`installed`、`current`、`stale`、`failed`、`uncertain` 状态，
-不虚构跨多个独立宿主的全局原子回滚。
+更改连接、端点、TLS 信任、凭据或观察到的 Principal 时，推进原生侧拥有的 generation。取消读取、清除私有
+视图/游标，并在必要的丢弃确认后清除易失草稿；拒绝迟到结果。已提交写入仍绑定原端点、身份、Scope、引用和
+generation。选择变化不改变目标。修改端点解除旧凭据引用，并要求为新目标明确配置凭据。
 
-只有安装负责方支持持久执行和恢复时，关闭窗口才能让安装在后台继续。否则应用保留操作界面，只在安全边界提供取消。
-强制退出后必须能根据安装记录恢复，不能承诺普通 Tauri 子进程会在“退出”后继续运行。稳态 Python Server 始终由
-已有系统服务注册独立管理。
+首版远程仅支持 HTTPS。Loopback HTTP 遵守 `tests/fixtures/transport_loopback_vectors.json`。
+当前 CLI/SDK 的非 loopback 明文 HTTP 同意机制不在桌面首版范围内；导入此类配置时说明限制。拒绝 URL 中的
+userinfo/query/fragment、路径前缀逃逸和认证请求重定向。验证 TLS 主机名/证书；自定义 CA 必须显式绑定连接，
+不能关闭验证。保留受支持 API base path，通过生成规则编码每个路径段。
 
-## 6. 凭据与本地配置
+首版 API 直连，不继承 shell 代理变量或系统代理凭据。需要代理的部署等待显式、绑定连接的适配器验收；连接设置
+说明此限制。
 
-使用明确的系统凭据库适配器：首个 Windows 目标使用 Windows Credential Manager；macOS 和 Linux 验收时分别
-接入 Keychain、Secret Service。桌面偏好只保存不透明引用。凭据库不可用或锁定时，要求解锁、仅本次会话使用，或
-走另行支持的加密 vault 流程，不能静默回退明文存储。Tauri Stronghold 可以用于 vault，但它本身不是系统凭据库，
-首个平台不以引入 Stronghold 为前提。
+| 桥接能力 | 允许数据 | 原生侧检查 |
+| --- | --- | --- |
+| 连接/凭据 | 连接选择、只写替换、安全事实 | 可信主窗口/设置窗口、原生 generation、无秘密读回 |
+| API 读取 | 允许的 operation、类型化参数/结果 | 兼容契约、精确连接、取消和响应限制 |
+| API 修改 | 允许的 operation、类型化载荷、预期版本和显式动作上下文 | 原连接/Scope/引用；不接受任意 URL/header 权限 |
+| 导入/包导出 | 系统选择的文件或一次性保存句柄、有界进度 | 不接受渲染层路径；字节/摘要验证；不执行 |
+| 本地管理 | 负责方确认的计划或支持的命令参数 | 核验归属、机器协议、确认绑定该精确计划 |
+| 通知/诊断 | 批准的元数据、不透明导航句柄、脱敏模型 | 无原始错误、秘密、shell、数据库或无限制文件系统 |
 
-用户在可信配置表单输入或粘贴凭据时，凭据可以短暂存在于输入框和只写 IPC 参数中。提交后清空，不提供读回操作，
-不保存到 WebView local/session storage、URL、命令行参数、日志、诊断、崩溃报告或通知。原生传输层在输出可观察
-错误前，清除 Authorization 头和敏感请求/响应字段。用户复制的 token 也可能留在系统剪贴板中；应用不声称能够抵御
-以相同用户身份运行的任意软件。
+同时限制应用自定义命令和插件权限。Tauri 对 `invoke_handler` 命令的默认行为不是全部拒绝，重叠 capability
+会合并权限。显式列出窗口/命令，并测试未授权窗口调用。不暴露通用 fetch、shell、进程终止、SQL 或原始文件接口。
 
-Server 的认证/provider secret 与桌面客户端凭据具有不同生命周期。独立 Server 必须能在桌面未运行、桌面 vault
-未解锁时取得自己的配置。本地安装委托安装/服务配置负责方生成并校验配置、设置严格文件权限、处理环境身份，不能
-把凭据放入服务命令行。涉及已注册环境的配置变更，必须通过服务层校准流程生效。
+只有可信打包文档获得 capability。不允许特权远程导航/脚本。严格 CSP 和安全文本/Markdown 渲染拒绝可执行 HTML
+和远程图片。外部 HTTP(S) 链接仅在用户操作后由系统浏览器打开；其他 scheme 要单独验收允许列表。不能为了复制
+Dashboard 内联脚本而放宽 CSP。Server 文本、导入和更新说明均是不可信数据。
 
-发现过程只读取已知安装/服务记录及用户明确选择的配置文件，不扫描无关用户目录、不导入全部环境变量、不把 Server
-或 provider 凭据复制到 UI 偏好。应用敏感配置修改前，展示作用范围及所需重启/校准操作。删除桌面连接时移除其凭据
-引用，并提供删除该凭据的选项；不能删除独立 Server 或 Agent 宿主仍在使用的凭据和环境文件。
+初始传输预算为连接 10 秒、普通读取 30 秒、单个解码 JSON 响应 8 MiB，Server 更低限制优先。逐操作例外在实现前
+定义。受支持二进制包在原生侧流式处理，单独声明导出上限并验证摘要，不经无限制 JSON/base64。长修改遵守各自
+契约，不全局重放。错误只返回安全类别/代码/request ID，不直接返回任意响应正文或 CLI stdout/stderr。
 
-## 7. 认证与资源授权
+## 6. 服务、安装与配置契约
 
-现有静态 Bearer 中间件建立的是部署级信任边界，并不提供团队角色或资源级共享。个人预览版可以明确以“共享信任”
-模式连接这种部署。桌面管理的新本地安装默认应开启 Server 认证；连接已有未认证 loopback 部署时，展示其真实策略，
-不静默修改它。
+复用唯一用户级服务：Windows Task Scheduler、macOS LaunchAgent、受支持 Linux 上的 systemd user service。
+不创建 root/SYSTEM 服务、竞争的桌面监管器，不接管归属未知的存活进程。本地服务配置保持 loopback。
 
-团队模式要求 Server 完成 RFC 1396 及相关实现规定的强制授权。可信 Principal 由 Server 解析；渲染层输入、Agent
-名称、`receiver` 或接收方自报的授权检查都不能建立可信身份或授予权限。桌面不能通过隐藏按钮或先拉全量数据再过滤，
-弥补后端授权缺失。
+分别保留 `support`、`registration`、`definition`、`manager_ownership`、`manager`、`server_liveness`、
+`endpoint`、`log_location`、`recovery_action`。非零状态命令退出可以包含合法的不健康 JSON。未知/外部归属、
+过期环境身份、端口占用分别提供受支持恢复方式。
 
-使用 Server 的当前 Principal 发现与受支持权限检查，解释哪些操作可用。它们仅辅助界面预检，每次读取正文、精确继续、
-确认接收、Review 或其他修改仍须经过 Server 当前授权检查。具体包括：
+当前安装/卸载面向人类输出，Windows install 未提供登录启动选择时可能询问。它们尚不是 D3 机器协议。
+start/stop/restart 等待服务负责方支持；卸载不是停止。D3/D4 要求：
 
-- Scope 的组织关系不意味着权限继承或 Context 共享。
-- Candidate 读取和 Review 修改分别遵守读取与审查权限。
-- 获得某个已提交 Handoff revision 的授权，不等于能访问最新版本、相邻 revision、整个 Scope、报告或任意 Memory
-  搜索。Evidence 遵守精确 citation manifest 及其授权规则。
-- Skill 发布同时保留资源和发布权限要求。target 标识是操作参数，不是新的授权资源或归属证明。
-- 集合、总数和搜索结果在 Repository 查询与分页之前完成授权过滤。如果无法安全过滤，明确失败，桌面不能回退到
-  无限制列表后再本地过滤。
+- 版本化请求/结果、稳定错误、受支持入口和非交互执行。配置校验/应用复用现有规则，并通过服务校准处理受保护
+  env-file 身份。
+- 秘密通过受保护文件或继承的私有输入传递，不进入命令行参数和普通输出。不解析交互向导，也不在 Rust 复制环境
+  与宿主配置合并规则。
+- resolve/preflight 不修改安装，计划含不可变组件身份、路径、归属、兼容、服务变更与恢复。应用前重新核验；
+  确认绑定精确计划，不能授权后来替换的计划。
+- 负责方维护 operation ID、进度、取消边界、锁、持久 journal 和状态查询。逐组件报告
+  unsupported/skipped/current/installed/stale/failed/uncertain；重试前核验不确定状态。
+- 客户端退出后可恢复，不承诺无关宿主之间的全局原子回滚。
 
-缓存项、不透明列表游标、选择和通知元数据，按连接端点、当前 Principal 或凭据 generation，以及查询条件隔离。
-切换身份时清除旧私有状态，权限检查结果不能作为持久授权。凭据过期时停止受保护请求并提示重新认证；操作被拒绝时
-保留独立说明。两者都不能触发跨连接自动复用凭据或无限后台重试。
+CLI 和桌面共用负责方的锁。安装完成不代表宿主加载或健康。只有负责方支持持久执行时，退出后才继续安装；否则
+保留操作窗口，只在安全边界取消。强制终止通过 journal 恢复。稳态 Server 始终独立运行。
 
-## 8. Scope、资产与 Review 行为
+## 7. 凭据与认证模式
 
-项目和工作流视图使用已有的不透明 Scope ID 和组织关系。仓库路径、分支、会话 ID、Agent 名称或显示标签都不是
-Scope 身份。Parent 组织关系不会产生传递性 Context reference、转移归属或发布 Artifact；跨 Scope 可见性和发布
-使用各自明确的已有 API。
+采用 Windows Credential Manager；后续平台分别验收 Keychain/Secret Service。偏好只保存不透明引用。
+凭据库不可用/锁定时提供解锁或仅本次会话使用，不回退明文。可另行支持加密 vault，但 Stronghold 本身不是系统
+凭据库适配器。凭据可短暂存在可信输入/只写 IPC，提交或取消后清空；不持久化到渲染层存储、URL、参数、日志、
+导出、崩溃报告或通知。
 
-观察选择（`all`、`subtree`、`exact`）与写入或集成绑定的精确目标 Scope 分开。表单显示目标 Scope，提交时固定
-该值；请求执行期间改变全局选择，不能重定向写操作。编辑绑定时显示受影响集成及其支持的选择语义，不假设所有宿主
-行为相同。
+| 模式 | 行为 |
+| --- | --- |
+| 已有未认证 loopback | 明确显示本地访问未受保护，不静默重配 |
+| enforced 静态 Bearer | 显示共享服务身份，不表现成多个团队成员 |
+| enforced 注入 Provider | 支持运维方发放且该 Provider 接受的 Bearer；身份和检查来自 Server |
+| 不支持的登录传输 | 说明不支持；不嵌入远程登录、不抓 token、不匿名降级 |
 
-Memory 搜索使用 Server 支持的模式和限制，缺少 embedding/generation 能力只禁用相关操作。UI 保留 Memory
-citation 和精确 Artifact reference，区分待处理 Source、Candidate、已提交 Artifact 和已退役项。不能把已接收
-的 Source 显示成已提取的 Memory，也不能把待 Review 的 Candidate 显示成已发布 Skill。
+首版不含浏览器 SSO/OAuth、cookie 会话和交互企业登录。实际验收 Provider 身份解析，不能仅凭 `multi_principal`
+判断登录支持。每项操作仍由 Server 授权。通用 `401 unauthorized` 表示需要有效凭据，不一定过期；只有支持的
+契约给出过期原因时才显示过期。区分 `403` 拒绝和 `503 authentication_unavailable`；认证拒绝后停止受保护循环。
 
-Review 复用 Candidate 的 expected-version 检查。冲突时重新加载权威 Candidate 并解释期间发生的变更，不静默
-批准更新版本。受管 Skill 生命周期变更保留 generation 检查，包发布使用已 Review 的精确包。下载、查看或发布包
-不授权桌面执行其中的脚本。
+新托管本地安装默认启用强制认证；无认证连接只作为明确选择的现有安装模式。配置负责方在受保护 Server 环境中
+生成凭据。用户确认安装后，安全机器接口为桌面凭据库和所选宿主
+配置凭据，复用现有按 URL 绑定的 authorization 适配器，不通过页面数据返回秘密。Server/Agent 不依赖桌面运行
+或桌面 vault 解锁。
 
-## 9. Handoff 发现、投递与操作
+轮换由负责方计划协调：核验归属/消费者、暂存受保护配置、校准服务、替换桌面与所选宿主凭据、逐个验证。
+静态 Bearer 不假设新旧 token 同时有效，需说明中断和部分失败。按负责方状态恢复，不能用一个客户端重连成功推断
+全部成功。删除连接只移除自己的引用/不再使用的凭据条目，不删除 Server/Agent 环境文件。
 
-三个视图的用途不同：
+## 8. 授权、Scope 与资产
+
+使用 `access/me` 和受支持检查解释 UI，再对真实请求重新授权。Agent 名称、`receiver`、标签和渲染层输入不建立
+身份。分页/计数前过滤；不支持安全查询时失败，不无限制回退。缓存/游标键包含端点、Principal/凭据 generation
+和查询条件；预检不是持久授权。
+
+Scope ID 不透明，不能用路径/分支/会话 ID 替代。父子组织关系不继承权限、不共享 Context、不发布 Artifact。
+只显示获准的祖先信息。`all/subtree/exact` 是观察选择，不是所有列表都支持的模式。页面使用 API 支持的选择，
+写入/绑定采用明确展示的精确 Scope。
+
+| 类型 | 首版处理 | 写入边界 |
+| --- | --- | --- |
+| Memory | 搜索/详情/citation；D2 有界目录/历史 | 专用 remember/revise/retire、原 citation 和冲突检查 |
+| Experience/Skill | 通用目录、类型化精确详情、来源/生命周期 | 已审核 Candidate 流程和验收过的发布 |
+| Profile | 授权读取、类型化 Profile Candidate Review | 保留 proposal/policy/证据要求，不通用绕过 Review |
+| Topic Memory | 已发布通用目录/revision、支持的专用详情/搜索 | 不提供手工通用 create/replace/delete |
+| Handoff | 已提交精确 revision 和单独授权的证据 | Continue、receipt、outcome 语义分开 |
+| Prompt/Dream/未知 | 不提供专门管理；仅安全且受支持的元数据/详情 | 不为未支持类型通用编辑/批准/执行 |
+
+标签遵守当前 taggable-family 契约。通用可读不代表可写。未知 Candidate 保留类型和身份，但在具备类型化展示/
+校验器前禁用审核；部分表单不能丢弃未知字段。Source 待处理、Candidate、已提交 Artifact、已发布包和退役项
+分别呈现。
+
+Review 发送 `expected_version`，拒绝必须填写契约要求的非空理由，修订保留证据及省略字段的语义。
+冲突后重读而不静默批准新版本。Skill 生命周期使用 `expected_generation`，
+包使用精确已审引用。精确 Handoff 授权不允许 latest/相邻版本、宽泛报告、无关搜索或未授权证据。
+即使没有所在 Scope 的目录权限，也应能打开合法的精确共享项。
+
+## 9. Handoff 发现与接收身份
 
 | 视图 | 权威来源 | 含义 |
 | --- | --- | --- |
-| Handoff Report | 已有报告 API | 所选 Scope 及其最新精确 Handoff 的只读投影 |
-| 与我共享 | RFC 1396 的授权资源发现 | 当前 Principal 有权访问的精确资源身份 |
-| Handoff 收件箱 | #1419 投递契约 | 接收方的持久投递记录，以及契约支持的状态和恢复 |
+| 报告 | 已有报告 API | 授权的只读选择投影 |
+| 与我共享 | Access 资源发现 | 精确可访问身份，不是未读/投递状态 |
+| 投递收件箱 | D6 | 持久投递记录和受支持接收恢复 |
 
-授权列表的分页游标不是增量通知游标。授予访问权限不会投递 Handoff，也不代表未读。Candidate Review 和远程 Skill
-receiver/reconciliation API 同样不能代替 Handoff 投递。桌面不另定义 envelope、接收端注册表、receipt 协议或
-重试调度器。
+Prepared Handoff 不是可枚举的持久收件箱。Access 分页、Review 和远程 Skill receiver API 不能替代投递。
+D6 前只提供报告/共享资源视图。
 
-#1419 负责方需要提供所有消费者共用的投递契约：版本化 envelope 和精确引用、可信接收方关联、持久列表与恢复、
-去重身份、分页/事件游标语义、过期、取消，以及终态/可重试状态。桌面只消费这些不透明身份和受支持操作，并限定到
-当前端点与 Principal。实现完成前可以提供报告和授权发现，但必须明确标注持久投递收件箱不可用。
+桌面是**当前 Principal 有权管理的接收目标的观察/控制界面**，不会自动成为 Agent 接收端。本地安装 Agent 不等于
+有权注册或冒充它。D6 必须定义可信 Principal 与 target 关联、注册/发现、envelope 版本、不可变引用、去重 ID、
+列表/恢复游标、过期/取消、可重试/终态和安全诊断。D6 还需定义已读属于 Principal 还是 target；设备本地通知去重
+不能修改 Server 已读。桌面不建立第二套注册表、envelope 协议或重试调度器。
 
-打开条目时使用原始精确 `ArtifactReference`，重新检查当前权限和投递状态，不能替换为 `latest`。条目不存在、
-过期、取消或权限撤销时，解释结果，不暴露缓存正文。只有某个精确 revision 的权限时，不能回退打开更广的 Scope 报告。
+打开 envelope 时，重新检查原精确引用的权限与投递状态。缺失/过期/取消/撤销不显示缓存正文，不回退宽泛报告。
+查看、支持时的已读、投递、授权、accepted receipt 和 Task Outcome 分别命名。
 
-已有精确 Continue 和 Acknowledge 操作仍是权威语义。`accepted`、`needs_clarification`、`declined` 等 receipt
-值保持原含义。接受需要接收方真实的 live-state、capability、authorization 观察；仅浏览桌面页面不能为另一个
-Agent 的环境作保证。只有受支持流程能够提供这些检查时，桌面才提供确认接收，否则引导至能完成检查的集成。
+`accepted`、`needs_clarification`、`declined` 保留现有语义。接受需要真实接收端 live-state、能力、授权和
+证据观察；浏览页面不能证明另一 Agent 的环境。只有提供这些检查的验收流程才允许确认。使用声明过的精确项宿主
+启动机制，否则提供受支持复制/打开，URL 不携带 token/正文。D6/D7 验收具名 sender/receiver 及其版本。
 
-维护中的 Agent 宿主如果支持打开精确条目，就使用它声明的集成机制，只传递其接受的有界精确选择。否则提供受支持的
-复制/打开流程，不在 URL 中携带凭据或业务正文。桌面不虚构宿主 deep link，也不自行执行 Agent 任务。本地链接和
-通知激活仅用于导航：校验连接与条目的关联，不自动执行修改。
+## 10. 通知与后台限制
 
-查看、标记已读（若支持）、投递成功、授予访问权限、接收方接受 receipt、记录 Task Outcome 是不同动作。界面分别
-命名；除非 Server 契约明确规定，不能把一种动作推进为另一种状态。
+通知是尽力提示，不是队列或 exactly-once 保证。Server Candidate 状态和已实现收件箱是权威。
+初期仅监控活动连接的**当前精确 Scope** 的 Review；all/subtree 浏览不订阅全部 Scope。托盘隐藏期间保留该 Scope，
+并明确展示覆盖范围。
 
-## 10. 通知与后台行为
+Review 初始限制：一次一个请求，每页最多 100 项，每分钟最多五个分页请求，轮询间隔 60 秒、最多 20% 抖动。
+继续有界分页，不把列表 cursor 当事件 cursor。五分钟内无法完成的遍历丢弃为过期，刷新并报告部分覆盖。
+完整全局计数/历史需要另一个 Server 契约；后台限制不阻止用户手动分页审核。
 
-Server 收件箱和 Candidate 状态是权威来源，系统通知只是尽力提示，不是持久队列，也不保证 exactly-once 投递。
-初期只订阅或轮询活动连接。有受支持增量契约时使用该契约；否则 Review 状态可以采用有上限、带退避的轮询。
-轮询 Candidate 列表只能得知当前待办，不能还原每个中间状态的完整历史。
+首次启用或范围改变只展示摘要，不为每个历史 Candidate 发通知。后续完整遍历按连接/Principal/Scope/Candidate
+ID/version 去重；待审版本变化可以产生一次合并提示。部分扫描使用“已发现待办”，不能声称完整总数或把未读页
+算作零。401 停止；临时错误退避最多 15 分钟，Server 要求更长等待时遵从。手动重试不能产生无限后台循环。
 
-通知消费要求如下：
+D6 投递使用单独的有界消费者，P4 交付前确定请求预算。只持久化不透明游标和去重/导航元数据，初始每连接最多
+1,000 条、保留七天。过期句柄拒绝；身份改变清除私有元数据，尽可能移除已发系统通知，残留通用提示不提供权限。
 
-- 从负责方的稳定条目/事件身份和适用的精确 revision 派生通知身份。只持久化有界去重元数据和不透明游标；桌面通知
-  存储不保存 Memory、Source、Handoff、Prompt 或 Prepared Context 正文。
-- 使用负责方定义的恢复、游标过期和缺口修复语义。如果只有当前状态列表，就刷新该状态并展示摘要，不虚构漏收事件，
-  不改变分页游标含义。
-- 按端点和 Principal 隔离元数据，凭据/身份变化时清理，并限制保留时间和容量。本地展示通知与 Server 标记已读、
-  确认接收是分开的操作。
-- 轮询支持抖动、退避、请求上限和取消；合并突发通知，抑制重复的离线/认证错误。凭据过期时停止受保护后台请求，
-  提供一个有用的恢复提示。
-- 默认使用“PowerContext 有事项需要处理”这样的通用提示，只携带批准的有界元数据和本地不透明导航句柄。包括锁屏
-  场景在内，不显示正文、凭据、私有路径、敏感标题或未经处理的 Server 错误文本。
-- 点击后激活应用，明确恢复对应连接，并重新授权精确项。失效或伪造的激活句柄不能静默切换凭据或执行操作。
+使用“PowerContext 有事项需要处理”这样的通用提示和本地不透明导航句柄，不显示正文、敏感标题、路径、token
+或原始错误，包括锁屏。点击后明确恢复对应连接并重新授权精确项；伪造句柄不能静默换凭据或修改状态。
+解释并请求通知许可，拒绝后提供应用内回退，抑制重复离线错误。退出停止通知，重开刷新 Server 状态。
+验收真实安装通知/冷启动激活，包括应用退出后点击已有提示。
 
-首次使用通知时解释用途并请求系统许可。拒绝许可后，应用内数量和收件箱仍可使用。首版完整退出桌面后不会继续通知，
-下次启动时恢复 Server 当前状态。没有托盘支持时，普通窗口导航和退出仍须可用。验证真实安装包的通知与冷启动激活，
-不能只测试进程内 mock。
+## 11. Source 导入、连接器与 Agent 诊断
 
-## 11. Source、连接器与集成
+首版通过 `capture_content_source`（`POST /v1/sources/content`）导入输入文本或单个所选 UTF-8 文件。
+不与分配新身份的通用 `create_source` 混用。读取系统选定句柄，不接受渲染层路径；防止替换/链接竞态、路径穿越
+和未请求的目录扫描。
 
-首先支持显式输入文本，以及通过系统文件选择器导入有大小限制的 UTF-8 文本文件。传输前显示目标连接、Scope、计划
-使用的 Source 身份和大小。通过有边界的原生句柄读取所选文件，防止路径替换、目录穿越或链接变化后读取另一文件。
-Server 的内容大小限制和校验仍生效，不能静默扫描目录或用户主目录。
+所有平台使用同一导入规则：
 
-远程连接通过公开内容摄取契约传送用户确认的字节，本地路径不是远程 Server 可以直接打开的位置。保留 Source 身份、
-摘要和 provenance，避免不必要地泄露完整本地路径。重复导入遵守 Source 身份/冲突规则；不可变身份下内容发生变化，
-不能被当成成功去重。
+1. 超过 1 MiB 的文件在超过读取预算前拒绝。严格 UTF-8 解码，移除一个开头 BOM，保留其余 Unicode 码点、换行和
+   空白。拒绝非法编码和空白内容。
+2. 正文最多 200,000 个 Unicode 码点，并遵守更低的已声明传输/Server 上限，不截断。
+3. 对提交文本的 UTF-8 字节做 SHA-256。`source_id` 为 `desktop-text-v1:<小写十六进制摘要>`，metadata 固定为
+   `{"importer":"powercontext-desktop-text-v1"}`。载荷不包含文件名/路径/时间/设备/用户元数据。确认页可显示
+   本地文件名，但不上传它。
+4. 确认端点、精确 Scope、规范化后大小和去重规则。同一 Scope 中相同提交文本使用同一 capture，内容变化生成
+   另一 Source。改名不重复导入相同内容，不同 Scope 相互独立。这是快照导入，不是文件同步。
+5. 重试同一确认导入时复用相同身份/内容/metadata。已有载荷冲突是真实错误，不覆盖，也不静默换随机 ID。
+   原生侧恢复读取用于核验提交文本。
 
-RFC 1400 的 Source 定义、观察和 checkpoint 不定义连接器发现、调度、provider 凭据或插件执行。首版连接器页面
-仅使用 Server 已支持的元数据和操作。新增管理 API 由连接器/Server 负责，必须形成公开契约后才交付对应控制。
-桌面关闭不能停止已接收的连接器任务；worker 凭据和 checkpoint 不能只存在桌面内。不完整抓取也不能被解释成未看到
-的内容已删除。
+不建立持久本地正文队列。重启后重新选择同一文件可复现身份，并在当前授权下检查/重试。远程导入传输批准的
+字节，不把本地路径当作远程路径。Capture 成功不代表提取完成。
 
-Agent 方面使用 #1405/#1410 维护的分发模型和随发行版本提供的能力声明。已有 `integrations/capabilities.toml`
-是仓库版本契约，不是实时公开 HTTP capability API 或接收端目录。界面分别展示：
+Source 定义/观察/checkpoint 不提供连接器管理。D8 前只展示已支持事实，不提供猜测的启动/重试按钮。已接收
+任务、凭据和 checkpoint 属于 Server/连接器 worker；不完整抓取不代表删除，桌面退出不能取消已接收持久工作。
 
-1. 所选发行物声明自己在该宿主、平台和版本上支持什么。
-2. 安装器记录了什么已安装内容，以及由谁管理。
-3. 结构化诊断核验了哪些加载、连接、Scope 选择、capture 和 recall 行为。
-4. 只有相应负责方提供事实时，才显示运行状态或接收端登记状态。
+分别展示版本化 `integrations/capabilities.toml`、安装记录和 `doctor integrations --json`：声明能力、
+已安装归属/版本、观察到的加载/连接/Scope/capture/recall，仅在真实提供时显示注册。元数据不是实时目标注册表。
+宿主安装由用户选择，适配器负责合并/修复。Rust 不重写所有检测到的配置，也不通过文件/工具数量推断健康。
 
-使用 `doctor integrations --json` 等真实结构化诊断接口，不解析人类文本、不通过文件或工具数量推断健康。未支持
-或未观察的检查应明确标注。每个所选宿主由用户主动安装。配置合并、标准包身份、hook 行为和分发修复继续由原负责层
-实现，Rust 宿主不能复制这些规则，也不能自动改写所有检测到的 Agent 配置。
+## 12. 并发写入、取消与未知结果
 
-## 12. 离线、重试与并发变更
+没有持久业务缓存或离线写队列。远程离线隐藏私有内容，未提交表单可在内存中保留为明确未保存输入，直到策略或
+确认后的身份变化将其丢弃。重连刷新兼容、身份、授权和资源。本地离线可用不代表能离线生成。
 
-首版没有持久本地业务缓存或离线写队列。远程离线视图隐藏私有内容，显示连接状态；可选择保留尚未提交的表单输入，
-但仅在内存中存在，并清楚显示未保存。重连时先刷新兼容性、身份、授权和所选资源状态，再开放修改。本地 Server
-可以继续提供自己的离线能力；模型需要网络时，桌面不承诺离线生成。
-
-读取重试有上限并可取消。修改重试遵循各操作公开契约。如果 Server 支持幂等键，同一逻辑操作重用同一个键。
-提交后超时意味着结果未知，不证明失败：重试前核验权威状态或提供检查入口。不能盲目重放 Review 批准、Handoff
-receipt、导入、发布或安装。没有安全核验或幂等重试路径时，显示不确定状态，要求用户重新明确决定。
-
-CLI、Agent、Web 和桌面并发修改都应正常工作。遵守已有 revision/version 检查，冲突时展示刷新后的条目，保留用户
-意图，但不静默应用到新 revision。待完成 UI 操作携带原连接/身份 generation 和精确目标，迟到结果不得出现在其他
-连接的页面上。
-
-## 13. 分发、升级与恢复
-
-首个 Windows 发行物使用签名的用户级安装包。本地 bootstrap 必须在未预装 Python、Rust、Node、Git 或编译器时
-工作。安装负责方提供所选系统和架构对应、经过验证的解释器/runtime 环境，以及维护中的集成发行物。仅远程连接的
-安装省略该 runtime。在线安装包和任何提供的离线包，都要声明包含哪些组件、仍需哪些网络访问。
-
-当前服务实现会定位 Python 可执行文件，Windows 还要求相邻的 `pythonw.exe`，所以冻结后的 Python 可执行文件
-不能直接替换现有 runtime。优先使用安装器管理的版本化 Python 环境；未来采用冻结 runtime 时，需要单独完成服务
-兼容性和平台验收。Tauri sidecar 可以分发辅助程序，但不意味着 Server 生命周期由 Tauri 子进程接管。
-
-发行计划分别记录桌面 UI/宿主版本、Python runtime 版本、API 契约版本、集成发行版本和持久数据兼容性。把便于人
-理解的通道解析成不可变 manifest，记录精确发行物位置、摘要、OS/架构和兼容性。发行信任需要绑定可信发布者的签名
-发行物或 manifest；仅从同一个不可信位置下载 checksum 不足以认证发行物。公钥和允许的更新源固定在任意渲染层或
-远程 Server 响应之外。
-
-Tauri 签名 updater 可以更新桌面组件，但不会协调 Python 环境、Agent 配置、服务注册和数据库迁移。这些组件的
-共同计划属于统一安装器。桌面不能静默升级远程 Server，也不能自行覆盖被 Agent 共用的安装。
-
-升级遵循以下规则：
-
-1. 解析并展示兼容的不可变版本、受影响组件、中断时间、数据兼容性和恢复方式，检查空间、归属、核验所需凭据，以及
-   是否有其他安装操作。
-2. 先校验发行物，再暂存到现有版本旁边，保留上次验证过的安装记录。下载或签名失败不影响仍在运行的安装。
-3. 切换 runtime 时，使用服务层支持的暂停处理、切换和校准路径。契约须明确进行中请求与持久任务如何处理，桌面不能
-   等待一个猜测的超时后直接杀进程。
-4. 完成就绪、兼容性和所选集成核验后，才将新安装记为健康。计划部分成功时分别报告组件结果。
-5. 只有安装器声明可安全回滚时，才回退可执行文件/配置。数据迁移属于 Server/runtime 负责方；旧 runtime 不能打开
-   不兼容的新数据。在不可逆迁移前，计划必须提供受支持备份/恢复或明确的向前修复路径，并由用户确认。
-6. 中断后重新读取持久操作记录，核验不确定组件，通过原负责方恢复或修复，不能推断中断操作已经成功回滚。
-
-不能临时复制正在使用的数据库文件充当备份。备份、暂停处理和恢复必须符合实际持久化后端。负责层尚未支持的 schema
-迁移或备份 API，会阻塞相应自动升级路径，不能转由 Rust 实现。
-
-默认 stable 通道；预发布需要主动选择和明确标识。切换通道不能绕过数据或 API 兼容检查。首版提供升级提醒和用户
-明确执行的升级，不在活跃工作期间无人值守地升级 runtime。
-
-## 14. 数据位置与卸载
-
-| 数据或发行物 | 负责方 | 默认删除行为 |
+| 修改 | 保护条件 | 响应丢失后的恢复 |
 | --- | --- | --- |
-| 桌面可执行文件和打包 UI | 桌面包管理器/updater | 随应用卸载 |
-| 连接、UI 偏好、有界通知元数据 | 桌面，位于独立用户级应用目录 | 可通过明确的重置选择删除 |
-| 桌面凭据条目 | 系统凭据库 | 只删除所选连接/应用拥有的条目 |
-| Python 环境、集成发行物、安装记录 | 统一安装器 | 仍有引用时保留，通过识别归属的计划删除 |
-| 服务注册和受保护 Server 环境 | 已有服务/配置负责方 | 除非明确要求移除服务，否则保留 |
-| Memory、Source、Artifact、调度状态、后端数据 | Server 持久化负责方 | 卸载应用或服务时默认保留 |
-| Agent 宿主配置 | 分发/安装负责方与用户 | 只撤销自己拥有且记录过的修改，保留无关编辑 |
+| Candidate 批准/拒绝/修订 | ID 与 `expected_version` | 读取 Candidate/result；状态改变不证明由本客户端完成，不自动批准新版本 |
+| Memory 保存/修订/退役 | 对应操作支持的预期 revision/精确 citation | 读取精确/当前 entry；可用时读取有界历史，归因不确定不等于允许重放 |
+| 文本导入 | 稳定 ID 与完全相同载荷 | 读取/比对精确 Source，或在当前授权下明确重复相同幂等 capture |
+| 标签替换 | 精确逻辑目标、必需的标签状态 `If-Match` | 读取当前标签集；冲突需要用户重新决定 |
+| Skill 生命周期/发布 | 精确引用与所需 generation | 读取生命周期/目标状态；无法归因时保留不确定性 |
+| Handoff receipt/outcome | 精确 revision、接收方观察、已接受 receipt 身份 | 负责方支持的读取/幂等路径，否则显示未知并转受支持接收恢复 |
+| 安装/配置/升级 | 已确认计划与负责方 operation ID | 读取持久状态、核验不确定组件、从受支持边界恢复 |
 
-Server 的 `POWERCONTEXT_HOME` 或已有平台数据目录规则继续生效，版本化应用目录不能成为业务数据目录。本地
-诊断页可以显示解析后的数据/日志位置，远程连接不能浏览 Server 文件系统。Rust 可以为用户打开已知本地位置，但
-不能读取或修改业务数据库内容。
+不虚构 operation-status 端点或幂等键。待处理期间禁用重复提交。取消读取可丢弃响应；取消等待已提交修改不代表
+取消修改。重试权限不转移到另一连接/Scope/revision。冲突时保留易失意图，但不自动应用。
 
-“移除桌面应用”“移除本地服务”“删除 PowerContext 数据”是分别命名的操作。首版自动卸载器不提供数据删除；未来
-提供该 UI 时，需要负责方支持的明确流程，并确认精确的本地安装和数据路径。除非用户单独要求移除其他组件，否则
-卸载桌面后，独立安装的 Server 和 Agent 仍须可用。归属未知或被用户修改的文件应保留并解释，不能递归删除。
+## 13. 分发、升级与迁移
 
-## 15. 诊断、隐私与安全范围
+采用签名用户级 Windows 包。受管本地安装不需要预装 Python/Node/Rust/Git/编译器；D4 提供核验的版本化 Python，
+D5 提供所选宿主。当前服务在 Windows 需要真实 Python 与相邻 `pythonw.exe`。冻结二进制需另行验收；Tauri
+sidecar 不拥有 Server 生命周期。
 
-诊断汇总桌面版本/平台、已核验的安装/组件状态、服务事实、连接失败类别、支持的契约版本、安全 request ID，以及
-有界耗时/错误码。默认导出不包含 Memory、Source、Handoff、Prompt、Prepared Context、模型输出、凭据、
-Authorization 头、原始环境变量、连接查询参数或私有绝对路径。不能直接附上任意 Server 错误正文或完整 CLI
-stdout/stderr，必须经过脱敏诊断模型归一化。
+不可变发行计划记录桌面/解释器/runtime/API/features/Agent 版本、OS/架构和数据兼容。可信发布者/来源固定在
+渲染层控制之外，区分系统签名、Tauri updater 签名与 runtime/Agent manifest 信任。不可信包旁的 checksum
+不是身份认证。发行前定义密钥轮换/撤销和 CI 归属；离线包说明剩余网络需求。
 
-导出是本地、显式、可预览的操作，由用户选择脱敏文件的保存位置，不要求自动上传或产品遥测。崩溃上报默认关闭；
-未来的主动开启机制也不能以“无正文诊断”为名传送内存转储或原始请求正文。日志保留时间和大小均有上限。
+Stable 为默认通道。预览通道可以作为连接客户端共存，但一个本地安装只能由一个记录在案的通道管理。转移管理权
+需要显式、兼容的负责方计划。两者可连接同一用户级服务，不创建竞争注册/SQLite 监管器。偏好和凭据引用按通道
+归属，卸载一个通道保留另一通道或 Agent 仍引用的组件。
 
-威胁模型包含恶意 Server 内容、导入文件、伪造通知/deep-link 激活、本地网站尝试访问桥接层、向错误端点泄露凭据，
-以及发行物被篡改。防护来自可信本地 UI、受限 IPC、按连接隔离的传输、Server 授权、系统凭据库、安全渲染和可信分发。
-它不承诺抵御已被控制的操作系统、任意同用户恶意软件，或可访问用户进程和数据的管理员。
+升级采用明确安装器计划：检查空间/归属/兼容，暂存并核验包，说明中断/数据恢复，通过支持的服务操作切换，再
+检查就绪和所选宿主。不自动升级远程，不承诺全局原子回滚；仅在数据仍兼容时恢复二进制/配置。
 
-安全验收必须检查真实安装包的 capability/CSP、依赖权限、凭据库回退行为，以及发行物/升级验证。选择 Rust 本身
-不能证明这些边界正确。
+受影响数据库已要求 `server processing-migrate --action plan/apply/verify`：停止旧 worker 及自动重启，
+暂停写入/触发，使用相同 migration ID 恢复，验证 `ready: true` 后才恢复流量。采用负责方安全维护流程，或明确
+说明手动维护；反复重启不是迁移。采用后端支持的备份，不复制运行中的 SQLite 文件。不可逆变更需要受支持恢复或
+清晰的向前修复方案并经确认，不让不兼容旧 runtime 打开已迁移数据。
 
-## 16. 平台、无障碍与本地化
+桌面自身升级与 runtime 升级分别处理。Windows Tauri updater 安装前退出应用，应先持久化负责方操作/检查点与
+恢复入口，不能由 UI 内存持有未完成协调工作。不支持跨退出恢复时，先完成或安全推迟 runtime 操作，再更新桌面。
+下载/签名失败保留原可用状态，逐组件报告部分成功和不确定性。
 
-| 平台 | 建议交付状态 | 需要验收的问题 |
+## 14. 数据归属与移除
+
+| 组件 | 负责方 | 默认移除行为 |
 | --- | --- | --- |
-| Windows 11 x64 | 首个正式验收目标，SQLite 本地 runtime | 用户级签名安装、WebView2 可用性/bootstrap、Credential Manager、Task Scheduler 归属、安装后通知、非 ASCII 路径 |
-| macOS | 后续验收 | 不同架构 runtime、Keychain、LaunchAgent、签名/notarization、WKWebView 行为、通知许可 |
-| Linux | 后续按明确发行版/桌面环境矩阵验收 | WebKitGTK/系统库、Secret Service、systemd 用户会话、托盘差异、打包和通知激活 |
+| 桌面二进制/UI | 桌面包/updater | 移除所选应用/通道 |
+| 连接/偏好/有界通知元数据 | 桌面用户目录 | 明确重置/移除选项 |
+| 桌面凭据 | 系统凭据库 | 仅所选、己方且不再被引用的条目 |
+| Python/Agent 发行物/安装 journal | 安装器/分发 | 保留引用，通过归属感知计划处理 |
+| 服务注册/受保护环境 | 服务/配置 | 除非单独移除服务，否则保留 |
+| Memory/Source/Artifact/处理状态/数据库 | Server 持久化 | 桌面/服务卸载时保留 |
+| 宿主配置 | 宿主适配器/用户 | 仅撤销记录过的己方变更，保留无关/用户编辑 |
 
-支持 Windows 不意味着支持 Windows ARM、Windows 上的 seekdb，或所有系统版本行为相同。Tauri 在三个目标上
-编译成功不足以证明产品支持。每个对外声明的 OS/架构，都必须在所声明环境通过安装包验收。
+现有 `POWERCONTEXT_HOME` 和平台规则仍是权威，版本化应用目录不是业务数据目录。本地诊断可显示/打开已知
+本地位置，远程连接不能浏览 Server 文件系统。“移除桌面”“移除本地服务”“删除数据”分别命名。首版自动卸载器
+不删除业务数据，保留归属未知内容，不递归删除任意所选位置。
 
-英文和中文 UI/文档同步维护。提供键盘导航、可见焦点、无障碍名称、屏幕阅读器语义、不会破坏 IME 输入的表单、高
-对比度，以及不只靠颜色表达的状态。通过滚动或响应式布局，管理流程在 800 × 600 窗口和 200% 缩放下仍可操作，
-不能隐藏确认或恢复入口。保留用户选择的语言及系统主题偏好。
+## 15. 诊断与隐私
 
-声明首个平台受支持前，在记录配置的参考机器上测量冷启动、空闲 CPU/唤醒次数、桌面与 runtime 的总内存、安装/下载
-体积，以及列表/搜索响应。架构验证后、功能扩展前确定发行预算。比较应包含 WebView2/runtime 依赖和 Python
-Server，不能把较小的 Rust 可执行文件宣传成整个产品的占用。
+展示核验后的组件/平台/状态、契约版本、安全 request ID、有界耗时与规范化错误码。普通日志/导出不含正文、
+prompt、prepared context、模型输出、凭据、Authorization、原始环境、敏感标题、URL 查询和私有路径。
+向本地用户显示路径不代表加入导出。规范化 CLI/Server 错误，不直接附 stdout/stderr。
 
-## 17. 交付顺序与依赖门槛
+导出在本地显式执行且可预览。崩溃上报默认关闭，无正文诊断不允许内存转储或原始请求。限制日志大小/保留期。
+威胁包括恶意内容/文件、伪造激活/IPC、错误端点和篡改发行物；不承诺抵御被控制的 OS、任意同用户恶意软件或
+特权管理员。将秘密标记植入凭据、路径、provider 设置、错误和内容，检查所有可观察输出。
 
-拆成范围明确的实现 PR，关联本 RFC 和 #1428。复用已有依赖任务，不再创建重复的桌面 Tracking Issue，也不把整个
-产品塞进一个变更。
+## 16. 平台、无障碍与预算
 
-| 阶段 | 具体交付物 | 退出条件 |
+| 平台 | 建议状态 | 验收 |
 | --- | --- | --- |
-| P0：架构验证与契约 | Tauri 中打包可信共享页面；公开 API 传输；凭据适配器；Windows 安装后通知；连接/兼容设计；原型测量 | 确认 Windows 可行性和预算、安装/服务负责方的机器接口、公开 API 缺口、安全边界及发布负责人 |
-| P1：个人预览 | 新旧本地安装、远程共享信任连接、服务状态/恢复、模型可选的首次 Memory 流程、所选 Agent 诊断、明确卸载行为 | 使用真实锁定发行物和当前支持的服务契约；不声称支持多用户资源共享或可靠 Handoff 投递 |
-| P2：管理功能 | Scope/绑定视图、Memory/资产、Review、只读报告、显式 Source 导入、受支持连接器状态、双语无障碍、受保护诊断 | 保留公开 API 授权与版本冲突语义；准确展示受依赖限制的功能 |
-| P3：授权协作 | 当前 Principal 资源发现、精确项权限、#1419 持久收件箱/恢复、受支持 Handoff 操作、有界通知 | RFC 1396 实现及 #1419 契约通过 Server 与桌面验收 |
-| P4：首个平台正式发行 | 签名安装/升级发行物、恢复、完整首次使用流程、独立服务生命周期、保留数据的卸载 | 下列适用验收项在 Windows 11 x64 全部通过；发布兼容/支持矩阵并明确运维归属 |
-| P5：增加平台 | 沿用相同边界的 macOS 和 Linux 包 | 每个声明支持的 OS/架构重复完成安装包验收 |
+| Windows 11 x64 + SQLite | 首个平台；当前项目 Windows 支持仍为 experimental | 签名标准用户安装、WebView2 有/无、Credential Manager、Task Scheduler/登录、通知/激活、非 ASCII 路径 |
+| macOS | 后续 | 具名架构、Keychain、LaunchAgent、签名/notarization、WebView/通知行为 |
+| Linux | 按发行版/桌面环境后续验收 | WebKitGTK/系统库、Secret Service、systemd 会话、托盘、包/激活 |
 
-P0/P1 无需等所有协作功能就绪，但不能用桌面自造 bootstrap 冒充统一安装。如果 #1406 机器接口或 Windows
-bootstrap 不可用，预览版必须明确为“仅连接”，不能声称通过安装验收。个人预览版本身不代表完成 #1428。
+不包含 Windows ARM 和 Windows 嵌入式 seekdb。框架编译通过不代表平台验收。P0 确定 Desktop/Install/Server/
+Release 负责人和一个维护中 Agent Host/版本，观察 Windows 加载及显式 capture/recall。“任意维护中集成”不能
+通过该门槛；P4 另行明确真实 sender/receiver。
 
-关闭 #1428 时，建议维护者至少要求：一个正式验收的 OS，issue 要求的完整本地安装和管理流程，授权远程访问，可靠
-的 Server Handoff 收件箱消费，Review/Handoff 通知，以及文档规定的恢复和卸载保证。授权和投递负责方保留各自
-测试与发布责任；桌面验收验证这些能力组合后的完整流程。
+当前源码基线在 Windows 原生类型检查中暴露了处理 worker 的 `Connection`/`PipeConnection` 类型不匹配，以及
+测试引用 POSIX 专用 `os.WNOHANG` 的问题。Windows 验收前需要修复或正确限定这些检查的平台范围；按 Linux
+目标检查通过不能证明 Windows 已受支持。
+
+P0 Go/No-Go 证据包括：无 Python/Server 时 UI 可用、认证 API 读写、凭据、签名标准用户包、WebView2 bootstrap、
+独立服务/登录、安装后的通知冷启动激活。D4/D5 完整 bootstrap 可以留到 P3，但 P0 要记录负责方承诺，并将预览
+限制为仅连接。原生阻塞必须解决或重新讨论平台/范围；Electron 备选针对实际外壳/WebView/维护阻塞，不解决安装器缺口。
+
+中英文 UI/文档同步，支持键盘、可见焦点、屏幕阅读器标签、IME 安全输入、高对比度、不只靠颜色的状态，以及
+800 × 600 和 200% 缩放下可用的确认/恢复。语言/主题变化保留身份。
+
+测量冷启动、空闲 CPU/唤醒、桌面+WebView+Server 内存、完整安装/下载大小、列表/搜索延迟。P0 记录硬件、OS/
+WebView、数据规模、重复次数和 p50/p95，在 P2 扩展前固定数字发行预算。覆盖空/多页、无模型/已配置模型场景。
+D7 负责公开预算，当前不宣称性能结果。传输/通知运行上限不能替代测量。
+
+## 17. 交付阶段
+
+| 阶段 | 交付物 | 退出条件 |
+| --- | --- | --- |
+| P0：架构 | 打包客户端、窄传输、凭据、Windows 安装原型、UI 复用与测量 | D7 负责人/宿主、安全证据、D1/D2 分工、D3–D6 限制 |
+| P1：仅连接预览 | 已有本地/远程连接、已测兼容、服务状态、显式 Memory 保存/召回、Agent 诊断 | 验收操作/身份，不承诺未实现安装 |
+| P2：管理/授权 | Scope/资产/Source、类型化 Review、精确共享/报告、导入、有范围的 Review 通知、诊断 | D2 完整 Memory 浏览、授权/并发/family 契约 |
+| P3：受管安装 | 干净机器安装、所选宿主、服务/配置修改、迁移/升级/恢复/移除 | D3/D4/D5、签名不可变包和归属验收 |
+| P4：投递 | 持久收件箱、目标关联、恢复、精确导航、支持的接收动作 | D6、具名 sender/receiver、有界消费者、安装激活 |
+| P5：首个正式发行 | Windows 11 x64 完整 #1428 流程 | 全部适用 AC、兼容/支持矩阵、公开预算 |
+| P6：更多平台 | 验收后的 macOS/Linux 包 | 每个声明环境重复安装验收 |
+
+依赖具备后 P3/P4 可独立推进；P2 授权不等待投递。复用已有 Tracking Issue，负责方契约与消费者拆成聚焦 PR。
+不能把被阻塞的必需 AC 标为不适用来关闭 #1428：完整交付需要一个平台上的受管本地安装、授权远程访问、持久
+Handoff 投递、Review/Handoff 通知、恢复、无障碍和保留数据的移除。
 
 ## 18. 验收与验证
 
-以下是可观察的验收要求，不要求固定内部函数调用、模块布局或 UI 元素 ID。使用公开 API 契约测试和真实安装后的
-桌面流程，只对宣称支持的平台要求相应平台测试。已有测试已保护的 Server 契约，应尽量复用。
+负责角色：Desktop 负责打包 UI/原生行为，Server 负责公开语义，Install 负责安装器/服务/配置/分发，Delivery
+负责 D6，Release 负责签名平台验收。这些是职责，不是已具名人员，D7 在 P0 退出前落实维护者。每项记录包含版本、
+环境、fixture、结果和负责人；一次冒烟不能代表某行所有场景通过。
 
-| ID | 场景 | 必须观察到的结果 |
-| --- | --- | --- |
-| AC-01 | 无 Python/Node/Rust/Git 的干净环境首次安装，且不配置模型 | 核验本地 runtime/service 与所选维护中集成的安装；显式 Memory 保存和全文召回成功；依赖模型的操作说明条件 |
-| AC-02 | 已有手工服务、过期受管定义、端口占用或其他服务注册 | 正确区分状态，保留归属未知的服务/数据，只提供受支持修复 |
-| AC-03 | 关闭窗口、退出、重启桌面、重启系统用户会话 | 独立服务和已接收持久任务不因桌面退出而丢失；登录行为符合各自设置 |
-| AC-04 | 下载/安装/升级中断，或签名/就绪检查失败 | 尽可能保留原可用状态；组件结果和不确定性明确；受支持恢复/回滚遵守数据兼容性 |
-| AC-05 | 旧 runtime、不兼容 API、混合集成版本或 Server 身份变化 | 解释能力/兼容限制；不猜测支持、不静默改投目标、不自动升级远程 Server |
-| AC-06 | loopback、非 loopback HTTP、错误 TLS、重定向、凭据过期和授权拒绝 | 保持现有传输策略，不跨端点转发凭据，各失败类别可区分 |
-| AC-07 | 请求或通知未完成时切换连接/Principal | 旧身份的数据、游标、响应、凭据和修改目标不出现在新连接 |
-| AC-08 | Principal 只能读某个精确 Handoff revision | 不泄露 latest/相邻 revision、未授权 evidence、更广报告或 Scope 内容；操作重新授权 |
-| AC-09 | 受限制列表及 Review/发布权限 | Server 在分页/总数之前过滤；不安全过滤失败；隐藏按钮不能绕过授权；各权限对应操作正确 |
-| AC-10 | Candidate/资产并发更新，或修改请求超时导致结果未知 | 显示版本冲突或未知结果；不静默批准新 revision，不盲目重复修改 |
-| AC-11 | 断线期间收到 Handoff、游标过期、权限撤销或投递取消 | 按负责方语义恢复授权收件箱；保留原精确引用；导航不会自动确认接收 |
-| AC-12 | 安装后通知、拒绝许可、突发事项、完整退出或过期激活句柄 | 有界无正文提示、去重合并、安全精确导航、应用内回退可用，并准确说明后台限制 |
-| AC-13 | 文件导入、重复 Source 身份、字节变化、不完整抓取或摄取时关闭桌面 | 确认内容通过公开 API 到达所选 Scope；保留身份/冲突规则；不静默扩大导入、删除或由桌面运行 worker |
-| AC-14 | 恶意 HTML/Markdown、任意 IPC 参数、伪造链接或错误连接端点 | 无任意执行/文件系统访问、凭据读回、特权远程导航或意外修改 |
-| AC-15 | 在 token、路径、provider 配置、错误和业务正文中植入秘密测试标记 | 通知、普通日志、诊断导出、URL、渲染层持久存储和发行遥测中均无标记 |
-| AC-16 | 移除桌面、移除服务或遇到用户修改的集成文件 | 默认保留数据；未单独移除的独立组件仍可用；保留未知/非己方文件 |
-| AC-17 | 中英文、纯键盘、IME、屏幕阅读器、高对比度、小窗口和 200% 缩放 | 安装、连接、Review、通知导航、恢复和卸载选项仍易懂且可操作 |
-| AC-18 | 在参考机器及声明的 OS/架构安装正式发行物 | 签名发行物和升级路径可用；完整占用和响应测量达到约定预算 |
-
-修改公开契约的实现 PR 运行 `make api-generate` 和 `make contract-test`，保留正常 `make check`、相关行为
-测试和严格文档检查。共享 UI 修改需要 Web 与桌面行为覆盖；桌面打包修改需要安装包冒烟测试，服务修改复用服务层
-原生平台测试。仅有 mock 传输测试不能证明安装或系统通知合格。
-
-# 缺点
-
-这会给 Python 项目增加一个长期维护的原生应用、Rust 工具链、桌面 JavaScript 打包、签名发布流程和系统专项测试。
-共享 UI 可以减少重复展示逻辑，但提取传输和构建边界仍需投入，也可能影响已有 Web UI。
-
-Tauri 在不同系统使用不同 WebView，渲染、无障碍、认证集成和原生通知都需要逐平台验证。Python 及可选存储/模型
-依赖可能占据大部分包体积和运行资源，减小桌面宿主后获得的实际收益未必很大。
-
-独立 runtime 安装比单个可执行文件更复杂。它符合现有 Server 在桌面关闭后继续服务 Agent 的职责，但需要协调
-兼容性和恢复。完整协作产品还依赖本 RFC 实现范围之外的授权和投递工作。
-
-# 设计理由与替代方案
-
-## Tauri 2 与 Electron
-
-| 考虑项 | Tauri 2 | Electron | 对 PowerContext 的判断 |
+| ID | 阶段/负责方 | 必须观察到的行为 | 验证入口 |
 | --- | --- | --- | --- |
-| Web UI 复用 | 在系统 WebView 中运行 HTML/CSS/JavaScript | 在随包 Chromium 中运行 HTML/CSS/JavaScript | 两者都能复用管理 UI，都不要求重写业务代码 |
-| 原生宿主 | Rust 宿主，显式授权 capability/插件 | Node.js 主进程，受限 preload/IPC | 范围较小的 Rust 宿主符合桌面职责和贡献者偏好 |
-| 分发占用 | 复用系统 WebView，但有平台 bootstrap 依赖 | 自带 Chromium 和 Node.js | 倾向 Tauri，但测量必须包含 Python/WebView/runtime 的完整发行物 |
-| 跨平台渲染 | 存在 WebView2、WKWebView、WebKitGTK 差异 | 自带 Chromium，相对一致 | 系统 WebView 无法满足必需无障碍/UI 行为时，Electron 更有优势 |
-| Python 集成 | 外部 runtime 或辅助进程 | 外部 runtime 或辅助进程 | 两者都不解决 Python 安装、服务归属和业务 schema 迁移 |
-| 凭据与升级 | 需要明确接入凭据库并设计组件升级 | 原生加密/升级能力仍需要策略和集成 | 两者都不替代系统凭据库验收、授权或安装契约 |
-| 团队成本 | Rust/原生插件维护能力和平台验收 | JavaScript/TypeScript 生态与 Electron 经验 | P0 验证 Rust 维护和发布归属 |
+| AC-01 | P3/P5 · Install + Desktop | 干净机器核验 runtime/宿主，无模型 Memory 保存/fts 召回成功 | 安装后的首次使用 |
+| AC-02 | P1/P3 · Install | 区分过期/外部/占用状态，保留未知归属 | 服务 JSON/原生生命周期 |
+| AC-03 | P3/P5 · Desktop + Install | 关闭/退出/重启/登录保留独立服务与工作，遵守所选启动方式 | 安装生命周期/恢复 |
+| AC-04 | P3/P5 · Install + Release | 中断升级/签名/就绪失败有持久组件状态和兼容恢复 | 安装器故障/重启 |
+| AC-05 | P1/P2 · Server + Desktop | 缺失/旧/未知握手、缺能力、身份变化不猜测支持或改投 | D1 连接 fixture |
+| AC-06 | P1 · Desktop | loopback/base path/明文/TLS/重定向/代理限制准确，不转发凭据 | 共享向量/原生传输 |
+| AC-07 | P1/P2 · Desktop | 连接/端点/token/Principal 变化隔离响应、游标、草稿和修改目标 | 打包后的并发交互 |
+| AC-08 | P2 · Server + Desktop | 无 Scope 列表权限仍可访问精确 Handoff；拒绝 latest/相邻/宽泛/证据泄露 | Access 与桌面流程 |
+| AC-09 | P2 · Server + Desktop | 分页/计数前过滤、不安全回退禁止、Review/发布仍授权 | Access/修改契约 |
+| AC-10 | P2 · Server + Desktop | 过期版本/citation、重复提交、响应丢失不静默批准/重放 | 修改恢复场景 |
+| AC-11 | P4 · Delivery + Desktop | 离线到达、游标过期、撤权/取消恢复精确授权收件箱 | D6 和接收端组合 |
+| AC-12 | P0/P4 · Desktop + Release | 安装提示、拒绝许可、突发、退出、过期激活安全导航/回退 | 原生/冷启动激活 |
+| AC-13 | P2 · Server + Desktop | 相同/改名/变化文本、BOM/换行、非法/超限、未知导入遵守身份/限制 | 导入/句柄 fixture |
+| AC-14 | P0/P2 · Desktop | 恶意内容、伪造 generation/窗口/路径/链接不能执行、读秘密或意外修改 | 打包 capability/CSP |
+| AC-15 | P0/P5 · Desktop + Release | 日志、URL、通知、导出、渲染层存储、遥测无秘密标记 | 输出检查 |
+| AC-16 | P3/P5 · Install | 移除保留数据、用户编辑和仍引用的独立消费者 | 安装后的移除 |
+| AC-17 | P2/P5 · Desktop | 双语、键盘/IME/阅读器/对比度/小窗口/200% 缩放可完成支持动作 | 无障碍流程 |
+| AC-18 | P0/P5 · Release | 精确签名包在参考机器测量，P5 达到公开预算 | 基准/支持记录 |
+| AC-19 | P2 · Server + Desktop | 大型/变化 Memory 在 D2 下完整有界遍历，D2 前如实限制 | 大 Scope fixture |
+| AC-20 | P2 · Server + Desktop | Profile Review、Topic Memory 和未知 family 保持类型化/只读边界 | Family/Review fixture |
+| AC-21 | P1/P3 · Server + Install + Desktop | 静态/注入 Provider、通用 401/503、部分轮换保持真实身份/错误/恢复 | 认证/配置流程 |
+| AC-22 | P2 · Desktop | 积压、多页、变化/部分覆盖遵守预算，不伪造计数/历史 | 轮询行为 |
+| AC-23 | P3 · Install + Release | updater 退出和 stable/preview 共享保留负责方恢复与唯一管理归属 | 打包升级/通道 |
+| AC-24 | P0/P2 · Desktop | 无 Python/Server 可安装引导，共享资源不漂移，管理只用公开 API | 桌面构建/Dashboard 回归 |
+| AC-25 | P3 · Server + Install | 维护迁移同 ID 恢复，流量前验证，无不兼容回滚 | 迁移/安装恢复 |
+| AC-26 | P4 · Delivery + Desktop | 多设备/目标、未注册 Agent 不冒充，不把提示转为接受 | 目标关联 |
 
-选择 **Tauri 2**，因为产品是在既有 Python Server 和相对轻量的 Web 管理界面外增加原生控制能力，宿主可以保持
-较小职责，不需要 Node.js 插件、自带浏览器引擎或桌面本地 AI 执行。Rust 用于系统集成和受限传输，不以性能为理由
-重写 Python 业务逻辑。
+实现 PR 运行 `make check` 和相关行为测试；契约变更额外运行 `make api-generate`、`make contract-test`。
+复用 Server/Access/传输/迁移/原生服务测试。共享 UI 需要 Dashboard 回归和桌面行为；打包需要真实安装测试。
+文档运行 `make docs-test`（Fumadocs），核验标题/导航/链接及中英文阶段/依赖/AC ID 一致。Mock 或文档构建不能
+证明原生行为合格。
 
-如果 P0 发现系统 WebView 的无障碍/渲染、必需原生集成，或持续 Rust/平台维护存在实际阻塞，Electron 是备选。
-切换时保持相同公开 API、安装、服务和授权边界。不并行维护两套正式桌面外壳，也不在比较完整安装原型之前声称某种
-方案性能更好。
+# 缺点与替代方案
 
-## 其他方案
+项目增加 Rust/原生维护、客户端 UI/构建、签名/升级和平台测试。共享展示减少部分重复，但不能省去客户端管理流程。
+Python/WebView 可能占据大部分资源。独立 runtime 升级需要兼容和数据恢复；投递仍依赖另一负责方。
 
-- **只做 Web UI：** 继续支持，对远程管理成本最低，但无法完成原生安装/服务诊断、系统凭据保存、文件集成和安装后通知流程。
-- **在有原生权限的外壳中直接加载 Server 页面：** 减少早期 UI 提取工作，但让安装依赖 Server 已可用，并把远程标记
-  放到原生权限旁边，因此选择打包可信本地 UI。
-- **让 Python 成为桌面子进程：** 可用于原型，但关闭/升级桌面不能中断 Agent 或持久工作，因此保留已有独立服务管理。
-- **用 Rust 重写 Runtime/存储：** 重复成熟业务契约和迁移责任，当前桌面需求没有要求这样做，不属于本提案。
-- **完全使用 Rust 原生控件：** 无法复用已有 Web 展示，又产生一套管理界面。只有明确证明共享 Web UI 无法满足需求时
-  再考虑。
+| 考虑项 | Tauri 2 | Electron | 判断 |
+| --- | --- | --- | --- |
+| Web 展示 | 系统 WebView | 自带 Chromium | 都支持客户端 UI，都不能直接移植 Jinja |
+| 原生边界 | Rust 与应用/插件权限 | 主进程和受限 preload/IPC | 倾向小型 Rust 宿主，实际验证权限 |
+| 体积/渲染 | 系统依赖与引擎差异 | 更大引擎、较一致渲染 | 测量完整安装产品 |
+| Python/服务/数据 | 外部 runtime 与迁移 | 同样需要 | 都不替代安装器/服务契约 |
+| 维护 | Rust/平台经验 | Electron/JavaScript 经验 | D7 确定维护/发行负责人 |
+
+选择 Tauri 2，并受 P0 门槛约束。Electron 用于实际 WebView/原生集成或持续维护阻塞时的备选，保留全部 API/归属
+规则，不同时维护两套正式外壳。Web-only 仍有价值，但缺少所需原生能力。当前范围不支持特权远程页面、桌面持有
+的 Server 子进程、Runtime 重写或完全原生的重复展示层。
 
 # 相关设计与参考
 
-项目内基础包括 RFC
-[1299](1299_local_server_availability_and_service_installation.md)、
-[1345](1345_scope_organization_and_agent_integration.md)、
-[1396](1396_handoff_access_control.md)、
-[1400](1400_source_definition_and_observation_model.md)、
-[1351](1351_standard_skill_package_lifecycle.md)，以及
-[Server Web UI 开发指南](../development/server-web-ui.md)。前面的依赖表区分了已实现部分和开放中的安装、分发、
-授权、投递工作。
+项目契约：[服务](1299_local_server_availability_and_service_installation.md)、
+[Scope](1345_scope_organization_and_agent_integration.md)、[授权](1396_handoff_access_control.md)、
+[Source](1400_source_definition_and_observation_model.md)、[基础 REST](1437_source_artifact_rest_api.md)、
+[Profile](1485_profile_artifact.md)、[处理](1515_artifact_processing_supervisor.md)、
+[family 读取](1549_artifact_family_unification.md)、[Skill 生命周期](1351_standard_skill_package_lifecycle.md)、
+[Dashboard](../development/dashboard.md)、[处理迁移](../docs/operate/artifact-processing-migration.md)。
 
-以下官方资料用于判断框架和打包方案，其中的机制不能替代 PowerContext 的组件契约：
+在真实包中验收框架机制：[Tauri 架构](https://v2.tauri.app/concept/architecture/)、
+[capability](https://v2.tauri.app/security/capabilities/)、[CSP](https://v2.tauri.app/security/csp/)、
+[Windows 安装](https://v2.tauri.app/distribute/windows-installer/)、[通知](https://v2.tauri.app/plugin/notification/)、
+[updater](https://v2.tauri.app/plugin/updater/)、[Stronghold](https://v2.tauri.app/plugin/stronghold/)、
+[Electron 安全](https://www.electronjs.org/docs/latest/tutorial/security)。
 
-- [Tauri 架构](https://v2.tauri.app/concept/architecture/)与
-  [WebView 版本](https://v2.tauri.app/reference/webview-versions/)说明宿主/UI 模型和平台引擎。
-- [Tauri capability](https://v2.tauri.app/security/capabilities/)与
-  [CSP](https://v2.tauri.app/security/csp/)用于设计受限原生桥接和可信打包 UI。
-- [Tauri sidecar](https://v2.tauri.app/develop/sidecar/)、
-  [updater](https://v2.tauri.app/plugin/updater/)和
-  [通知](https://v2.tauri.app/plugin/notification/)提供组件机制，仍需验证生命周期和真实安装行为。
-- [Tauri Windows 分发](https://v2.tauri.app/distribute/windows-installer/)、
-  [macOS 签名](https://v2.tauri.app/distribute/sign/macos/)及
-  [AppImage 分发](https://v2.tauri.app/distribute/appimage/)说明各系统不同的交付要求。
-- [Tauri Stronghold](https://v2.tauri.app/plugin/stronghold/)描述 vault 能力；本提案单独选择系统凭据库适配器。
-- [Electron 文档](https://www.electronjs.org/docs/latest/)、
-  [安全指南](https://www.electronjs.org/docs/latest/tutorial/security)、
-  [safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage)与
-  [autoUpdater](https://www.electronjs.org/docs/latest/api/auto-updater)用于评估替代方案。
+# 需要维护者共同决定的事项
 
-# 待解决问题
+这些问题都有建议默认方案和明确决策时间。缺失依赖仍是交付前提，不能写成已实现能力，也不妨碍提交设计供评审。
 
-在 RFC 审查或指定阶段，解决以下跨负责方决策，不把核心业务语义交给桌面：
-
-1. **RFC 接受前：** 确认 Windows 11 x64 首个平台、Tauri 维护/发布负责人，以及个人预览和完成 #1428 的阶段区别。
-2. **桌面管理安装前：** 确定安装/服务机器接口和 Windows bootstrap 时间。#1406 要求 shell 和 PowerShell 同为
-   首批入口，而开放的 #1408 仍未确定引擎及 PowerShell 时序；本提案不选择安装引擎语言，也不虚构 CLI 参数。
-3. **依赖兼容性的管理功能前：** 与 Server 负责方确定 `server-info` schema、契约版本策略、稳定 Server 身份的
-   生命周期和支持窗口。
-4. **协作版本发布前：** 与 #1419 确定投递/收件箱契约、集成启动及接收方检查，并完成 RFC 1396 实现的授权验收。
-   不将授权列表分页视为事件重放。
-5. **P0 结束时：** 公布实测性能预算、代码签名/更新密钥归属、发布 CI 环境及依赖/安全维护策略。这些是发布前提，
-   不表示当前已经覆盖。
-
-连接器管理面、更多认证方式、高级离线同步和广泛 Agent 执行属于其他设计，不能通过桌面私有协议掩盖这些能力缺失。
+| 通俗问题 | 建议默认方案 | 何时决定 |
+| --- | --- | --- |
+| 先把哪个系统做好，谁长期维护和发版？ | Windows 11 x64 + SQLite；确定 Desktop/Install/Server/Release 负责人和一个 Agent Host/版本 | 接受 RFC 时确定平台；P0 结束前落实人员/宿主 |
+| 和现在的 Dashboard 共用多少界面？ | 资源/规则/翻译/组件，独立客户端管理入口，不强制重写 Dashboard | 接受 RFC 时 |
+| 安装器和投递还没好，能不能先发布？ | 先仅连接预览，再管理；P3/P4 独立，完整前不关闭 #1428 | 接受 RFC 时 |
+| 第一版能连接哪些远程环境？ | 直连 HTTPS、运维发放 Bearer；暂不做代理/SSO/明文同意 | 接受 RFC 时；扩展需验收适配器 |
+| 支持哪些 Server 版本，恢复或克隆后如何识别？ | D1 明确版本/生命周期，1.0.0 作为旧版验收候选 | P0 契约讨论，早于相关控制交付 |
+| 安装和投递接口由谁提供，什么时候可用？ | D3–D6 原负责方维护 schema/恢复，桌面不另造替代 | 承诺 P3/P4 前 |
+| 整个产品要多快、多省资源？ | 在具名硬件实测，公布含 Python/WebView 的数字预算 | P0 结束、P2 扩展前 |
 
 # 未来可能性
 
-首个平台完成全部验收后，再增加 macOS/Linux 包、更多架构，以及用户明确开启的多连接后台通知。后续可以扩展
-Source 导入格式、受支持的连接器配置，或在 Server 契约具备后接入系统浏览器认证。
-
-离线写队列、本地业务缓存、更广的 Agent 操作或云同步都会引入新的一致性和安全责任，需要单独提案；采用本 RFC
-不以它们为前提。
+首个平台验收后，再增加 macOS/Linux、代理/浏览器身份适配器、用户明确选择的多 Scope/连接监控、更多导入格式和
+有契约的连接器管理。持久离线内容/写入及更广 Agent 执行引入新一致性/安全责任，需要单独提案。
