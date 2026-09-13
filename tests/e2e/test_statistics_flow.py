@@ -45,7 +45,7 @@ from powercontext.http import (
     StatsPeriod,
 )
 from powercontext.server.factory import create_server_app
-from powercontext.server.settings import BearerAuthConfig, McpConfig, ServerSettings
+from powercontext.server.settings import AccessControlConfig, BearerAuthConfig, McpConfig, ServerSettings
 
 _AUTH_TOKEN = "statistics-e2e-token"  # noqa: S105 - non-secret test credential.
 _OCEANBASE_URL = os.environ.get("POWERCONTEXT_TEST_OCEANBASE_URL")
@@ -70,7 +70,8 @@ def _settings(database_kind: str, database: Path) -> ServerSettings:
         persistence = SQLiteConfig(url=f"sqlite+aiosqlite:///{database}")
     return ServerSettings(
         database=persistence,
-        auth=BearerAuthConfig(enabled=True, token=SecretStr(_AUTH_TOKEN)),
+        auth=BearerAuthConfig(token=SecretStr(_AUTH_TOKEN)),
+        access=AccessControlConfig(mode="enforced"),
         inference=InferenceConfig(generation_model="test"),
         mcp=McpConfig(enabled=False),
     )
@@ -127,7 +128,7 @@ def test_statistics_survive_the_authenticated_http_business_flow_and_restart(
     })
     monkeypatch.setattr(
         "pydantic_ai.models.infer_model",
-        lambda _: TestModel(custom_output_text=model_output),
+        lambda _, **_kwargs: TestModel(custom_output_text=model_output),
     )
     first_app = create_server_app(settings=settings)
 

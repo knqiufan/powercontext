@@ -25,17 +25,19 @@ import {
   UnknownOperationError,
 } from './errors.ts'
 import { OPERATIONS, type OperationId, type OperationSpec } from './operations.generated.ts'
+import { normalizeServerUrl } from './transport.ts'
 
 export type JsonObject = Record<string, unknown>
 export type FetchFn = (input: string, init: RequestInit) => Promise<Response>
 
 export type ClientSuccess =
-  | { kind: 'json'; value: unknown; status: number; requestId: string | undefined }
-  | { kind: 'text'; value: string; status: number; requestId: string | undefined }
-  | { kind: 'bytes'; value: Uint8Array; status: number; requestId: string | undefined }
+  | { kind: 'json'; value: unknown; status: number; requestId: string | undefined; etag?: string }
+  | { kind: 'text'; value: string; status: number; requestId: string | undefined; etag?: string }
+  | { kind: 'bytes'; value: Uint8Array; status: number; requestId: string | undefined; etag?: string }
 
 export interface ClientOptions {
   baseUrl: string
+  allowInsecureHttp?: boolean
   authorization?: string
   requestTimeoutMs: number
   fetch?: FetchFn
@@ -83,7 +85,7 @@ function responsePath(response: Response): string {
 export async function readLimitedBody(response: Response, maxBytes = MAX_RESPONSE_BYTES): Promise<Uint8Array> {
   if (!response.body) {
     const buffer = new Uint8Array(await response.arrayBuffer())
-    if (buffer.byteLength > maxBytes) throw new InvalidResponseError(responsePath(response))
+    if (buffer.byteLength > maxBytes) throw new InvalidResponseError(responsePath(response), undefined, undefined, 'response_too_large')
     return buffer
   }
   const reader = response.body.getReader()
@@ -95,7 +97,7 @@ export async function readLimitedBody(response: Response, maxBytes = MAX_RESPONS
     total += value.byteLength
     if (total > maxBytes) {
       await reader.cancel()
-      throw new InvalidResponseError(responsePath(response))
+      throw new InvalidResponseError(responsePath(response), undefined, undefined, 'response_too_large')
     }
     chunks.push(value)
   }
@@ -117,7 +119,7 @@ function queryString(payload: JsonObject | undefined): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(payload ?? {})) {
     if (value === undefined || value === null) continue
-    params.set(key, String(value))
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, String(item))
   }
   const encoded = params.toString()
   return encoded ? `?${encoded}` : ''
@@ -190,7 +192,7 @@ export class PowerContextClient {
   private readonly fetchImpl: FetchFn
 
   constructor(options: ClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '')
+    this.baseUrl = normalizeServerUrl(options.baseUrl, options.allowInsecureHttp)
     this.authorization = options.authorization
     this.requestTimeoutMs = options.requestTimeoutMs
     this.fetchImpl = options.fetch ?? fetch
@@ -200,6 +202,7 @@ export class PowerContextClient {
     id: string,
     payload?: JsonObject,
     signal?: AbortSignal,
+    options: { readinessResponse?: boolean } = {},
   ): Promise<ClientSuccess> {
     if (!(id in OPERATIONS)) throw new UnknownOperationError(id)
     const spec = OPERATIONS[id as OperationId]
@@ -207,11 +210,25 @@ export class PowerContextClient {
     const url = `${this.baseUrl}${prepared.path}${prepared.query}`
     try {
       const response = await this.fetchImpl(url, this.buildInit(spec, prepared, signal))
-      return await this.parseResponse(id, spec, payload, response)
+      return await this.parseResponse(id, spec, payload, response, options.readinessResponse === true)
     } catch (error) {
       if (error instanceof ServerResponseError || error instanceof InvalidResponseError) throw error
       if (error instanceof UnknownOperationError) throw error
       throw this.wrapTransport(prepared.path, error)
+    }
+  }
+
+  async readOpenApi(signal?: AbortSignal): Promise<ClientSuccess> {
+    const path = '/openapi.json'
+    const spec = OPERATIONS.get_liveness
+    try {
+      const response = await this.fetchImpl(this.baseUrl + path, this.buildInit(spec, {
+        path, query: '', headers: {}, body: undefined,
+      }, signal))
+      return await this.parseResponse('openapi_document', { ...spec, path }, undefined, response)
+    } catch (error) {
+      if (error instanceof ServerResponseError || error instanceof InvalidResponseError) throw error
+      throw this.wrapTransport(path, error)
     }
   }
 
@@ -243,21 +260,29 @@ export class PowerContextClient {
 
   private async parseResponse(
     id: string,
-    spec: OperationSpec,
+    spec: Omit<OperationSpec, 'path'> & { path: string },
     payload: JsonObject | undefined,
     response: Response,
+    readinessResponse = false,
   ): Promise<ClientSuccess> {
     const success = (response.status >= 200 && response.status < 300)
       || hasStatus(spec.successStatuses as readonly number[], response.status)
-    if (isRedirect(response.status) && !success) throw new InvalidResponseError(spec.path)
-    const bytes = await readLimitedBody(response)
+      || (readinessResponse && id === 'get_readiness' && response.status === 503)
     const requestId = response.headers.get(REQUEST_ID_HEADER) ?? undefined
+    if (isRedirect(response.status) && !success) throw new InvalidResponseError(spec.path, requestId, response.status, 'redirect')
+    let bytes: Uint8Array
+    try {
+      bytes = await readLimitedBody(response)
+    } catch (error) {
+      if (error instanceof InvalidResponseError) throw new InvalidResponseError(spec.path, requestId, response.status, error.issue)
+      throw error
+    }
     if (!success) {
       throw this.httpError(response.status, spec.path, requestId, bytes)
     }
     if (hasStatus(spec.emptyStatuses as readonly number[], response.status)) {
-      if (bytes.byteLength !== 0) throw new InvalidResponseError(spec.path, requestId)
-      return { kind: 'json', value: null, status: response.status, requestId }
+      if (bytes.byteLength !== 0) throw new InvalidResponseError(spec.path, requestId, response.status, 'unexpected_body')
+      return { kind: 'json', value: null, status: response.status, requestId, etag: response.headers.get('ETag') ?? undefined }
     }
     if (id === 'get_handoff_report' && payload?.download === true) {
       return { kind: 'bytes', value: bytes, status: response.status, requestId }
@@ -266,9 +291,9 @@ export class PowerContextClient {
       return { kind: 'text', value: Buffer.from(bytes).toString('utf8'), status: response.status, requestId }
     }
     try {
-      return { kind: 'json', value: JSON.parse(Buffer.from(bytes).toString('utf8')), status: response.status, requestId }
+      return { kind: 'json', value: JSON.parse(Buffer.from(bytes).toString('utf8')), status: response.status, requestId, etag: response.headers.get('ETag') ?? undefined }
     } catch {
-      throw new InvalidResponseError(spec.path, requestId)
+      throw new InvalidResponseError(spec.path, requestId, response.status, 'invalid_json')
     }
   }
 

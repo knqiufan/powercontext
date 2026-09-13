@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { invokeOperation, renderToolResult, toolResultSchema, type PluginRuntime, type ToolResult } from './invoke.ts'
+import { invokeOperation, renderToolResult, reportDirectFailure, toolResultSchema, type PluginRuntime, type ToolResult } from './invoke.ts'
 import type { JsonObject } from './client.ts'
 import { sessionCwd, UNSCOPED_MESSAGE } from './scope.ts'
 
@@ -55,9 +55,14 @@ async function run(
   operationId: string,
   payload: JsonObject,
 ): Promise<ToolResult> {
-  const scopeId = await runtime.resolveScope(sessionCwd(exec.agent?.session.header.cwd))
-  if (!scopeId) return { ok: false, code: 'unscoped', message: UNSCOPED_MESSAGE }
-  return invokeOperation(runtime.client, operationId, payload, scopeId, exec.signal)
+  try {
+    const scopeId = await runtime.resolveScope(sessionCwd(exec.agent?.session.header.cwd), exec.signal)
+    if (!scopeId) return { ok: false, code: 'unscoped', message: UNSCOPED_MESSAGE }
+    return await invokeOperation(runtime.client, operationId, payload, scopeId, exec.signal,
+      error => reportDirectFailure(runtime, 'tool_call', error))
+  } catch (error) {
+    return reportDirectFailure(runtime, 'tool_call', error)
+  }
 }
 
 type ToolCallKind = 'read' | 'edit' | 'delete' | 'search'
@@ -163,7 +168,11 @@ function contextTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
       description: 'Manually prepare bounded PowerContext for a query. Automatic recall already runs each step.',
       kind: 'search',
       parameters: { query: { type: 'string', required: true, description: 'Question to retrieve context for.' } },
-      execute: (args, exec) => run(runtime, exec, 'prepare_context', { query: args.query, max_bytes: runtime.config.maxBytes }),
+      execute: (args, exec) => run(runtime, exec, 'prepare_context', {
+        query: args.query,
+        max_bytes: runtime.config.maxBytes,
+        ...(runtime.config.contextAssembly === undefined ? {} : { assembly: runtime.config.contextAssembly }),
+      }),
     }),
     pcTool(defineTool, {
       name: 'pc_capture_source',

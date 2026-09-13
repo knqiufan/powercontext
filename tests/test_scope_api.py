@@ -14,11 +14,129 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.server.factory import create_server_app
-from powercontext.server.settings import McpConfig, ServerSettings
+from powercontext.server.settings import BearerAuthConfig, McpConfig, ServerSettings
+
+
+def test_scope_discovery_filters_one_explicit_field_in_sql_and_paginates(tmp_path) -> None:
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'scope-query.db'}"),
+            auth=BearerAuthConfig(enabled=False),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/scopes",
+            json={
+                "title": "ＰowerContext title",  # noqa: RUF001 - preserve database-native width semantics
+                "summary": "Needle résumé 中文 %_*",
+                "external_references": [{"kind": "repository", "value": "https://github.com/OceanBase/PowerContext"}],
+                "idempotency_key": "needle",
+            },
+        ).json()
+        scope_id = created["scope_id"]
+        fragment = scope_id[4:12]
+        second = client.post(
+            "/v1/scopes",
+            json={
+                "title": "PowerContext child",
+                "summary": "Child scope",
+                "parent_scope_id": scope_id,
+                "idempotency_key": "child",
+            },
+        ).json()
+        binding_key = {"integration": "codex", "kind": "session", "external_id": "Workspace-PowerContext"}
+        assert client.put("/v1/scope-bindings", json={"key": binding_key, "scope_id": scope_id}).status_code == 200
+
+        matched = client.get(
+            "/v1/scopes",
+            params={"query": f"  {fragment}  ", "query_field": "scope_id"},
+        )
+        assert [item["scope_id"] for item in matched.json()["items"]] == [scope_id]
+        assert client.get("/v1/scopes", params={"query": "ＰowerContext", "query_field": "title"}).json()["items"]  # noqa: RUF001
+        assert client.get("/v1/scopes", params={"query": "powercontext", "query_field": "title"}).json()["items"] == []
+        assert [
+            item["scope_id"]
+            for item in client.get("/v1/scopes", params={"query": "PowerContext", "query_field": "title"}).json()[
+                "items"
+            ]
+        ] == [second["scope_id"]]
+        for query in ("résumé", "中文", "%_*"):
+            assert client.get("/v1/scopes", params={"query": query, "query_field": "summary"}).json()["items"]
+        assert client.get("/v1/scopes", params={"query": "resume", "query_field": "summary"}).json()["items"] == []
+        assert (
+            client.get(
+                "/v1/scopes", params={"query": "OceanBase/PowerContext", "query_field": "external_reference_value"}
+            ).json()["items"][0]["scope_id"]
+            == scope_id
+        )
+        assert (
+            client.get(
+                "/v1/scopes",
+                params={
+                    "query": "Workspace-PowerContext",
+                    "query_field": "binding_external_id",
+                    "binding_integration": "codex",
+                    "binding_kind": "session",
+                },
+            ).json()["items"][0]["scope_id"]
+            == scope_id
+        )
+        assert [
+            item["scope_id"] for item in client.get("/v1/scopes", params={"parent_scope_id": scope_id}).json()["items"]
+        ] == [second["scope_id"]]
+        assert client.get("/v1/scopes", params={"query": "%_*", "query_field": "title"}).json()["items"] == []
+
+        first_page = client.get("/v1/scopes", params={"limit": 1}).json()
+        assert len(first_page["items"]) == 1
+        assert first_page["next_cursor"]
+        second_page = client.get("/v1/scopes", params={"limit": 1, "cursor": first_page["next_cursor"]}).json()
+        assert second_page["items"][0]["scope_id"] > first_page["items"][0]["scope_id"]
+
+        assert len(client.get("/v1/scopes", params={"query": "   "}).json()["items"]) == 3
+        assert client.get("/v1/scopes", params={"query": fragment}).status_code == 422
+        assert client.get("/v1/scopes", params={"query_field": "scope_id"}).status_code == 422
+        assert client.get("/v1/scopes?query=one&query=two").status_code == 422
+        assert client.get("/v1/scopes", params={"title": "Needle"}).status_code == 422
+
+
+def test_scope_discovery_cursor_handles_expanding_unicode_query(tmp_path) -> None:
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'unicode-query.db'}"),
+            auth=BearerAuthConfig(enabled=False),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+    query = "\ufdfa" * 256
+    with TestClient(app) as client:
+        scope_ids = set()
+        for index in range(2):
+            created = client.post(
+                "/v1/scopes",
+                json={"title": query, "summary": "Unicode pagination", "idempotency_key": f"unicode-{index}"},
+            )
+            assert created.status_code == 201, created.text
+            scope_ids.add(created.json()["scope_id"])
+        params = {"query": query, "query_field": "title", "limit": 1}
+        first = client.get("/v1/scopes", params=params)
+        assert first.status_code == 200, first.text
+        cursor = first.json()["next_cursor"]
+        assert cursor and len(cursor) <= 4096
+        second = client.get("/v1/scopes", params=params | {"cursor": cursor})
+        assert second.status_code == 200, second.text
+        assert second.json()["next_cursor"] is None
+        assert {item["scope_id"] for page in (first, second) for item in page.json()["items"]} == scope_ids
+        changed = client.get("/v1/scopes", params=params | {"cursor": cursor, "query": "other"})
+        assert changed.status_code == 400, changed.text
+        assert changed.json()["error"]["code"] == "invalid_cursor"
 
 
 def test_scope_http_flow_resolves_default_durable_and_observation_ranges(tmp_path) -> None:
@@ -169,6 +287,50 @@ def test_scope_http_flow_rejects_incomplete_memory_publication(tmp_path) -> None
             "message": "The Artifact family cannot be published as complete target state.",
             "details": {"family": "memory"},
         }
+
+
+@pytest.mark.parametrize("target_has_profile", [False, True])
+def test_scope_http_rejects_profile_publication(tmp_path, target_has_profile) -> None:
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'profile-copy.db'}"),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+    with TestClient(app) as client:
+        scope_ids = [
+            client.post("/v1/scopes", json={"title": name, "summary": name, "idempotency_key": name}).json()["scope_id"]
+            for name in ("Source", "Target")
+        ]
+        source_id, target_id = scope_ids
+        for sid in scope_ids if target_has_profile else scope_ids[:1]:
+            assert (
+                client.post(
+                    f"/v1/scopes/{sid}/artifacts", json={"family": "profile", "content": {"content": "# Profile"}}
+                ).status_code
+                == 201
+            )
+        target_path = f"/v1/scopes/{target_id}/artifacts/profile/profile"
+        before = client.get(target_path)
+        request = {
+            "source": {
+                "scope_id": source_id,
+                "artifact": {"family": "profile", "artifact_id": "profile", "revision": 1},
+            },
+            "target_scope_id": target_id,
+            "idempotency_key": "profile-copy",
+        }
+        for _ in range(2):
+            response = client.post("/v1/artifact-publications", json=request)
+            assert response.status_code == 422
+            assert response.json()["error"] == {
+                "code": "artifact_publication_unsupported",
+                "message": "Profile artifacts cannot be copied or published across Scopes.",
+                "details": {"family": "profile"},
+            }
+        after = client.get(target_path)
+        assert after.status_code == before.status_code
+        assert after.json() == before.json()
 
 
 def test_data_plane_rejects_an_unknown_scope(tmp_path) -> None:

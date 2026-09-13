@@ -25,9 +25,20 @@ from urllib.parse import quote
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from powercontext.client.errors import InvalidResponseError, ServerResponseError, TransportError
+from powercontext.client.errors import InvalidResponseError, TransportError, server_response_error
+from powercontext.client.tags import ArtifactTagSetResponse
 from powercontext.client.tracing import ClientSpan
+from powercontext.client.transport_policy import resolve_client_transport
 from powercontext.http import (
+    AccessAuditPage,
+    AccessBinding,
+    AccessBindingPage,
+    AccessBindingReplacement,
+    AccessCheckRequest,
+    AccessCheckResponse,
+    AccessMeResponse,
+    AccessResourcePage,
+    AccessRolePage,
     AcknowledgeHandoffRequest,
     ActivateHandoffRequest,
     ApproveArtifactCandidateRequest,
@@ -37,6 +48,7 @@ from powercontext.http import (
     ArtifactPage,
     ArtifactPublication,
     ArtifactRevision,
+    ArtifactRevisionPage,
     Capabilities,
     CaptureContentSourceRequest,
     CaptureContentSourceResponse,
@@ -47,12 +59,18 @@ from powercontext.http import (
     CommittedHandoff,
     ConnectorCheckpointState,
     ContinueHandoffRequest,
+    CreateAccessBindingRequest,
     CreateArtifactRequest,
+    CreateDreamRunRequest,
     CreateRemoteSkillTargetRequest,
     CreateScopeRequest,
     CreateSourceRequest,
+    CreateSubjectSourceRequest,
+    CreateSubjectSourceResponse,
     CreateWorkContractRequest,
     DownloadRemoteSkillPackageRequest,
+    DreamRun,
+    DreamRunPage,
     EnrollRemoteSkillTargetRequest,
     ErrorResponse,
     ExperienceArtifact,
@@ -60,8 +78,13 @@ from powercontext.http import (
     FinalizeHandoffRequest,
     FlushMemoryRequest,
     FlushMemoryResponse,
+    FlushProfileRequest,
+    FlushProfileResponse,
+    FlushTopicMemoryRequest,
+    FlushTopicMemoryResponse,
     GeneratedCandidateResponse,
     GenerateExperienceRequest,
+    GeneratePromptDemonstrationsRequest,
     GenerateSkillRequest,
     GetArtifactCandidateRequest,
     GetConnectorCheckpointRequest,
@@ -71,6 +94,7 @@ from powercontext.http import (
     GetSkillPackageRequest,
     GetSkillRequest,
     GetStatsRequest,
+    GetTopicMemoryRequest,
     HandoffAcknowledgement,
     HandoffActivation,
     HandoffCurrentWorkRequest,
@@ -79,8 +103,14 @@ from powercontext.http import (
     HandoffResolution,
     HealthResponse,
     ImportExternalSkillRequest,
+    ListAccessAuditRequest,
+    ListAccessBindingsRequest,
+    ListAccessResourcesRequest,
+    ListAccessRolesRequest,
     ListArtifactCandidatesRequest,
+    ListArtifactRevisionsRequest,
     ListArtifactsRequest,
+    ListDreamRunsRequest,
     ListExternalSkillsRequest,
     ListExternalSkillsResponse,
     ListManagedSkillsRequest,
@@ -91,6 +121,8 @@ from powercontext.http import (
     ListMemoryEntriesResponse,
     ListRemoteSkillTargetsRequest,
     ListRemoteSkillTargetsResponse,
+    ListScopesRequest,
+    ListSourcesRequest,
     MemoryEntry,
     MemoryMutationResponse,
     PrepareContextRequest,
@@ -98,11 +130,15 @@ from powercontext.http import (
     PreparedHandoff,
     PreparedWorkHandoff,
     PrepareHandoffRequest,
+    ProfilePolicyResponse,
+    PromptConfiguration,
+    PromptDemonstrationResult,
     ProposeExperienceRequest,
     ProposeSkillPackageRequest,
     ProposeSkillRequest,
     PublishArtifactRequest,
     PublishRemoteSkillRequest,
+    PutProfilePolicyRequest,
     ReadinessResponse,
     ReconcileRemoteSkillsRequest,
     ReconcileRemoteSkillsResponse,
@@ -118,6 +154,7 @@ from powercontext.http import (
     RemoteSkillTargetCredential,
     RemoteSkillTargetEnrollment,
     RenameRemoteSkillTargetRequest,
+    ReplaceAccessBindingRequest,
     ReplaceArtifactRequest,
     ResolveExternalSkillRequest,
     ResolveScopeBindingRequest,
@@ -125,6 +162,7 @@ from powercontext.http import (
     RetireMemoryEntryRequest,
     ReviseArtifactCandidateRequest,
     ReviseMemoryEntryRequest,
+    RevokeAccessBindingRequest,
     RevokeRemoteSkillTargetRequest,
     ScanExternalSkillsRequest,
     ScanExternalSkillsResponse,
@@ -132,8 +170,11 @@ from powercontext.http import (
     ScopeDescriptor,
     ScopedStats,
     ScopePage,
+    ScopeQueryField,
     SearchMemoryRequest,
     SearchMemoryResponse,
+    SearchTopicMemoryRequest,
+    SearchTopicMemoryResponse,
     SetDefaultScopeRequest,
     SetScopeBindingRequest,
     SkillArtifact,
@@ -142,60 +183,89 @@ from powercontext.http import (
     SkillPackageManifest,
     SourceDefinitionManifest,
     SourceObservationReceipt,
+    SourcePage,
     SourceRecord,
     SubmitSourceObservationRequest,
+    TopicMemoryArtifact,
     UnpublishRemoteSkillRequest,
     UpdateScopeRequest,
     UpdateSkillLifecycleRequest,
     WorkSourceReceipt,
+)
+from powercontext.http._generated.models import (
+    ArtifactTagPage,
+    ArtifactTagSet,
+    QueryArtifactTagsRequest,
+    ReplaceArtifactTagsRequest,
 )
 from powercontext.http._generated.operations import (
     ACKNOWLEDGE_HANDOFF,
     ACTIVATE_HANDOFF,
     APPROVE_ARTIFACT_CANDIDATE,
     CAPTURE_CONTENT_SOURCE,
+    CHECK_ACCESS,
     CLEAR_SCOPE_BINDING,
     COMMIT_CONNECTOR_CHECKPOINT,
     COMMIT_HANDOFF,
     CONTINUE_HANDOFF,
+    CREATE_ACCESS_BINDING,
     CREATE_ARTIFACT,
+    CREATE_DREAM_RUN,
     CREATE_REMOTE_SKILL_TARGET,
     CREATE_SCOPE,
     CREATE_SOURCE,
+    CREATE_SUBJECT_SOURCE,
     CREATE_WORK_CONTRACT,
     DOWNLOAD_REMOTE_SKILL_PACKAGE,
     DOWNLOAD_SKILL_PACKAGE,
     ENROLL_REMOTE_SKILL_TARGET,
     FINALIZE_HANDOFF,
     FLUSH_MEMORY,
+    FLUSH_PROFILE,
+    FLUSH_TOPIC_MEMORY,
     GENERATE_EXPERIENCE,
+    GENERATE_PROMPT_DEMONSTRATIONS,
     GENERATE_SKILL,
+    GET_ACCESS_PRINCIPAL,
     GET_ARTIFACT,
     GET_ARTIFACT_CANDIDATE,
     GET_ARTIFACT_REVISION,
+    GET_ARTIFACT_TAGS,
     GET_CAPABILITIES,
     GET_CONNECTOR_CHECKPOINT,
     GET_DEFAULT_SCOPE,
+    GET_DREAM_RUN,
     GET_EXPERIENCE,
     GET_HANDOFF_REPORT,
     GET_LIVENESS,
     GET_MEMORY_ENTRY,
+    GET_MEMORY_ENTRY_TAGS,
+    GET_PROFILE_POLICY,
+    GET_PROMPT_CONFIGURATION,
     GET_READINESS,
     GET_SCOPE,
     GET_SKILL,
     GET_SKILL_PACKAGE_MANIFEST,
     GET_SOURCE,
     GET_STATS,
+    GET_TOPIC_MEMORY,
     HANDOFF_CURRENT_WORK,
     IMPORT_EXTERNAL_SKILL,
+    LIST_ACCESS_AUDIT,
+    LIST_ACCESS_BINDINGS,
+    LIST_ACCESS_RESOURCES,
+    LIST_ACCESS_ROLES,
     LIST_ARTIFACT_CANDIDATES,
+    LIST_ARTIFACT_REVISIONS,
     LIST_ARTIFACTS,
+    LIST_DREAM_RUNS,
     LIST_EXTERNAL_SKILLS,
     LIST_MANAGED_SKILLS,
     LIST_MEMORY_CHANGES,
     LIST_MEMORY_ENTRIES,
     LIST_REMOTE_SKILL_TARGETS,
     LIST_SCOPES,
+    LIST_SOURCES,
     PREPARE_CONTEXT,
     PREPARE_HANDOFF,
     PROPOSE_EXPERIENCE,
@@ -203,6 +273,8 @@ from powercontext.http._generated.operations import (
     PROPOSE_SKILL_PACKAGE,
     PUBLISH_ARTIFACT,
     PUBLISH_REMOTE_SKILL,
+    PUT_PROFILE_POLICY,
+    QUERY_ARTIFACT_TAGS,
     RECONCILE_REMOTE_SKILLS,
     RECORD_REMOTE_SKILL_RECEIPT,
     RECORD_SKILL_USAGE,
@@ -211,16 +283,21 @@ from powercontext.http._generated.operations import (
     REJECT_ARTIFACT_CANDIDATE,
     REMEMBER_MEMORY,
     RENAME_REMOTE_SKILL_TARGET,
+    REPLACE_ACCESS_BINDING,
     REPLACE_ARTIFACT,
+    REPLACE_ARTIFACT_TAGS,
+    REPLACE_MEMORY_ENTRY_TAGS,
     RESOLVE_EXTERNAL_SKILL,
     RESOLVE_SCOPE_BINDING,
     RESOLVE_SCOPE_SELECTION,
     RETIRE_MEMORY_ENTRY,
     REVISE_ARTIFACT_CANDIDATE,
     REVISE_MEMORY_ENTRY,
+    REVOKE_ACCESS_BINDING,
     REVOKE_REMOTE_SKILL_TARGET,
     SCAN_EXTERNAL_SKILLS,
     SEARCH_MEMORY,
+    SEARCH_TOPIC_MEMORY,
     SET_DEFAULT_SCOPE,
     SET_SCOPE_BINDING,
     SUBMIT_SOURCE_OBSERVATION,
@@ -241,15 +318,17 @@ class PowerContextClient:
 
     def __init__(
         self,
-        base_url: str,
+        base_url: str | None = None,
         *,
         token: str | None = None,
         timeout: float = 10.0,
         http_client: httpx.AsyncClient | None = None,
         trust_transport_security: bool = False,
-        allow_insecure_http: bool = False,
+        allow_insecure_http: bool | None = None,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
+        self._base_url, allow_insecure_http = resolve_client_transport(
+            "client", server_url=base_url, allow_insecure_http=allow_insecure_http
+        )
         # Plaintext HTTP is only trusted on loopback -- for *any* request, not just an authenticated
         # one. The request body itself carries Memory content, so a missing bearer token does not make
         # an unencrypted non-loopback request safe. When this facade opens the transport itself,
@@ -261,8 +340,7 @@ class PowerContextClient:
         # evidence of safety: the guard stays on for caller-supplied transports too, and a caller that
         # knows its transport is secure must say so explicitly via ``trust_transport_security`` rather
         # than have safety inferred from the argument being set. ``allow_insecure_http`` is the
-        # separate, explicit cleartext escape hatch used by a remote Skill Receiver after its own
-        # protected-network consent check; it does not claim that the transport is secure.
+        # separate, explicit cleartext opt-in; it does not claim that the transport is secure.
         transport_trusted = http_client is not None and trust_transport_security
         if not transport_trusted and not allow_insecure_http and is_plaintext_non_loopback(self._base_url):
             raise ValueError("refusing to send requests over unencrypted non-loopback HTTP")  # noqa: TRY003
@@ -306,10 +384,44 @@ class PowerContextClient:
 
         return await self._request(GET_CAPABILITIES)
 
-    async def list_scopes(self) -> ScopePage:
-        """List durable Scope descriptors."""
+    async def list_scopes(
+        self,
+        query: str | None = None,
+        *,
+        query_field: ScopeQueryField | None = None,
+        parent_scope_id: str | None = None,
+        external_reference_kind: str | None = None,
+        binding_integration: str | None = None,
+        binding_kind: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> ScopePage:
+        """List or discover durable Scope descriptors."""
 
-        return await self._request(LIST_SCOPES)
+        if (
+            query is None
+            and query_field is None
+            and parent_scope_id is None
+            and external_reference_kind is None
+            and binding_integration is None
+            and binding_kind is None
+            and limit is None
+            and cursor is None
+        ):
+            return await self._request(LIST_SCOPES)
+        return await self._request(
+            LIST_SCOPES,
+            ListScopesRequest(
+                query=query,
+                query_field=query_field,
+                parent_scope_id=parent_scope_id,
+                external_reference_kind=external_reference_kind,
+                binding_integration=binding_integration,
+                binding_kind=binding_kind,
+                limit=50 if limit is None else limit,
+                cursor=cursor,
+            ),
+        )
 
     async def create_scope(self, request: CreateScopeRequest) -> ScopeDescriptor:
         """Create one independent Scope boundary."""
@@ -412,7 +524,7 @@ class PowerContextClient:
         )
         if response.status_code != GET_HANDOFF_REPORT.success_status:
             error = _decode_error(response.content)
-            raise ServerResponseError(
+            raise server_response_error(
                 status_code=response.status_code,
                 request_id=response.headers.get(REQUEST_ID_HEADER),
                 code=None if error is None else error.error.code,
@@ -426,10 +538,102 @@ class PowerContextClient:
 
         return await self._request(CAPTURE_CONTENT_SOURCE, request)
 
+    async def get_access_principal(self) -> AccessMeResponse:
+        """Return the authenticated Principal and enforceable Access capabilities."""
+
+        return await self._request(GET_ACCESS_PRINCIPAL)
+
+    async def check_access(self, request: AccessCheckRequest) -> AccessCheckResponse:
+        """Evaluate one compound requirement for the current Principal."""
+
+        return await self._request(CHECK_ACCESS, request)
+
+    async def list_access_resources(self, request: ListAccessResourcesRequest) -> AccessResourcePage:
+        """List only relationships already visible to the current Principal."""
+
+        return await self._request(LIST_ACCESS_RESOURCES, request)
+
+    async def list_access_roles(self, request: ListAccessRolesRequest) -> AccessRolePage:
+        """List stable built-in role definitions."""
+
+        return await self._request(LIST_ACCESS_ROLES, request)
+
+    async def list_access_bindings(self, request: ListAccessBindingsRequest) -> AccessBindingPage:
+        """List bindings within an authorized administrative boundary."""
+
+        return await self._request(LIST_ACCESS_BINDINGS, request)
+
+    async def create_access_binding(self, request: CreateAccessBindingRequest) -> AccessBinding:
+        """Create or idempotently return one Access Binding."""
+
+        return await self._request(CREATE_ACCESS_BINDING, request)
+
+    async def revoke_access_binding(self, request: RevokeAccessBindingRequest) -> AccessBinding:
+        """Revoke one Access Binding using compare-and-swap."""
+
+        return await self._request(REVOKE_ACCESS_BINDING, request)
+
+    async def replace_access_binding(self, request: ReplaceAccessBindingRequest) -> AccessBindingReplacement:
+        """Atomically replace an immutable Access Binding."""
+
+        return await self._request(REPLACE_ACCESS_BINDING, request)
+
+    async def list_access_audit(self, request: ListAccessAuditRequest) -> AccessAuditPage:
+        """List data-minimized authorization and relationship audit events."""
+
+        return await self._request(LIST_ACCESS_AUDIT, request)
+
+    async def create_dream_run(self, scope_id: str, request: CreateDreamRunRequest) -> DreamRun:
+        """Accept a Dream or replay its original queued/terminal result."""
+
+        return await self._request(CREATE_DREAM_RUN, request, path_parameters={"scope_id": scope_id})
+
+    async def get_dream_run(self, scope_id: str, run_id: str) -> DreamRun:
+        """Read one durable Dream without triggering generation."""
+
+        return await self._request(GET_DREAM_RUN, path_parameters={"scope_id": scope_id, "run_id": run_id})
+
+    async def list_dream_runs(self, scope_id: str, request: ListDreamRunsRequest | None = None) -> DreamRunPage:
+        """List a bounded page of Dream history in reverse acceptance order."""
+
+        return await self._request(
+            LIST_DREAM_RUNS,
+            ListDreamRunsRequest() if request is None else request,
+            path_parameters={"scope_id": scope_id},
+        )
+
     async def create_source(self, scope_id: str, request: CreateSourceRequest) -> SourceRecord:
         """Create one durable Source without invoking generation."""
 
         return await self._request(CREATE_SOURCE, request, path_parameters={"scope_id": scope_id})
+
+    async def list_sources(
+        self,
+        scope_id: str,
+        request: ListSourcesRequest | None = None,
+    ) -> SourcePage:
+        """List one stable page of public Sources in a Scope."""
+
+        return await self._request(
+            LIST_SOURCES,
+            ListSourcesRequest() if request is None else request,
+            path_parameters={"scope_id": scope_id},
+        )
+
+    async def create_subject_source(
+        self, scope_id: str, request: CreateSubjectSourceRequest
+    ) -> CreateSubjectSourceResponse:
+        """Resolve a subject binding and atomically write both Sources."""
+        return await self._request(CREATE_SUBJECT_SOURCE, request, path_parameters={"scope_id": scope_id})
+
+    async def get_profile_policy(self, scope_id: str) -> ProfilePolicyResponse:
+        return await self._request(GET_PROFILE_POLICY, path_parameters={"scope_id": scope_id})
+
+    async def put_profile_policy(self, scope_id: str, request: PutProfilePolicyRequest) -> ProfilePolicyResponse:
+        return await self._request(PUT_PROFILE_POLICY, request, path_parameters={"scope_id": scope_id})
+
+    async def flush_profile(self, request: FlushProfileRequest) -> FlushProfileResponse:
+        return await self._request(FLUSH_PROFILE, request)
 
     async def get_source(self, scope_id: str, source_type: str, source_id: str) -> SourceRecord:
         """Read one exact Source in a Scope and Source type."""
@@ -460,6 +664,105 @@ class PowerContextClient:
             extra_headers=None if if_none_match is None else {"If-None-Match": if_none_match},
         )
 
+    async def get_artifact_tags(
+        self,
+        scope_id: str,
+        family: str,
+        artifact_id: str,
+        *,
+        if_none_match: str | None = None,
+    ) -> ArtifactTagSetResponse | None:
+        """Read scope-local labels with the server-issued ETag; None means 304."""
+        return await self._tag_request(
+            GET_ARTIFACT_TAGS,
+            None,
+            {"scope_id": scope_id, "family": family, "artifact_id": artifact_id},
+            headers={} if if_none_match is None else {"If-None-Match": if_none_match},
+        )
+
+    async def replace_artifact_tags(
+        self,
+        scope_id: str,
+        family: str,
+        artifact_id: str,
+        request: ReplaceArtifactTagsRequest,
+        *,
+        expected_etag: str,
+    ) -> ArtifactTagSetResponse:
+        """Replace labels without revising content; use the ETag from a prior read."""
+        result = await self._tag_request(
+            REPLACE_ARTIFACT_TAGS,
+            request,
+            {"scope_id": scope_id, "family": family, "artifact_id": artifact_id},
+            headers={"If-Match": expected_etag},
+        )
+        if result is None:
+            raise InvalidResponseError(REPLACE_ARTIFACT_TAGS.path, request_id=None)
+        return result
+
+    async def get_memory_entry_tags(
+        self,
+        scope_id: str,
+        artifact_id: str,
+        entry_id: str,
+        *,
+        if_none_match: str | None = None,
+    ) -> ArtifactTagSetResponse | None:
+        """Read one logical entry's labels, including an inactive manifest entry."""
+        return await self._tag_request(
+            GET_MEMORY_ENTRY_TAGS,
+            None,
+            {"scope_id": scope_id, "artifact_id": artifact_id, "entry_id": entry_id},
+            headers={} if if_none_match is None else {"If-None-Match": if_none_match},
+        )
+
+    async def replace_memory_entry_tags(
+        self,
+        scope_id: str,
+        artifact_id: str,
+        entry_id: str,
+        request: ReplaceArtifactTagsRequest,
+        *,
+        expected_etag: str,
+    ) -> ArtifactTagSetResponse:
+        """Replace one logical entry's labels without changing its version."""
+        result = await self._tag_request(
+            REPLACE_MEMORY_ENTRY_TAGS,
+            request,
+            {"scope_id": scope_id, "artifact_id": artifact_id, "entry_id": entry_id},
+            headers={"If-Match": expected_etag},
+        )
+        if result is None:
+            raise InvalidResponseError(REPLACE_MEMORY_ENTRY_TAGS.path, request_id=None)
+        return result
+
+    async def query_artifact_tags(self, scope_id: str, request: QueryArtifactTagsRequest) -> ArtifactTagPage:
+        """Find visible targets by exact tags within a Scope."""
+        return await self._request(QUERY_ARTIFACT_TAGS, request, path_parameters={"scope_id": scope_id})
+
+    async def _tag_request(
+        self,
+        operation: Operation[Any, ArtifactTagSet],
+        request: ReplaceArtifactTagsRequest | None,
+        path_parameters: dict[str, str],
+        *,
+        headers: dict[str, str],
+    ) -> ArtifactTagSetResponse | None:
+        response_headers: dict[str, str] = {}
+        result = await self._request(
+            operation,
+            request,
+            path_parameters=path_parameters,
+            extra_headers=headers,
+            response_headers=response_headers,
+        )
+        if result is None:
+            return None
+        etag = response_headers.get("etag")
+        if etag is None:
+            raise InvalidResponseError(operation.path, request_id=response_headers.get(REQUEST_ID_HEADER.lower()))
+        return ArtifactTagSetResponse(tag_set=result, etag=etag)
+
     async def get_artifact_revision(
         self,
         scope_id: str,
@@ -486,6 +789,36 @@ class PowerContextClient:
             LIST_ARTIFACTS,
             request,
             path_parameters={"scope_id": scope_id, "family": family},
+        )
+
+    async def list_artifact_revisions(
+        self, scope_id: str, family: str, artifact_id: str, request: ListArtifactRevisionsRequest
+    ) -> ArtifactRevisionPage:
+        """List immutable revision metadata using a stable, scoped pagination snapshot."""
+
+        return await self._request(
+            LIST_ARTIFACT_REVISIONS,
+            request,
+            path_parameters={"scope_id": scope_id, "family": family, "artifact_id": artifact_id},
+        )
+
+    async def get_prompt_configuration(self, scope_id: str, prompt_key: str) -> PromptConfiguration:
+        """Read the saved selection and Runtime defaults without creating a revision."""
+
+        return await self._request(
+            GET_PROMPT_CONFIGURATION,
+            path_parameters={"scope_id": scope_id, "prompt_key": prompt_key},
+        )
+
+    async def generate_prompt_demonstrations(
+        self, scope_id: str, prompt_key: str, request: GeneratePromptDemonstrationsRequest
+    ) -> PromptDemonstrationResult:
+        """Suggest typed demonstrations without saving or changing a Prompt."""
+
+        return await self._request(
+            GENERATE_PROMPT_DEMONSTRATIONS,
+            request,
+            path_parameters={"scope_id": scope_id, "prompt_key": prompt_key},
         )
 
     async def replace_artifact(
@@ -554,6 +887,11 @@ class PowerContextClient:
 
         return await self._request(FLUSH_MEMORY, request)
 
+    async def flush_topic_memory(self, request: FlushTopicMemoryRequest) -> FlushTopicMemoryResponse:
+        """Durably request Topic Memory processing without waiting for completion."""
+
+        return await self._request(FLUSH_TOPIC_MEMORY, request)
+
     async def remember_memory(self, request: RememberMemoryRequest) -> MemoryMutationResponse:
         """Save one explicit Memory entry without creating a Source."""
 
@@ -563,6 +901,16 @@ class PowerContextClient:
         """Search active Memory entries in one scope."""
 
         return await self._request(SEARCH_MEMORY, request)
+
+    async def search_topic_memory(self, request: SearchTopicMemoryRequest) -> SearchTopicMemoryResponse:
+        """Search current Topic Memory heads with Server-owned retrieval mode."""
+
+        return await self._request(SEARCH_TOPIC_MEMORY, request)
+
+    async def get_topic_memory(self, request: GetTopicMemoryRequest) -> TopicMemoryArtifact:
+        """Read one exact immutable Topic Memory revision."""
+
+        return await self._request(GET_TOPIC_MEMORY, request)
 
     async def prepare_context(self, request: PrepareContextRequest) -> PreparedContext:
         """Prepare final bounded context for one Agent turn."""
@@ -806,6 +1154,7 @@ class PowerContextClient:
         path_parameters: Mapping[str, str | int] | None = None,
         query_parameters: Mapping[str, Any] | None = None,
         extra_headers: Mapping[str, str] | None = None,
+        response_headers: dict[str, str] | None = None,
     ) -> _ResponseT:
         path, json_payload, request_query = _prepare_request(
             operation,
@@ -837,13 +1186,16 @@ class PowerContextClient:
             span.finish("failure", error=error)
             raise
         declared_not_modified = response.status_code == 304 and 304 in operation.responses
-        succeeded = response.status_code == operation.success_status or declared_not_modified
+        declared_success = 200 <= response.status_code < 300 and response.status_code in operation.responses
+        succeeded = declared_success or declared_not_modified
         span.finish("success" if succeeded else "failure", status_code=response.status_code)
 
         request_id = response.headers.get(REQUEST_ID_HEADER)
+        if response_headers is not None:
+            response_headers.update(response.headers)
         if not succeeded:
             error = _decode_error(response.content)
-            raise ServerResponseError(
+            raise server_response_error(
                 status_code=response.status_code,
                 request_id=request_id,
                 code=None if error is None else error.error.code,
@@ -876,10 +1228,18 @@ def _prepare_request(
         if operation.request_type is None:
             message = f"{operation.operation_id} does not accept a request"
             raise TypeError(message)
-        payload = TypeAdapter(operation.request_type).dump_python(request, mode="json", by_alias=True)
+        payload = TypeAdapter(operation.request_type).dump_python(
+            request, mode="json", by_alias=True, exclude_unset=operation is not PREPARE_CONTEXT
+        )
         if not isinstance(payload, dict):
             message = "Request must serialize to an object."
             raise TypeError(message)
+        if (
+            operation is PREPARE_CONTEXT
+            and isinstance(request, PrepareContextRequest)
+            and "assembly" not in request.model_fields_set
+        ):
+            payload.pop("assembly", None)
         if operation.request_location == "query":
             request_query.update({key: value for key, value in payload.items() if value is not None})
         else:

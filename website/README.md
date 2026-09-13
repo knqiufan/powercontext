@@ -29,6 +29,22 @@ pnpm build
 
 静态产物输出到 `website/out`。
 
+## 发布到 GitHub Pages
+
+在正式仓库 `oceanbase/powercontext` 的 `master` 分支上手动运行 `Deploy website` 工作流，发布官网。
+本地验证时使用相同的根路径构建参数：
+
+```bash
+NEXT_PUBLIC_BASE_PATH= \
+NEXT_PUBLIC_SITE_URL=https://powercontext.oceanbase.io \
+NEXT_PUBLIC_REPOSITORY_URL=https://github.com/oceanbase/powercontext \
+pnpm build
+```
+
+把 `out` 的内容部署到 `https://powercontext.oceanbase.io/`。这些参数在构建时写入页面和资源路径。
+
+`pnpm verify:export` 应使用与构建相同的环境变量；它会检查页面链接、静态资源、跳转页和双语首页的规范地址。
+
 ## 生成内容
 
 - OpenAPI 页面由 `openapi/powercontext.yaml` 直接生成。

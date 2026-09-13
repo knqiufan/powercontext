@@ -575,12 +575,22 @@ def test_service_install_requires_persistent_config_for_shell_server_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("POWERCONTEXT_SERVER_HTTP_PORT", "8123")
+    monkeypatch.setenv("POWERCONTEXT_HOME", "private-data-directory")
+    monkeypatch.setenv("POWERCONTEXT_SERVER_API_KEY", "secret-test-token")
     adapter = FakeAdapter(tmp_path)
 
     with pytest.raises(ServiceError, match="do not copy shell environment variables") as raised:
         ServiceController(adapter).install()
 
     assert raised.value.exit_code == 2
+    message = str(raised.value)
+    assert "POWERCONTEXT_SERVER_HTTP_PORT" in message
+    assert "POWERCONTEXT_HOME" in message
+    assert "POWERCONTEXT_SERVER_HTTP_PORT=8123" in message
+    assert "POWERCONTEXT_HOME=private-data-directory" in message
+    assert "POWERCONTEXT_SERVER_API_KEY=<your-current-value>" in message
+    assert "secret-test-token" not in message
+    assert "powercontext service install --env-file" in message
     assert adapter.events == []
 
 
@@ -1086,6 +1096,27 @@ def test_launchd_stop_waits_until_bootout_removes_the_loaded_job(
     run.assert_called_once_with("bootout", "gui/501/com.oceanbase.powercontext")
 
 
+def test_launchd_start_kickstarts_a_newly_bootstrapped_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LaunchdUserAdapter(home=tmp_path, uid=501)
+    monkeypatch.setattr(
+        adapter,
+        "loaded_registration",
+        lambda: ManagerRegistration(ManagerOwnershipState.NOT_LOADED),
+    )
+    run = Mock()
+    monkeypatch.setattr(adapter, "_run", run)
+
+    adapter.start(reload_definition=False)
+
+    assert run.call_args_list == [
+        (("bootstrap", "gui/501", str(adapter.artifact_path)), {}),
+        (("kickstart", "gui/501/com.oceanbase.powercontext"), {}),
+    ]
+
+
 @pytest.mark.parametrize("corruption", ["fragment", "path", "arguments", "marker", "metadata"])
 def test_systemd_loaded_registration_requires_matching_fragment_command_and_metadata(
     tmp_path: Path,
@@ -1381,6 +1412,134 @@ def test_service_install_cli_prompts_for_login_autostart(monkeypatch: pytest.Mon
     confirm.assert_called_once_with("Enable automatic Server startup when you log in?", default=False)
     controller.install.assert_called_once_with(env_file=None, start_on_login=False)
     assert "without login auto-start" in result.output
+    assert "environment file: not configured" in result.output
+    assert "POWERCONTEXT_SERVER_AUTH_TOKEN" in result.output
+    assert "the value is never printed" in result.output
+    assert "Inference capability notice" in result.output
+    assert "可能影响部分制品功能" in result.output
+    assert "https://powercontext.oceanbase.io/en/docs/reference/configuration/" in result.output
+
+
+def test_service_install_cli_reports_the_environment_file_without_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_ACCESS_MODE=disabled\n", encoding="utf-8")
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    assert f"environment file: {environment.resolve()} (mode 0600)" in result.output
+    assert "token location: POWERCONTEXT_SERVER_AUTH_TOKEN" in result.output
+    assert "the value is never printed" in result.output
+    assert "Inference capability notice" in result.output
+
+
+def test_service_install_preflight_keeps_the_environment_file_authoritative(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_HTTP_HOST=127.0.0.1\n", encoding="utf-8")
+    monkeypatch.setenv("POWERCONTEXT_SERVER_HTTP_HOST", "0.0.0.0")  # noqa: S104 - exercise the rejected non-loopback shell value.
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    controller.install.assert_called_once_with(env_file=environment, start_on_login=True)
+
+
+def test_service_install_cli_expands_the_environment_file_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_ACCESS_MODE=disabled\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        service_app,
+        ["install", "--env-file", "~/powercontext.env", "--start-on-login"],
+    )
+
+    assert result.exit_code == 0
+    controller.install.assert_called_once_with(env_file=environment, start_on_login=True)
+    assert f"environment file: {environment.resolve()} (mode 0600)" in result.output
+
+
+def test_service_install_cli_omits_inference_notice_when_models_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text(
+        "\n".join((
+            "POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:test-generation",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_MODEL=openai:test-embedding",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_PROFILE_ID=test-profile",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_DIMENSION=3",
+            "",
+        )),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    assert "Inference capability notice" not in result.output
 
 
 def test_service_uninstall_cli_renders_partial_failure_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1418,7 +1577,7 @@ def test_service_launcher_hands_control_to_the_foreground_server_runner(
         "probe_server",
         lambda _endpoint: ProbeResult(ProbeState.UNREACHABLE, "not listening"),
     )
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     data_dir = tmp_path / "data"
     exit_code = service_launcher.main(["--endpoint", "http://127.0.0.1:8000", "--data-dir", str(data_dir)])
@@ -1445,8 +1604,7 @@ def test_service_launcher_pins_the_recorded_data_directory(
         lambda _endpoint: ProbeResult(ProbeState.UNREACHABLE, "not listening"),
     )
     monkeypatch.setattr(
-        service_launcher.server_cli,
-        "_run_configured_server",
+        "powercontext.server.cli._run_configured_server",
         lambda _settings: observed_data.append(powercontext_data_dir()),
     )
 
@@ -1471,7 +1629,7 @@ def test_service_launcher_does_not_start_over_an_existing_powercontext_server(
         "probe_server",
         lambda endpoint: ProbeResult(ProbeState.LIVE, f"{endpoint} status=ok"),
     )
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     exit_code = service_launcher.main(["--endpoint", "http://127.0.0.1:8000", "--data-dir", str(tmp_path / "data")])
 
@@ -1495,7 +1653,7 @@ def test_service_launcher_can_redirect_server_output_to_owned_log_files(
         print("server output")
         print("server error", file=sys.stderr)
 
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     exit_code = service_launcher.main([
         "--endpoint",

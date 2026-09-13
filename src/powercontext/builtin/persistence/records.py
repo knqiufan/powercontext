@@ -16,12 +16,9 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
-import hmac
-import secrets
-from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import aclosing
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
 from uuid import uuid4
@@ -32,35 +29,44 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.artifacts import Artifact, ArtifactRef
+from powercontext.builtin.artifacts.memory import MemoryCitation, MemoryEntryVersion, MemoryService
 from powercontext.builtin.persistence.artifacts import ArtifactRepository
+from powercontext.builtin.persistence.cursor_codec import SignedCursorCodec
 from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.errors import (
     RepositoryNotFoundError,
     StoredPayloadConflictError,
 )
 from powercontext.builtin.persistence.family_management import FamilyManagementWriterRegistry
+from powercontext.builtin.persistence.memory import RelationalMemoryBackend
+from powercontext.builtin.persistence.processing import ArtifactProcessingPendingRepository
 from powercontext.builtin.persistence.sources import SourceRepository, StoredSource
 from powercontext.builtin.persistence.tables import (
     ARTIFACT_HEADS_TABLE,
     ARTIFACTS_TABLE,
+    MEMORY_ENTRY_VERSIONS_TABLE,
     SOURCE_JOURNAL_HEADS_TABLE,
     SOURCES_TABLE,
 )
+from powercontext.builtin.persistence.tags import RelationalTagService, tag_predicate
 from powercontext.builtin.records import (
     ArtifactCollectionItem,
     ArtifactCreated,
+    ArtifactListReader,
     ArtifactRecord,
     ArtifactRecordPage,
+    ArtifactRevisionPage,
     ArtifactRevisionPreconditionError,
     ArtifactWrite,
     BaseValueConflictError,
     BaseValueNotFoundError,
-    CursorExpiredError,
     InvalidBaseAccessRequestError,
     InvalidCursorError,
+    LogicalArtifactRecord,
     ScopeSummary,
     ScopeSummaryPage,
     SourceRecord,
+    SourceRecordPage,
 )
 from powercontext.builtin.sources import (
     CONTENT_SOURCE_ADAPTER,
@@ -70,19 +76,30 @@ from powercontext.builtin.sources import (
     ContentSourceInternal,
     ContentSourceTarget,
 )
+from powercontext.builtin.tags import ArtifactTagSet, TagFilter, TagQuery, TagQueryPage, TagTarget
 from powercontext.errors import RevisionConflictError
 from powercontext.sources import SourceMaterialization, SourceRef
 
 Clock = Callable[[], datetime]
 IdFactory = Callable[[str], str]
 
-_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+
 _JSON_VALUE = TypeAdapter(JsonValue)
 _DEFAULT_CURSOR_TTL_SECONDS = 3_600
+_SOURCE_PAGE_BUDGET_BYTES = 4 * 1024 * 1024
 
 
 class RelationalRecordService:
     """Serve fixed Source and Artifact paths over the shared relational tables."""
+
+    async def migrate_handoff_receipts(
+        self,
+        committed_identity_lookup: Callable[[str, str], Awaitable[object | None]],
+        /,
+    ) -> tuple[int, int]:
+        from powercontext.builtin.persistence.receipt_migration import migrate_handoff_receipts
+
+        return await migrate_handoff_receipts(self._database, self._sources, committed_identity_lookup)
 
     def __init__(
         self,
@@ -96,19 +113,43 @@ class RelationalRecordService:
         id_factory: IdFactory | None = None,
         cursor_secret: bytes | None = None,
         cursor_ttl_seconds: int = _DEFAULT_CURSOR_TTL_SECONDS,
+        processing_pending: ArtifactProcessingPendingRepository | None = None,
+        source_processing_bindings: tuple[str, ...] = (),
+        topic_memory_list_reader: ArtifactListReader | None = None,
     ) -> None:
-        if isinstance(cursor_ttl_seconds, bool) or cursor_ttl_seconds < 1:
-            raise ValueError("cursor_ttl_seconds must be a positive integer")  # noqa: TRY003
-        if cursor_secret is not None and not cursor_secret:
-            raise ValueError("cursor_secret must not be empty")  # noqa: TRY003
         self._database = database
         self._sources = sources
         self._artifacts = artifacts
         self._family_writers = family_writers
         self._clock = _utc_now if clock is None else clock
         self._id_factory = _resource_id if id_factory is None else id_factory
-        self._cursor_secret = secrets.token_bytes(32) if cursor_secret is None else cursor_secret
-        self._cursor_ttl = timedelta(seconds=cursor_ttl_seconds)
+        self._cursor_codec = SignedCursorCodec(
+            secret=cursor_secret,
+            clock=self._clock,
+            ttl_seconds=cursor_ttl_seconds,
+        )
+        self._cursor_secret = self._cursor_codec.secret
+        self._processing_pending = processing_pending
+        self._source_processing_bindings = source_processing_bindings
+        self._topic_memory_list_reader = topic_memory_list_reader
+        self._tags = RelationalTagService(
+            database,
+            artifacts,
+            cursor_secret=self._cursor_secret,
+            clock=self._clock,
+            cursor_ttl_seconds=cursor_ttl_seconds,
+        )
+
+    async def get_tags(self, scope_id: str, target: TagTarget) -> ArtifactTagSet:
+        return await self._tags.get(scope_id, target)
+
+    async def replace_tags(
+        self, scope_id: str, target: TagTarget, tags: tuple[str, ...], *, expected_etag: str
+    ) -> ArtifactTagSet:
+        return await self._tags.replace(scope_id, target, tags, expected_etag=expected_etag)
+
+    async def query_tags(self, scope_id: str, query: TagQuery, *, caller: str = "runtime") -> TagQueryPage:
+        return await self._tags.query(scope_id, query, caller=caller)
 
     async def create_source(
         self,
@@ -135,6 +176,8 @@ class RelationalRecordService:
         content: JsonValue,
         metadata: Mapping[str, JsonValue],
         /,
+        *,
+        handoff_receipt: bool = False,
     ) -> SourceRecord:
         """Preserve the caller-stable identity used by the existing capture API."""
 
@@ -146,7 +189,11 @@ class RelationalRecordService:
             )
         except ValidationError as error:
             raise InvalidBaseAccessRequestError("content", "does not match the Source adapter") from error
-        return await self._store_source(scope_id, source_type, await CONTENT_SOURCE_ADAPTER.resolve(capture))
+        return await self._store_source(
+            scope_id,
+            source_type,
+            (await CONTENT_SOURCE_ADAPTER.resolve(capture)).model_copy(update={"handoff_receipt": handoff_receipt}),
+        )
 
     async def _store_source(
         self,
@@ -156,7 +203,15 @@ class RelationalRecordService:
     ) -> SourceRecord:
         try:
             async with self._database.transaction() as connection:
-                stored = await self._sources.add(connection, scope_id, source)
+                stored, created = await self._sources.add_with_status(connection, scope_id, source)
+                if created and self._processing_pending is not None:
+                    for binding_name in self._source_processing_bindings:
+                        await self._processing_pending.raise_source(
+                            connection,
+                            scope_id,
+                            binding_name,
+                            stored.journal_position,
+                        )
         except StoredPayloadConflictError as error:
             raise BaseValueConflictError("source", (scope_id, source_type, source.name)) from error
         return _source_record(scope_id, stored)
@@ -167,6 +222,68 @@ class RelationalRecordService:
         async with self._database.transaction() as connection:
             return _source_record(scope_id, await self._get_source(connection, scope_id, ref))
 
+    async def list_sources(
+        self,
+        scope_id: str,
+        /,
+        *,
+        limit: int,
+        cursor: str | None,
+        caller: str = "runtime",
+    ) -> SourceRecordPage:
+        _require_limit(limit)
+        expected_cursor = {
+            "version": 1,
+            "endpoint": "list_sources",
+            "scope_id": scope_id,
+            "source_types": [CONTENT_SOURCE_NAME],
+            "authorization": "scope_read",
+            "caller": caller,
+            "limit": limit,
+            "order": "journal_position:asc",
+        }
+        cursor_state = self._cursor_after_text(cursor, expected_cursor)
+        async with self._database.transaction() as connection:
+            high_watermark = await self._sources.journal_position(connection, scope_id)
+            if cursor_state:
+                try:
+                    through_text, after_text = cursor_state.split(":")
+                    through, after = int(through_text), int(after_text)
+                except ValueError:
+                    raise InvalidCursorError from None
+                if not 0 <= after <= through <= high_watermark:
+                    raise InvalidCursorError
+            else:
+                through, after = high_watermark, 0
+            selected: list[SourceRecord] = []
+            page_bytes = 0
+            has_more = False
+            source_stream = self._sources.iter_list(
+                connection,
+                scope_id,
+                after=after,
+                through=through,
+                limit=limit + 1,
+                source_type=CONTENT_SOURCE_NAME,
+            )
+            async with aclosing(source_stream):
+                async for stored in source_stream:
+                    item = _source_record(scope_id, stored)
+                    if len(selected) == limit:
+                        has_more = True
+                        break
+                    item_bytes = len(item.model_dump_json().encode("utf-8"))
+                    if selected and page_bytes + item_bytes > _SOURCE_PAGE_BUDGET_BYTES:
+                        has_more = True
+                        break
+                    selected.append(item)
+                    page_bytes += item_bytes
+
+        next_cursor = None
+        if has_more and selected:
+            next_cursor = self._encode_cursor(expected_cursor, f"{through}:{selected[-1].position}")
+        return SourceRecordPage(items=tuple(selected), next_cursor=next_cursor)
+
     async def create_artifact(
         self,
         scope_id: str,
@@ -176,7 +293,15 @@ class RelationalRecordService:
     ) -> ArtifactCreated:
         writer = self._family_writers.get(family)
         command = writer.validate_create(write.content)
-        artifact_id = writer.artifact_id_for_create(self._id_factory(family))
+        if family == "prompt":
+            if write.prompt_key is None:
+                raise InvalidBaseAccessRequestError("prompt_key", "is required for Prompt Create")
+            selected_id = write.prompt_key
+        else:
+            if write.prompt_key is not None:
+                raise InvalidBaseAccessRequestError("prompt_key", "is only accepted for Prompt Create")
+            selected_id = self._id_factory(family)
+        artifact_id = writer.artifact_id_for_create(selected_id)
         source_id = self._id_factory("source")
         canonical_content = cast(
             dict[str, JsonValue],
@@ -236,6 +361,116 @@ class RelationalRecordService:
                 raise BaseValueNotFoundError("artifact", (scope_id, family, artifact_id, revision)) from None
             return _artifact_record(scope_id, artifact)
 
+    async def list_artifact_revisions(
+        self,
+        scope_id: str,
+        family: str,
+        artifact_id: str,
+        /,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> ArtifactRevisionPage:
+        self._require_family(family)
+        _require_limit(limit)
+        expected_cursor = {
+            "version": 1,
+            "endpoint": "list_artifact_revisions",
+            "scope_id": scope_id,
+            "family": family,
+            "artifact_id": artifact_id,
+            "authorization": "scope_read",
+            "order": "revision:desc",
+        }
+        after_text = self._cursor_after_text(cursor, expected_cursor)
+        async with self._database.transaction() as connection:
+            try:
+                current = await self._artifacts.latest(connection, scope_id, family, artifact_id)
+            except RepositoryNotFoundError:
+                raise BaseValueNotFoundError("artifact", (scope_id, family, artifact_id)) from None
+            if after_text:
+                try:
+                    snapshot_text, revision_text = after_text.split(":")
+                    snapshot, after = int(snapshot_text), int(revision_text)
+                except ValueError:
+                    raise InvalidCursorError from None
+                if not 1 <= after <= snapshot <= current.revision:
+                    raise InvalidCursorError
+            else:
+                snapshot, after = current.revision, current.revision + 1
+            revisions = tuple(
+                (
+                    await connection.execute(
+                        select(ARTIFACTS_TABLE.c.revision)
+                        .where(
+                            ARTIFACTS_TABLE.c.scope_id == scope_id,
+                            ARTIFACTS_TABLE.c.family == family,
+                            ARTIFACTS_TABLE.c.artifact_id == artifact_id,
+                            ARTIFACTS_TABLE.c.revision <= snapshot,
+                            ARTIFACTS_TABLE.c.revision < after,
+                        )
+                        .order_by(ARTIFACTS_TABLE.c.revision.desc())
+                        .limit(limit + 1)
+                    )
+                ).scalars()
+            )
+            selected = revisions[:limit]
+            artifacts = await self._artifacts.get_many(
+                connection,
+                scope_id,
+                tuple(ArtifactRef(family=family, artifact_id=artifact_id, revision=revision) for revision in selected),
+            )
+            items = tuple(_artifact_collection_item(scope_id, artifact) for artifact in artifacts)
+        next_cursor = (
+            self._encode_cursor(expected_cursor, f"{snapshot}:{selected[-1]}")
+            if len(revisions) > limit and selected
+            else None
+        )
+        return ArtifactRevisionPage(items=items, next_cursor=next_cursor)
+
+    async def current_memory_entry(self, scope_id: str, artifact_id: str, entry_id: str, /) -> MemoryEntryVersion:
+        """Resolve only one entry body, including entries in base-API Memory artifacts."""
+        backend = RelationalMemoryBackend(database=self._database, scope_id=scope_id, artifacts=self._artifacts)
+        memory = await backend.latest(artifact_id)
+        entry = next((value for value in memory.content.manifest.entries if value.entry_id == entry_id), None)
+        if entry is None:
+            raise BaseValueNotFoundError("artifact", (scope_id, artifact_id, entry_id))
+        citation = MemoryCitation(
+            memory_ref=memory.as_ref(), entry_id=entry_id, entry_version_id=entry.entry_version_id
+        )
+        return await MemoryService(backend=backend).validate_citation(citation)
+
+    async def logical_artifacts(self, scope_id: str, /) -> tuple[LogicalArtifactRecord, ...]:
+        """Read only catalog identities, including retained Memory entries."""
+
+        async with self._database.transaction() as connection:
+            artifacts = (
+                await connection.execute(
+                    select(ARTIFACT_HEADS_TABLE.c.family, ARTIFACT_HEADS_TABLE.c.artifact_id).where(
+                        ARTIFACT_HEADS_TABLE.c.scope_id == scope_id,
+                        ARTIFACT_HEADS_TABLE.c.family != "memory",
+                    )
+                )
+            ).all()
+            entries = (
+                await connection.execute(
+                    select(MEMORY_ENTRY_VERSIONS_TABLE.c.memory_artifact_id, MEMORY_ENTRY_VERSIONS_TABLE.c.entry_id)
+                    .where(
+                        MEMORY_ENTRY_VERSIONS_TABLE.c.scope_id == scope_id,
+                    )
+                    .distinct()
+                )
+            ).all()
+        return (
+            *(LogicalArtifactRecord(family=str(row.family), artifact_id=str(row.artifact_id)) for row in artifacts),
+            *(
+                LogicalArtifactRecord(
+                    family="memory", artifact_id=str(row.memory_artifact_id), entry_id=str(row.entry_id)
+                )
+                for row in entries
+            ),
+        )
+
     async def query_artifacts(
         self,
         scope_id: str,
@@ -244,9 +479,19 @@ class RelationalRecordService:
         *,
         limit: int,
         cursor: str | None,
+        tag_filter: TagFilter | None = None,
     ) -> ArtifactRecordPage:
         self._require_family(family)
         _require_limit(limit)
+        reader = self._topic_memory_list_reader
+        if reader is not None and family == reader.family:
+            return await reader.query(
+                scope_id,
+                limit=limit,
+                cursor=cursor,
+                tag_filter=tag_filter,
+                cursor_codec=self._cursor_codec,
+            )
         expected_cursor = {
             "version": 1,
             "endpoint": "list_artifacts",
@@ -254,6 +499,13 @@ class RelationalRecordService:
             "family": family,
             "order": "artifact_id:asc",
         }
+        if tag_filter is not None:
+            expected_cursor["tag_filter"] = sha256(
+                rfc8785.dumps({
+                    "keys": list(tag_filter.keys),
+                    "match": tag_filter.match,
+                })
+            ).hexdigest()
         after = self._cursor_after_text(cursor, expected_cursor)
         async with self._database.transaction() as connection:
             statement = (
@@ -269,6 +521,17 @@ class RelationalRecordService:
                 .order_by(ARTIFACT_HEADS_TABLE.c.artifact_id)
                 .limit(limit + 1)
             )
+            if tag_filter is not None:
+                statement = statement.where(
+                    tag_predicate(
+                        scope_id,
+                        family,
+                        ARTIFACT_HEADS_TABLE.c.artifact_id,
+                        "artifact",
+                        ARTIFACT_HEADS_TABLE.c.artifact_id,
+                        tag_filter,
+                    )
+                )
             rows = (await connection.execute(statement)).all()
             selected_rows = rows[:limit]
             artifacts = await self._artifacts.get_many(
@@ -298,6 +561,8 @@ class RelationalRecordService:
         write: ArtifactWrite,
         /,
     ) -> ArtifactRecord:
+        if write.prompt_key is not None:
+            raise InvalidBaseAccessRequestError("prompt_key", "is not accepted for replacement")
         writer = self._family_writers.get(family)
         command = writer.validate_replace(write.content)
         async with self._database.transaction() as connection:
@@ -356,11 +621,10 @@ class RelationalRecordService:
         return ScopeSummaryPage(items=summaries, next_cursor=next_cursor)
 
     def _encode_cursor(self, expected: Mapping[str, JsonValue], after: int | str) -> str:
-        expires_at = _aware_datetime(self._clock()) + self._cursor_ttl
-        return _encode_cursor(expected, after, secret=self._cursor_secret, expires_at=expires_at)
+        return self._cursor_codec.encode(expected, after)
 
     def _cursor_after_text(self, cursor: str | None, expected: Mapping[str, JsonValue]) -> str:
-        return _cursor_after_text(cursor, expected, secret=self._cursor_secret, now=_aware_datetime(self._clock()))
+        return self._cursor_codec.after_text(cursor, expected)
 
     def _require_content_source(self, source_type: str) -> None:
         if source_type != CONTENT_SOURCE_NAME:
@@ -368,7 +632,7 @@ class RelationalRecordService:
 
     def _require_family(self, family: str) -> None:
         if family not in self._artifacts.families:
-            raise InvalidBaseAccessRequestError("family", "must be memory, experience, skill, or handoff")
+            raise InvalidBaseAccessRequestError("family", "must be a registered Artifact family")
 
     async def _get_source(
         self,
@@ -427,6 +691,7 @@ def _source_record(
         content=_source_content(stored.value),
         position=stored.journal_position,
         content_digest=_content_digest(_source_content(stored.value)),
+        handoff_receipt=stored.value.handoff_receipt,
     )
 
 
@@ -449,6 +714,7 @@ def _artifact_record(
         content=content,
         sources=artifact.lineage.sources,
         artifacts=artifact.lineage.artifacts,
+        memory_citations=artifact.lineage.memory_citations,
         content_digest=_content_digest(content),
     )
 
@@ -496,80 +762,6 @@ def _canonical_source_text(value: JsonValue) -> str:
 def _require_limit(limit: int) -> None:
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
         raise InvalidBaseAccessRequestError("limit", "must be between 1 and 100")
-
-
-def _encode_cursor(
-    expected: Mapping[str, JsonValue],
-    after: int | str,
-    *,
-    secret: bytes,
-    expires_at: datetime,
-) -> str:
-    payload = {**expected, "after": after, "expires_at": int(expires_at.timestamp())}
-    encoded = rfc8785.dumps(cast(Any, payload))
-    signature = hmac.digest(secret, encoded, "sha256")
-    return f"{_encode_token_part(encoded)}.{_encode_token_part(signature)}"
-
-
-def _cursor_payload(
-    cursor: str | None,
-    expected: Mapping[str, JsonValue],
-    *,
-    secret: bytes,
-    now: datetime,
-) -> dict[str, JsonValue] | None:
-    if cursor is None:
-        return None
-    try:
-        encoded_payload, encoded_signature = cursor.split(".")
-        decoded = _decode_token_part(encoded_payload)
-        signature = _decode_token_part(encoded_signature)
-        payload = _JSON_OBJECT.validate_json(decoded, strict=True)
-    except (binascii.Error, UnicodeEncodeError, ValueError, ValidationError) as error:
-        raise InvalidCursorError from error
-    if not hmac.compare_digest(signature, hmac.digest(secret, decoded, "sha256")):
-        raise InvalidCursorError
-    expires_at = payload.get("expires_at")
-    if not isinstance(expires_at, int) or isinstance(expires_at, bool):
-        raise InvalidCursorError
-    if any(payload.get(key) != value for key, value in expected.items()):
-        raise InvalidCursorError
-    if set(payload) != {*expected, "after", "expires_at"}:
-        raise InvalidCursorError
-    if int(now.timestamp()) >= expires_at:
-        raise CursorExpiredError
-    return payload
-
-
-def _cursor_after_text(
-    cursor: str | None,
-    expected: Mapping[str, JsonValue],
-    *,
-    secret: bytes,
-    now: datetime,
-) -> str:
-    payload = _cursor_payload(cursor, expected, secret=secret, now=now)
-    if payload is None:
-        return ""
-    after = payload["after"]
-    if not isinstance(after, str):
-        raise InvalidCursorError
-    return after
-
-
-def _encode_token_part(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def _decode_token_part(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.b64decode(f"{value}{padding}".encode("ascii"), altchars=b"-_", validate=True)
-
-
-def _aware_datetime(value: object) -> datetime:
-    if not isinstance(value, datetime):
-        raise InvalidBaseAccessRequestError("timestamp", "must be a datetime")
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _resource_id(kind: str) -> str:

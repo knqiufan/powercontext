@@ -28,7 +28,7 @@ from pydantic import SecretStr, ValidationError
 
 from powercontext.client import PowerContextClient
 from powercontext.client.settings import ClientSettings
-from powercontext.server.settings import BearerAuthConfig, HttpConfig, ServerSettings
+from powercontext.server.settings import AccessControlConfig, BearerAuthConfig, HttpConfig, ServerSettings
 from powercontext.transport import canonical_loopback_endpoint, is_loopback_host, is_plaintext_non_loopback
 
 _ALL_INTERFACES = "0.0.0.0"  # noqa: S104 - a non-loopback bind used to exercise the policy.
@@ -62,11 +62,15 @@ def _load_plugin_module(name: str, path: Path) -> tuple[ModuleType | None, str]:
     # Register before executing: a slotted dataclass (the Claude Code plugin) resolves its own
     # module via sys.modules during class creation and fails to import otherwise.
     sys.modules[module_name] = module
+    previous_path = sys.path.copy()
     try:
+        sys.path.insert(0, str(path.parent))
         spec.loader.exec_module(module)
     except Exception as error:  # pragma: no cover - exercised only when a plugin is unavailable.
         sys.modules.pop(module_name, None)
         return None, repr(error)
+    finally:
+        sys.path[:] = previous_path
     return module, ""
 
 
@@ -223,14 +227,15 @@ def test_server_rejects_an_unauthenticated_non_loopback_bind() -> None:
     with pytest.raises(ValidationError):
         ServerSettings(
             http=HttpConfig(host=_ALL_INTERFACES),
-            auth=BearerAuthConfig(enabled=False),
+            auth=BearerAuthConfig(),
         )
 
 
 def test_server_allows_a_non_loopback_bind_with_authentication() -> None:
     settings = ServerSettings(
         http=HttpConfig(host=_ALL_INTERFACES),
-        auth=BearerAuthConfig(enabled=True, token=SecretStr("server-secret")),
+        auth=BearerAuthConfig(token=SecretStr("server-secret")),
+        access=AccessControlConfig(mode="enforced"),
     )
     assert settings.http.host == _ALL_INTERFACES
 
@@ -238,7 +243,7 @@ def test_server_allows_a_non_loopback_bind_with_authentication() -> None:
 def test_server_allows_a_non_loopback_bind_with_an_explicit_opt_in() -> None:
     settings = ServerSettings(
         http=HttpConfig(host=_ALL_INTERFACES),
-        auth=BearerAuthConfig(enabled=False),
+        auth=BearerAuthConfig(),
         allow_unauthenticated_non_loopback=True,
     )
     assert settings.allow_unauthenticated_non_loopback is True

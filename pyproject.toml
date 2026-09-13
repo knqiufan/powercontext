@@ -63,12 +63,14 @@ client = [
 server = [
     "fastapi>=0.115,<1",
     "fastmcp>=3.4,<4",
-    "jinja2>=3.1,<4",
+    "httpx>=0.28,<1",
+    "jinja2>=3.1.6,<4",
     "opentelemetry-api>=1.30,<2",
     "opentelemetry-sdk>=1.30,<2",
     "platformdirs>=4,<5",
     "powercontext[builtin]",
     "prometheus-client>=0.21,<1",
+    "pycasbin>=2.8,<3",
     "pydantic-settings>=2.7,<3",
     "scalar-fastapi>=1.8.2,<2",
     "uvicorn>=0.34,<1",
@@ -101,6 +103,19 @@ Repository = "https://github.com/oceanbase/powercontext"
 Documentation = "https://powercontext.oceanbase.io/en/docs/"
 
 [dependency-groups]
+notebooks = [
+    "powercontext[cli,server]",
+    "powercontext-langchain",
+    "powercontext-langgraph",
+    "powercontext-connector-opendal; python_version >= '3.12'",
+    "ipykernel>=6.29,<8",
+    "jupyterlab>=4.3,<5",
+    "nbclient>=0.10,<1",
+    "nbformat>=5.10,<6",
+    "langchain-openai>=1,<2",
+    "python-dotenv>=1,<2",
+    "playwright>=1.55,<2",
+]
 dev = [
     "datamodel-code-generator==0.64.0",
     "powercontext[cli,server]",
@@ -110,6 +125,7 @@ dev = [
     "langgraph>=1.2,<2",
     "langchain-core>=1,<2",
     "pytest>=9.0.2",
+    "time-machine==3.5.0",
     "pytest-cov>=7,<8",
     "pyyaml>=6,<7",
     "prek>=0.2.0",
@@ -122,6 +138,7 @@ dev = [
 [tool.uv.sources]
 powercontext-langchain = { path = "integrations/langchain", editable = true }
 powercontext-langgraph = { path = "integrations/langgraph", editable = true }
+powercontext-connector-opendal = { path = "integrations/opendal", editable = true }
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -139,14 +156,19 @@ python-version = "3.11"
 extra-paths = [
     "./scripts",
     "./integrations/claude-code/plugins/powercontext",
+    "./integrations/claude-code/plugins/powercontext/scripts",
     "./integrations/codex/plugins/powercontext",
+    "./integrations/codex/plugins/powercontext/scripts",
     "./integrations/workbuddy/plugins/powercontext",
     "./integrations/workbuddy/plugins/powercontext/hooks",
+    "./integrations/workbuddy/plugins/powercontext/scripts",
     "./integrations/pydantic-ai/src",
 ]
 
 [tool.ty.src]
 exclude = [
+    # Optional Jupyter dependencies and notebook state are validated by notebooks-test.
+    "examples/jupyter",
     "e2e/bub",
     "integrations/bub",
     "integrations/pydantic-ai",
@@ -234,6 +256,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"examples/jupyter/*.ipynb" = ["S101", "RUF001", "TRY003"]
+"examples/jupyter/_tutorial.py" = ["RUF001"]
 "tests/**/*.py" = ["S101", "S603"]
 "tests/*.py" = ["S101", "S603"]
 

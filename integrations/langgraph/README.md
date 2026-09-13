@@ -1,5 +1,7 @@
 # PowerContext for LangGraph
 
+`community`
+
 This package connects a [LangGraph](https://langchain-ai.github.io/langgraph/) graph to a running PowerContext
 Server through the public Python client. It integrates at the node and tool level, using LangGraph primitives that
 are stable public API, and provides three components:
@@ -81,6 +83,7 @@ Configuration is read through pydantic-settings with the prefix `POWERCONTEXT_LA
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `POWERCONTEXT_LANGGRAPH_BASE_URL` | `http://127.0.0.1:8000` | PowerContext Server URL |
+| `POWERCONTEXT_LANGGRAPH_ALLOW_INSECURE_HTTP` | `false` | Explicitly allow non-loopback HTTP; HTTPS certificate validation stays enabled |
 | `POWERCONTEXT_LANGGRAPH_TOKEN` | unset | Bearer token forwarded to `PowerContextClient` |
 | `POWERCONTEXT_LANGGRAPH_SCOPE_ID` | unset | Existing Server Scope to use instead of the Server default |
 | `POWERCONTEXT_LANGGRAPH_TIMEOUT` | `10` | Client timeout in seconds |
@@ -89,6 +92,12 @@ Configuration is read through pydantic-settings with the prefix `POWERCONTEXT_LA
 `TOKEN` carries a bare token rather than a complete `Authorization` header value, differing from the
 `POWERCONTEXT_*_AUTHORIZATION` convention used by the Codex, Claude Code, and DeepSeek Harness plugins.
 `PowerContextClient` accepts the bare token and composes the header internally.
+
+`allow_insecure_http=True` on `PowerContextLangGraphSettings` or `PowerContextScope` also permits non-loopback HTTP.
+Transport settings resolve from explicit values, host environment, common
+`POWERCONTEXT_CLIENT_SERVER_URL` / `POWERCONTEXT_CLIENT_ALLOW_INSECURE_HTTP`, then the `langgraph` entry in
+`~/.config/powercontext/clients.json` (overridden by `POWERCONTEXT_CLIENT_CONFIG_FILE`). A host value of `false`
+overrides common `true`. Saved consent applies only to its saved Server URL; changing a run's URL does not reuse it.
 
 ## Scope resolution
 

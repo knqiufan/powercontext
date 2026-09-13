@@ -28,11 +28,13 @@ from powercontext.http import (
     ContinueHandoffRequest,
     CreateArtifactRequest,
     CreateSourceRequest,
+    CreateSubjectSourceRequest,
     GetExperienceRequest,
     GetSkillPackageRequest,
     GetSkillRequest,
     HandoffSelection,
     ListArtifactsRequest,
+    ListSourcesRequest,
     ReplaceArtifactRequest,
 )
 from powercontext.server.factory import create_server_app
@@ -96,10 +98,37 @@ def test_source_and_artifact_api_round_trip(tmp_path: Path) -> None:
                 "content",
                 "position",
                 "content_digest",
+                "receipt_identity",
             }
             null_source = await client.create_source(scope_id, CreateSourceRequest(content=None))
             assert null_source.content is None
             assert (await client.get_source(scope_id, "content", null_source.source_id)).content is None
+
+            first_page = await client.list_sources(scope_id, ListSourcesRequest(limit=1))
+            assert [item.source_id for item in first_page.items] == [source.source_id]
+            assert first_page.next_cursor is not None
+            later_source = await client.create_source(scope_id, CreateSourceRequest(content="created after snapshot"))
+            second_page = await client.list_sources(
+                scope_id,
+                ListSourcesRequest(limit=1, cursor=first_page.next_cursor),
+            )
+            assert [item.source_id for item in second_page.items] == [null_source.source_id]
+            assert second_page.next_cursor is None
+            refreshed = await client.list_sources(scope_id, ListSourcesRequest(limit=10))
+            assert [item.source_id for item in refreshed.items] == [
+                source.source_id,
+                null_source.source_id,
+                later_source.source_id,
+            ]
+
+            invalid_cursor = await transport.get(
+                f"/v1/scopes/{encoded_scope}/sources",
+                params={"cursor": "invalid-token"},
+            )
+            assert invalid_cursor.status_code == 400
+            assert (
+                await transport.get(f"/v1/scopes/{encoded_scope}/sources", params={"source_type": "content"})
+            ).status_code == 422
 
             invalid_source_type = await transport.get(
                 f"/v1/scopes/{encoded_scope}/sources/private/{quote(source.source_id, safe='')}"
@@ -144,6 +173,14 @@ def test_source_and_artifact_api_round_trip(tmp_path: Path) -> None:
                 if_none_match=etag,
             )
             assert not_modified is None
+            weak_match = await transport.get(head_path, headers={"If-None-Match": f"W/{etag}"})
+            assert weak_match.status_code == 304
+            assert weak_match.headers["ETag"] == etag
+            list_match = await transport.get(head_path, headers={"If-None-Match": f'"revision:999", {etag}'})
+            assert list_match.status_code == 304
+            assert list_match.headers["ETag"] == etag
+            stale_match = await transport.get(head_path, headers={"If-None-Match": '"revision:999"'})
+            assert stale_match.status_code == 200
 
             listed = await client.list_artifacts(scope_id, "memory", ListArtifactsRequest())
             assert [item.artifact_id for item in listed.items] == [created.artifact_id]
@@ -184,6 +221,39 @@ def test_source_and_artifact_api_round_trip(tmp_path: Path) -> None:
                 )
             assert stale.value.status_code == 412
             assert stale.value.code == "revision_conflict"
+
+    asyncio.run(scenario())
+
+
+def test_subject_key_projects_one_source_into_a_stable_user_root(tmp_path: Path) -> None:
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'subject-source.db'}"),
+            auth=BearerAuthConfig(enabled=False),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+
+    async def scenario() -> None:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as transport,
+        ):
+            client = PowerContextClient("http://testserver", http_client=transport, trust_transport_security=True)
+            origin_scope_id = (await client.get_default_scope()).scope_id
+
+            created = await client.create_subject_source(
+                origin_scope_id,
+                CreateSubjectSourceRequest(content="我偏好中文简洁回答。", subject_key="user-10086"),
+            )
+
+            assert created.subject_key == "user-10086"
+            first, second = created.sources
+            assert first.scope_id == origin_scope_id
+            assert second.scope_id == created.subject_scope_id != origin_scope_id
+            assert first.source_id == second.source_id
+            assert first.content == second.content == "我偏好中文简洁回答。"
+            assert await client.get_source(second.scope_id, "content", second.source_id) == second
 
     asyncio.run(scenario())
 

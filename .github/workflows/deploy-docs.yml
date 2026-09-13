@@ -14,11 +14,16 @@ concurrency:
 
 jobs:
   deploy-website:
-    if: github.ref == 'refs/heads/master'
+    if: >-
+      github.repository == 'oceanbase/powercontext' && github.ref == 'refs/heads/master'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BASE_PATH: ''
+      NEXT_PUBLIC_SITE_URL: https://powercontext.oceanbase.io
+      NEXT_PUBLIC_REPOSITORY_URL: https://github.com/oceanbase/powercontext
     steps:
       - name: Check out
         uses: actions/checkout@v7

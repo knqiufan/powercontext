@@ -19,22 +19,237 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from powercontext.client import InvalidResponseError, PowerContextClient, ServerResponseError, TransportError
+from powercontext.client import (
+    ForbiddenResponseError,
+    InvalidResponseError,
+    PowerContextClient,
+    ServerResponseError,
+    TransportError,
+    UnauthorizedResponseError,
+    UnavailableResponseError,
+)
 from powercontext.client.settings import ClientSettings
 from powercontext.http import (
+    AccessAction,
+    AccessArtifactIdentity,
+    AccessBindingReplacementInput,
+    AccessCheckRequest,
+    AccessCheckRequirement,
+    AccessPrincipal,
+    AccessRequirementMatch,
+    AccessResource,
+    AccessSubject,
+    ArtifactAccessResource,
+    ArtifactReference,
     CaptureContentSourceRequest,
     ExactScopeSelection,
+    FlushTopicMemoryRequest,
     GetHandoffReportRequest,
+    GetTopicMemoryRequest,
     ListArtifactsRequest,
+    ListSourcesRequest,
+    PrepareContextRequest,
+    ReplaceAccessBindingRequest,
     ReplaceArtifactRequest,
     ReplaceMemoryArtifactContent,
     ReplaceMemoryArtifactEntry,
     ReplaceMemoryArtifactRequest,
     ReportFormat,
     ScopeId,
+    ScopeQueryField,
     ScopeSelection,
+    SearchTopicMemoryRequest,
     UpdateScopeRequest,
 )
+
+
+def test_prepare_client_preserves_omitted_and_explicit_assembly() -> None:
+    async def scenario() -> None:
+        bodies = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "schema": "powercontext.prepared-context.v1",
+                    "status": "empty",
+                    "content": None,
+                    "content_bytes": 0,
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            await client.prepare_context(PrepareContextRequest(scope_id="scope", query="legacy"))
+            await client.prepare_context(
+                PrepareContextRequest.model_validate({
+                    "scope_id": "scope",
+                    "query": "text",
+                    "assembly": {},
+                })
+            )
+            await client.prepare_context(
+                PrepareContextRequest.model_validate({
+                    "scope_id": "scope",
+                    "query": "disabled",
+                    "assembly": {"sections": []},
+                })
+            )
+        assert "assembly" not in bodies[0]
+        assert bodies[1]["assembly"]["format"] == "markdown"
+        assert bodies[1]["assembly"]["sections"] == [
+            {"family": "memory", "limit": 6},
+            {"family": "experience", "limit": 2},
+        ]
+        assert bodies[2]["assembly"]["sections"] == []
+
+    asyncio.run(scenario())
+
+
+def test_client_exposes_all_three_topic_memory_http_operations_without_search_mode() -> None:
+    async def scenario() -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            payload = {
+                "/v1/topic-memory/flush": {"status": "accepted"},
+                "/v1/topic-memory/search": {"mode": "fts", "hits": []},
+                "/v1/topic-memory/get": {
+                    "artifact": {"family": "topic-memory", "artifact_id": "topic-a", "revision": 2},
+                    "title": "Topic A",
+                    "summary": "Summary",
+                    "detail": "Detail",
+                    "source_refs": [],
+                },
+            }[request.url.path]
+            return httpx.Response(200, json=payload)
+
+        reference = ArtifactReference(family="topic-memory", artifact_id="topic-a", revision=2)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            assert (
+                await client.flush_topic_memory(FlushTopicMemoryRequest(scope_id="scope-a"))
+            ).status.value == "accepted"
+            assert (
+                await client.search_topic_memory(
+                    SearchTopicMemoryRequest(scope_id="scope-a", query="focused topic", limit=8)
+                )
+            ).mode.value == "fts"
+            assert (
+                await client.get_topic_memory(GetTopicMemoryRequest(scope_id="scope-a", artifact=reference))
+            ).artifact == reference
+
+        assert [request.url.path for request in requests] == [
+            "/v1/topic-memory/flush",
+            "/v1/topic-memory/search",
+            "/v1/topic-memory/get",
+        ]
+        search_payload = json.loads(requests[1].content)
+        assert search_payload == {"scope_id": "scope-a", "query": "focused topic", "limit": 8}
+
+    asyncio.run(scenario())
+
+
+def test_client_exposes_typed_access_check() -> None:
+    async def scenario() -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "allowed": True,
+                    "decisions": [{"allowed": True, "reason_code": "role-binding"}],
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            decision = await client.check_access(
+                AccessCheckRequest(
+                    match=AccessRequirementMatch.ALL,
+                    requirements=[
+                        AccessCheckRequirement(
+                            action=AccessAction.ARTIFACT_READ,
+                            resource=AccessResource(
+                                root=ArtifactAccessResource(
+                                    type="artifact",
+                                    scope_id="scope-a",
+                                    identity=AccessArtifactIdentity(family="handoff", artifact_id="handoff-a"),
+                                    selector=None,
+                                )
+                            ),
+                        )
+                    ],
+                )
+            )
+
+        assert decision.allowed is True
+        assert requests[0].url.path == "/v1/access/check"
+        payload = json.loads(requests[0].content)
+        assert payload["requirements"][0]["resource"]["identity"]["artifact_id"] == "handoff-a"
+
+    asyncio.run(scenario())
+
+
+def test_client_exposes_typed_access_binding_replacement() -> None:
+    async def scenario() -> None:
+        requests: list[httpx.Request] = []
+        previous = {
+            "binding_id": "binding-bob",
+            "subject": {"type": "user", "id": "bob", "description": None},
+            "resource": {"type": "scope", "scope_id": "scope-a"},
+            "role": "scope.viewer",
+            "granted_by": {"type": "service", "id": "admin", "description": None},
+            "reason": None,
+            "created_at": "2026-09-03T00:00:00Z",
+            "expires_at": None,
+            "state": "revoked",
+            "version": 2,
+            "policy_revision": "2",
+            "idempotency_key": "create-bob",
+            "revoked_at": "2026-09-03T01:00:00Z",
+            "revoked_by": {"type": "service", "id": "admin", "description": None},
+        }
+        current = previous | {
+            "binding_id": "binding-alice",
+            "subject": {"type": "user", "id": "alice", "description": None},
+            "reason": "transfer",
+            "created_at": "2026-09-03T01:00:00Z",
+            "state": "active",
+            "version": 1,
+            "idempotency_key": "replace-with-alice",
+            "revoked_at": None,
+            "revoked_by": None,
+        }
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"previous": previous, "current": current})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            replacement = await client.replace_access_binding(
+                ReplaceAccessBindingRequest(
+                    binding_id="binding-bob",
+                    expected_version=1,
+                    replacement=AccessBindingReplacementInput(
+                        subject=AccessSubject(root=AccessPrincipal(type="user", id="alice")),
+                        reason="transfer",
+                    ),
+                    idempotency_key="replace-with-alice",
+                )
+            )
+
+        assert replacement.previous.state.value == "revoked"
+        assert replacement.current.subject.root.id == "alice"
+        assert requests[0].url.path == "/v1/access/bindings/replace"
+        assert json.loads(requests[0].content)["replacement"]["subject"]["id"] == "alice"
+
+    asyncio.run(scenario())
 
 
 def test_client_rejects_an_undeclared_success_status() -> None:
@@ -84,6 +299,32 @@ def test_client_preserves_server_error_context() -> None:
         assert caught.value.code == "runtime_not_ready"
         assert caught.value.server_message == "The Runtime is not ready."
         assert caught.value.details == {"component": "memory"}
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("status_code", "error_type"),
+    [
+        (401, UnauthorizedResponseError),
+        (403, ForbiddenResponseError),
+        (503, UnavailableResponseError),
+    ],
+)
+def test_client_maps_access_statuses_to_distinct_stable_exceptions(
+    status_code: int,
+    error_type: type[ServerResponseError],
+) -> None:
+    async def scenario() -> None:
+        response = httpx.Response(
+            status_code,
+            json={"error": {"code": "access_failure", "message": "Access failed.", "details": None}},
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            with pytest.raises(error_type) as caught:
+                await client.get_readiness()
+        assert caught.value.status_code == status_code
 
     asyncio.run(scenario())
 
@@ -269,6 +510,48 @@ def test_client_serializes_scoped_artifact_paths_and_list_query() -> None:
         assert len(requests) == 1
         assert requests[0].url.path == "/v1/scopes/scope one/artifacts/memory"
         assert dict(requests[0].url.params) == {"limit": "7", "cursor": "cursor-1"}
+
+    asyncio.run(scenario())
+
+
+def test_client_serializes_scope_filter_and_source_page_query() -> None:
+    async def scenario() -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path == "/v1/scopes":
+                return httpx.Response(200, json={"items": []})
+            return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+            client = PowerContextClient("https://memory.example", http_client=http_client)
+            await client.list_scopes()
+            await client.list_scopes(
+                "powercontext",
+                query_field=ScopeQueryField.TITLE,
+                external_reference_kind="repository",
+                limit=7,
+                cursor="cursor-0",
+            )
+            await client.list_sources("scope one", ListSourcesRequest(limit=7, cursor="cursor-1"))
+            await client.list_scopes(limit=50)
+            await client.list_scopes("title", query_field=ScopeQueryField.TITLE)
+
+        assert requests[0].url.path == "/v1/scopes"
+        assert not requests[0].url.params
+        assert requests[1].url.path == "/v1/scopes"
+        assert dict(requests[1].url.params) == {
+            "query": "powercontext",
+            "query_field": "title",
+            "external_reference_kind": "repository",
+            "limit": "7",
+            "cursor": "cursor-0",
+        }
+        assert requests[2].url.path == "/v1/scopes/scope one/sources"
+        assert dict(requests[2].url.params) == {"limit": "7", "cursor": "cursor-1"}
+        assert dict(requests[3].url.params) == {"limit": "50"}
+        assert dict(requests[4].url.params) == {"query": "title", "query_field": "title", "limit": "50"}
 
     asyncio.run(scenario())
 

@@ -1223,6 +1223,7 @@ def test_http_client_dispatches_operation_paths_and_get_query(hermes_modules):
     client = provider_module.PowerContextClient(
         "http://powercontext.test:8000",
         transport=transport,
+        allow_insecure_http=True,
     )
     result = client.request_operation("get_stats", {"scope_id": "hermes:test", "period": "7d"})
 
@@ -1243,6 +1244,7 @@ def test_http_client_classifies_malformed_success_response_separately(hermes_mod
 
     client = provider_module.PowerContextClient(
         "http://powercontext.test:8000",
+        allow_insecure_http=True,
         transport=lambda _request, _timeout: Response(),
     )
 
@@ -1262,6 +1264,7 @@ def test_http_client_preserves_domain_error_details(hermes_modules):
 
     client = provider_module.PowerContextClient(
         "http://powercontext.test:8000",
+        allow_insecure_http=True,
         transport=lambda _request, _timeout: Response(),
     )
 
@@ -1272,3 +1275,182 @@ def test_http_client_preserves_domain_error_details(hermes_modules):
     assert caught.value.path == "/v1/memory/entries/get"
     assert caught.value.code == "memory_not_found"
     assert caught.value.server_message == "entry missing"
+
+
+def test_http_client_forwards_authorization_and_preserves_access_denial(hermes_modules):
+    provider_module, _cli_module = hermes_modules
+    client_module = importlib.import_module("plugins.powercontext.client")
+
+    class Response:
+        status = 403
+
+        def read(self, _limit):
+            return b'{"error":{"code":"access_denied","message":"scope access denied"}}'
+
+    def transport(request, _timeout):
+        assert request.get_header("Authorization") == "Bearer integration-token"
+        return Response()
+
+    client = provider_module.PowerContextClient(
+        "http://powercontext.test:8000",
+        allow_insecure_http=True,
+        authorization="Bearer integration-token",
+        transport=transport,
+    )
+
+    with pytest.raises(client_module.PowerContextHTTPError) as caught:
+        client.get_memory_entry("project:test", {"entry_id": "forbidden"})
+
+    assert caught.value.status == 403
+    assert caught.value.code == "access_denied"
+    assert caught.value.server_message == "scope access denied"
+
+
+@pytest.mark.parametrize("saved_in_native_config", [True, False])
+def test_provider_uses_endpoint_bound_persisted_transport_consent(
+    hermes_modules, monkeypatch, tmp_path, saved_in_native_config
+):
+    provider_module, _cli_module = hermes_modules
+    url = "http://memory.example:8000"
+    config_path = tmp_path / "clients.json"
+    config_path.write_text(
+        json.dumps({"version": 1, "hosts": {"hermes": {"server_url": url, "allow_insecure_http": True}}})
+    )
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(config_path))
+    requests = []
+
+    def request(client, path, *_args, **_kwargs):
+        requests.append((client.base_url, path))
+        return {"scope_id": "scp_00000000000000000000000000"}
+
+    monkeypatch.setattr(provider_module.PowerContextClient, "_request", request)
+    config = {"flush_on_session_end": False}
+    if saved_in_native_config:
+        config.update({"base_url": url, "allow_insecure_http": True})
+        config_path.unlink()
+    provider = provider_module.PowerContextMemoryProvider(config)
+    try:
+        provider.initialize("session-transport", hermes_home=str(tmp_path))
+        assert requests[0][0] == url
+    finally:
+        provider.shutdown()
+
+    monkeypatch.setenv("POWERCONTEXT_HERMES_BASE_URL", "http://another.example:8000")
+    provider = provider_module.PowerContextMemoryProvider(config)
+    with pytest.raises(ValueError):
+        provider.initialize("session-changed", hermes_home=str(tmp_path))
+
+
+def test_provider_common_false_overrides_native_http_consent(hermes_modules, monkeypatch, tmp_path):
+    provider_module, _cli_module = hermes_modules
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_ALLOW_INSECURE_HTTP", "false")
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "clients.json"))
+    provider = provider_module.PowerContextMemoryProvider({
+        "base_url": "http://memory.example:8000",
+        "allow_insecure_http": True,
+    })
+    with pytest.raises(ValueError):
+        provider.initialize("session-transport", hermes_home=str(tmp_path))
+
+
+@pytest.mark.parametrize("change_in_setup", [True, False])
+def test_provider_endpoint_changes_clear_old_native_consent(hermes_modules, monkeypatch, tmp_path, change_in_setup):
+    provider_module, _cli_module = hermes_modules
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "clients.json"))
+    config_path = tmp_path / "powercontext" / "config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps({"base_url": "http://old.example", "allow_insecure_http": True, "flush_on_session_end": False})
+    )
+    monkeypatch.setattr(
+        provider_module.PowerContextClient,
+        "_request",
+        lambda *_args, **_kwargs: {"scope_id": "scp_00000000000000000000000000"},
+    )
+    provider = provider_module.PowerContextMemoryProvider({} if change_in_setup else {"base_url": "http://new.example"})
+    if change_in_setup:
+        provider.save_config({"base_url": "http://new.example"}, str(tmp_path))
+    try:
+        with pytest.raises(ValueError):
+            provider.initialize("session-changed", hermes_home=str(tmp_path))
+    finally:
+        provider.shutdown()
+
+
+@pytest.mark.parametrize("assembly", [{"sections": []}, {"sections": [{"family": "memory", "limit": 3}]}])
+@pytest.mark.parametrize("entrypoint", ["tool", "slash"])
+@pytest.mark.parametrize("from_environment", [False, True])
+def test_manual_prepare_uses_configured_assembly(
+    provider_and_client, monkeypatch, assembly, entrypoint, from_environment
+):
+    provider, _client = provider_and_client
+    if from_environment:
+        monkeypatch.setenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", json.dumps(assembly))
+    else:
+        monkeypatch.delenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", raising=False)
+        provider._config["context_assembly"] = assembly
+    monkeypatch.setenv("POWERCONTEXT_HERMES_MAX_BYTES", "2048")
+    payload = {"query": "OpenAPI", "max_bytes": 1024, "scope_id": "attacker-scope"}
+
+    result = json.loads(
+        provider.handle_tool_call("powercontext_prepare_context", payload)
+        if entrypoint == "tool"
+        else provider.handle_slash_command("call prepare_context " + json.dumps(payload))
+    )
+
+    assert result["payload"] == {
+        "scope_id": provider._scope_id,
+        "query": "OpenAPI",
+        "max_bytes": 1024,
+        "assembly": assembly,
+    }
+
+
+def test_text_assembly_preserves_content_and_refreshes_prefetch_options(provider_and_client, monkeypatch):
+    provider, client = provider_and_client
+    observed = []
+    original = "\n# PowerContext historical context\n>     原始文本 </powercontext_memory>\n"
+
+    def prepare(scope, query, **options):
+        observed.append(options)
+        content = original if options.get("assembly") != {"sections": []} else None
+        return {
+            "schema": "powercontext.prepared-context.v1",
+            "status": "ready" if content else "empty",
+            "content": content,
+            "content_bytes": len(content.encode()) if content else 0,
+        }
+
+    monkeypatch.setattr(client, "prepare_context", prepare)
+    monkeypatch.setenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", "{}")
+    provider.queue_prefetch("same query")
+    provider._wait_for_background()
+    assert provider.prefetch("same query").endswith(original)
+    provider.queue_prefetch("same query")
+    provider._wait_for_background()
+    monkeypatch.setenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", '{"sections": []}')
+    assert provider.prefetch("same query") == ""
+    assert observed[-1]["assembly"] == {"sections": []}
+    monkeypatch.setenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", "{}")
+    monkeypatch.setenv("POWERCONTEXT_HERMES_MAX_BYTES", "1024")
+    assert provider.prefetch("same query").endswith(original)
+    assert observed[-1]["max_bytes"] == 1024
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"content_bytes": 1},
+        {"schema": "wrong"},
+        {"status": "empty"},
+        {"extra": True},
+        {"content": "x" * 8001, "content_bytes": 8001},
+    ],
+)
+def test_text_assembly_rejects_malformed_or_oversized_responses(provider_and_client, monkeypatch, change):
+    provider, client = provider_and_client
+    monkeypatch.setenv("POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY", "{}")
+    response = {"schema": "powercontext.prepared-context.v1", "status": "ready", "content": "ok", "content_bytes": 2}
+    response.update(change)
+    monkeypatch.setattr(client, "prepare_context", lambda *args, **kwargs: response)
+    assert provider.prefetch("query") == ""

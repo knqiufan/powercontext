@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from contextlib import nullcontext
 from copy import copy
 from typing import Generic, Self, TypeVar, cast
 
 from pydantic import BaseModel, Field
+from typing_extensions import override
 
 from powercontext.builtin.artifacts.memory.canonical import canonical_embedding
 from powercontext.builtin.artifacts.memory.models import EmbeddingProfile
+from powercontext.builtin.artifacts.prompt.service import current_prompt
 from powercontext.builtin.inference.errors import (
     InferenceConfigurationError,
     InferenceError,
@@ -79,8 +82,9 @@ try:
         UsageLimitExceeded,
         UserError,
     )
-    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart
     from pydantic_ai.models import Model, ModelRequestParameters
+    from pydantic_ai.models.wrapper import WrapperModel
     from pydantic_ai.settings import ModelSettings, merge_model_settings
     from pydantic_ai.usage import RunUsage, UsageLimits
     from pydantic_core import PydanticSerializationError
@@ -98,6 +102,25 @@ class InferenceLimits(BaseModel):
 
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_requests: int = Field(default=2, ge=1)
+    max_output_tokens_per_request: int | None = Field(default=None, ge=1)
+    output_tokens_limit: int | None = Field(default=None, ge=1)
+    allow_continuations: bool = True
+
+
+class _CompleteResponseModel(WrapperModel):
+    """Do not let Agent fold separately billed continuations into one request."""
+
+    @override
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        response = await self.wrapped.request(messages, model_settings, model_request_parameters)
+        if response.state != "complete":
+            raise InvalidInferenceOutputError("generate", "provider continuation is not allowed")
+        return response
 
 
 class PydanticAIStructuredGenerator(Generic[InputT, OutputT]):
@@ -113,6 +136,7 @@ class PydanticAIStructuredGenerator(Generic[InputT, OutputT]):
         limits: InferenceLimits | None = None,
         model_settings: ModelSettings | None = None,
         name: str | None = None,
+        prompt_key: str | None = None,
     ) -> None:
         if isinstance(model, str) or not isinstance(model, Model):
             raise PydanticAIConfigurationError("model-instance")
@@ -120,13 +144,20 @@ class PydanticAIStructuredGenerator(Generic[InputT, OutputT]):
             raise PydanticAIConfigurationError("instructions")
         self._limits = InferenceLimits() if limits is None else limits
         self._input_type = input_type
+        self._prompt_key = prompt_key
         try:
             self._input_adapter = TypeAdapter(input_type)
+            bounded_settings = model_settings
+            if self._limits.max_output_tokens_per_request is not None:
+                bounded_settings = merge_model_settings(
+                    model_settings,
+                    ModelSettings(max_tokens=self._limits.max_output_tokens_per_request),
+                )
             self._agent = Agent(
-                model,
+                model if self._limits.allow_continuations else _CompleteResponseModel(model),
                 output_type=PromptedOutput(output_type),
                 instructions=instructions,
-                model_settings=model_settings,
+                model_settings=bounded_settings,
                 retries=self._limits.max_requests - 1,
                 name=name,
             )
@@ -144,13 +175,25 @@ class PydanticAIStructuredGenerator(Generic[InputT, OutputT]):
             raise PydanticAIConfigurationError("serialize") from error
 
         try:
-            result = await asyncio.wait_for(
-                self._agent.run(
-                    prompt,
-                    usage_limits=UsageLimits(request_limit=self._limits.max_requests),
-                ),
-                timeout=self._limits.timeout_seconds,
+            selection = None if self._prompt_key is None else current_prompt(self._prompt_key)
+            # Agent.override uses task-local state; concurrent Scopes never mutate a shared Agent.
+            override = (
+                self._agent.override(instructions=selection.compiled_instructions)
+                if selection is not None and selection.selection == "artifact"
+                else nullcontext()
             )
+            with override:
+                result = await asyncio.wait_for(
+                    self._agent.run(
+                        prompt,
+                        usage_limits=UsageLimits(
+                            request_limit=self._limits.max_requests,
+                            output_tokens_limit=self._limits.output_tokens_limit,
+                        ),
+                        metadata=None if selection is None else selection.trace_attributes(),
+                    ),
+                    timeout=self._limits.timeout_seconds,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -208,6 +251,8 @@ class PydanticAIEmbeddingModel:
         try:
             result = await asyncio.wait_for(self._embed_batches(texts), timeout=self._limits.timeout_seconds)
         except asyncio.CancelledError:
+            raise
+        except InvalidInferenceOutputError:
             raise
         except ValueError as error:
             raise InferenceUnavailableError("embed") from error

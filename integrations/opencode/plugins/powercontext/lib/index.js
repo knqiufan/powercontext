@@ -16,7 +16,9 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { tool } from "@opencode-ai/plugin";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 //#region src/errors.ts
 const REQUEST_ID_HEADER = "X-PowerContext-Request-ID";
@@ -67,498 +69,1312 @@ var ServerResponseError = class extends ClientError {
 //#endregion
 //#region src/operations.generated.ts
 const OPERATIONS = {
+	create_subject_source: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/subject-sources",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
+	},
+	get_profile_policy: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/profile-policy",
+		location: null,
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	put_profile_policy: {
+		method: "PUT",
+		path: "/v1/scopes/{scope_id}/profile-policy",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	flush_profile: {
+		method: "POST",
+		path: "/v1/profile/flush",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
 	get_liveness: {
 		method: "GET",
 		path: "/health/live",
 		location: null,
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_readiness: {
 		method: "GET",
 		path: "/health/ready",
 		location: null,
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_capabilities: {
 		method: "GET",
 		path: "/v1/capabilities",
 		location: null,
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_scopes: {
 		method: "GET",
 		path: "/v1/scopes",
-		location: null,
+		location: "query",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [
+			"query",
+			"query_field",
+			"parent_scope_id",
+			"external_reference_kind",
+			"binding_integration",
+			"binding_kind",
+			"limit",
+			"cursor"
+		],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	create_scope: {
 		method: "POST",
 		path: "/v1/scopes",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	publish_artifact: {
 		method: "POST",
 		path: "/v1/artifact-publications",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	get_scope: {
 		method: "GET",
 		path: "/v1/scopes/{scope_id}",
 		location: null,
 		scopeMode: "none",
-		pathParameters: ["scope_id"]
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	update_scope: {
 		method: "PUT",
 		path: "/v1/scopes/{scope_id}",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: ["scope_id"]
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_default_scope: {
 		method: "GET",
 		path: "/v1/scopes/default",
 		location: null,
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	set_default_scope: {
 		method: "PUT",
 		path: "/v1/scopes/default",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	resolve_scope_selection: {
 		method: "POST",
 		path: "/v1/scopes/selection/resolve",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	resolve_scope_binding: {
 		method: "POST",
 		path: "/v1/scope-bindings/resolve",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	set_scope_binding: {
 		method: "PUT",
 		path: "/v1/scope-bindings",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	clear_scope_binding: {
 		method: "POST",
 		path: "/v1/scope-bindings/clear",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	capture_content_source: {
 		method: "POST",
 		path: "/v1/sources/content",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [202],
+		emptyStatuses: []
 	},
 	register_source_definition: {
 		method: "POST",
 		path: "/v1/source-definitions/register",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_connector_checkpoint: {
 		method: "POST",
 		path: "/v1/connector-checkpoints/get",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	submit_source_observation: {
 		method: "POST",
 		path: "/v1/source-observations",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [202],
+		emptyStatuses: []
 	},
 	commit_connector_checkpoint: {
 		method: "POST",
 		path: "/v1/connector-checkpoints/commit",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	prepare_context: {
 		method: "POST",
 		path: "/v1/context/prepare",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	create_work_contract: {
 		method: "POST",
 		path: "/v1/work/contracts/create",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [202],
+		emptyStatuses: []
 	},
 	handoff_current_work: {
 		method: "POST",
 		path: "/v1/work/handoffs/prepare-current",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	acknowledge_handoff: {
 		method: "POST",
 		path: "/v1/work/handoffs/acknowledge",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	record_task_outcome: {
 		method: "POST",
 		path: "/v1/work/outcomes/record",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [202],
+		emptyStatuses: []
 	},
 	activate_handoff: {
 		method: "POST",
 		path: "/v1/handoff/activate",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	prepare_handoff: {
 		method: "POST",
 		path: "/v1/handoff/prepare",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	finalize_handoff: {
 		method: "POST",
 		path: "/v1/handoff/finalize",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	commit_handoff: {
 		method: "POST",
 		path: "/v1/handoff/commit",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	continue_handoff: {
 		method: "POST",
 		path: "/v1/handoff/continue",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	flush_topic_memory: {
+		method: "POST",
+		path: "/v1/topic-memory/flush",
+		location: "body",
+		scopeMode: "current",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	search_topic_memory: {
+		method: "POST",
+		path: "/v1/topic-memory/search",
+		location: "body",
+		scopeMode: "current",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_topic_memory: {
+		method: "POST",
+		path: "/v1/topic-memory/get",
+		location: "body",
+		scopeMode: "current",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	flush_memory: {
 		method: "POST",
 		path: "/v1/memory/flush",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	remember_memory: {
 		method: "POST",
 		path: "/v1/memory/remember",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	search_memory: {
 		method: "POST",
 		path: "/v1/memory/search",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_memory_entries: {
 		method: "POST",
 		path: "/v1/memory/entries/list",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_memory_entry: {
 		method: "POST",
 		path: "/v1/memory/entries/get",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	revise_memory_entry: {
 		method: "POST",
 		path: "/v1/memory/entries/revise",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	retire_memory_entry: {
 		method: "POST",
 		path: "/v1/memory/entries/retire",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_memory_changes: {
 		method: "POST",
 		path: "/v1/memory/changes",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_dream_runs: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/dream",
+		location: "query",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [
+			"status",
+			"operation",
+			"cursor",
+			"limit"
+		],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	create_dream_run: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/dream",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [202, 200],
+		emptyStatuses: []
+	},
+	get_dream_run: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/dream/{run_id}",
+		location: null,
+		scopeMode: "none",
+		pathParameters: ["scope_id", "run_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	propose_experience: {
 		method: "POST",
 		path: "/v1/experience/propose",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	generate_experience: {
 		method: "POST",
 		path: "/v1/experience/generate",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_experience: {
 		method: "POST",
 		path: "/v1/experience/get",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	propose_skill: {
 		method: "POST",
 		path: "/v1/skill/propose",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	generate_skill: {
 		method: "POST",
 		path: "/v1/skill/generate",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_skill: {
 		method: "POST",
 		path: "/v1/skill/get",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_managed_skills: {
 		method: "POST",
 		path: "/v1/skill/library",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	update_skill_lifecycle: {
 		method: "POST",
 		path: "/v1/skill/lifecycle",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_skill_package_manifest: {
 		method: "POST",
 		path: "/v1/skill/package/manifest",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	download_skill_package: {
 		method: "POST",
 		path: "/v1/skill/package/download",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	propose_skill_package: {
 		method: "POST",
 		path: "/v1/skill/package/propose",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	record_skill_usage: {
 		method: "POST",
 		path: "/v1/skill/usage",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	list_remote_skill_targets: {
 		method: "POST",
 		path: "/v1/skill/remote/targets",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	create_remote_skill_target: {
 		method: "POST",
 		path: "/v1/skill/remote/target/create",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
 	},
 	enroll_remote_skill_target: {
 		method: "POST",
 		path: "/v1/skill/remote/target/enroll",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	rename_remote_skill_target: {
 		method: "POST",
 		path: "/v1/skill/remote/target/rename",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	revoke_remote_skill_target: {
 		method: "POST",
 		path: "/v1/skill/remote/target/revoke",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	publish_remote_skill: {
 		method: "POST",
 		path: "/v1/skill/remote/publication/publish",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	unpublish_remote_skill: {
 		method: "POST",
 		path: "/v1/skill/remote/publication/unpublish",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	reconcile_remote_skills: {
 		method: "POST",
 		path: "/v1/skill/remote/reconcile",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	download_remote_skill_package: {
 		method: "POST",
 		path: "/v1/skill/remote/package/download",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	record_remote_skill_receipt: {
 		method: "POST",
 		path: "/v1/skill/remote/receipt",
 		location: "body",
 		scopeMode: "none",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	scan_external_skills: {
 		method: "POST",
 		path: "/v1/external-skills/scan",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_external_skills: {
 		method: "POST",
 		path: "/v1/external-skills/list",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	resolve_external_skill: {
 		method: "POST",
 		path: "/v1/external-skills/resolve",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	import_external_skill: {
 		method: "POST",
 		path: "/v1/external-skills/import",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	list_artifact_candidates: {
 		method: "POST",
 		path: "/v1/artifact-candidates/list",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_artifact_candidate: {
 		method: "POST",
 		path: "/v1/artifact-candidates/get",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	approve_artifact_candidate: {
 		method: "POST",
 		path: "/v1/artifact-candidates/approve",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	reject_artifact_candidate: {
 		method: "POST",
 		path: "/v1/artifact-candidates/reject",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	revise_artifact_candidate: {
 		method: "POST",
 		path: "/v1/artifact-candidates/revise",
 		location: "body",
 		scopeMode: "current",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_stats: {
 		method: "POST",
 		path: "/v1/stats",
 		location: "body",
 		scopeMode: "selection",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	},
 	get_handoff_report: {
 		method: "POST",
 		path: "/v1/handoff-reports/get",
 		location: "body",
 		scopeMode: "selection",
-		pathParameters: []
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_sources: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/sources",
+		location: "query",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: ["limit", "cursor"],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	create_source: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/sources",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
+	},
+	get_source: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/sources/{source_type}/{source_id}",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"source_type",
+			"source_id"
+		],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	create_artifact: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/artifacts",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
+	},
+	list_artifacts: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}",
+		location: "query",
+		scopeMode: "none",
+		pathParameters: ["scope_id", "family"],
+		queryParams: [
+			"tag",
+			"tag_match",
+			"limit",
+			"cursor"
+		],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_artifact: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id"
+		],
+		queryParams: [],
+		headerParams: ["If-None-Match"],
+		successStatuses: [200, 304],
+		emptyStatuses: [304]
+	},
+	replace_artifact: {
+		method: "PUT",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id"
+		],
+		queryParams: [],
+		headerParams: ["If-Match"],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_artifact_tags: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}/tags",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id"
+		],
+		queryParams: [],
+		headerParams: ["If-None-Match"],
+		successStatuses: [200, 304],
+		emptyStatuses: [304]
+	},
+	replace_artifact_tags: {
+		method: "PUT",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}/tags",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id"
+		],
+		queryParams: [],
+		headerParams: ["If-Match"],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_memory_entry_tags: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/memory/{artifact_id}/entries/{entry_id}/tags",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"artifact_id",
+			"entry_id"
+		],
+		queryParams: [],
+		headerParams: ["If-None-Match"],
+		successStatuses: [200, 304],
+		emptyStatuses: [304]
+	},
+	replace_memory_entry_tags: {
+		method: "PUT",
+		path: "/v1/scopes/{scope_id}/artifacts/memory/{artifact_id}/entries/{entry_id}/tags",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"artifact_id",
+			"entry_id"
+		],
+		queryParams: [],
+		headerParams: ["If-Match"],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	query_artifact_tags: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/artifact-tags/query",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_artifact_revision: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}/revisions/{revision}",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id",
+			"revision"
+		],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_artifact_revisions: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/artifacts/{family}/{artifact_id}/revisions",
+		location: "query",
+		scopeMode: "none",
+		pathParameters: [
+			"scope_id",
+			"family",
+			"artifact_id"
+		],
+		queryParams: ["limit", "cursor"],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_prompt_configuration: {
+		method: "GET",
+		path: "/v1/scopes/{scope_id}/prompts/{prompt_key}",
+		location: null,
+		scopeMode: "none",
+		pathParameters: ["scope_id", "prompt_key"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	generate_prompt_demonstrations: {
+		method: "POST",
+		path: "/v1/scopes/{scope_id}/prompts/{prompt_key}/demonstrations",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: ["scope_id", "prompt_key"],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	get_access_principal: {
+		method: "GET",
+		path: "/v1/access/me",
+		location: null,
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	check_access: {
+		method: "POST",
+		path: "/v1/access/check",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_access_resources: {
+		method: "POST",
+		path: "/v1/access/resources/list",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_access_roles: {
+		method: "POST",
+		path: "/v1/access/roles/list",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_access_bindings: {
+		method: "POST",
+		path: "/v1/access/bindings/list",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	create_access_binding: {
+		method: "POST",
+		path: "/v1/access/bindings/create",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [201],
+		emptyStatuses: []
+	},
+	revoke_access_binding: {
+		method: "POST",
+		path: "/v1/access/bindings/revoke",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	replace_access_binding: {
+		method: "POST",
+		path: "/v1/access/bindings/replace",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
+	list_access_audit: {
+		method: "POST",
+		path: "/v1/access/audit/list",
+		location: "body",
+		scopeMode: "none",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
 	}
 };
 const OPERATION_IDS = Object.keys(OPERATIONS);
+
+//#endregion
+//#region src/transport.ts
+function optionalText(value) {
+	return typeof value === "string" ? value.trim() || void 0 : void 0;
+}
+function optionalBoolean(value, name) {
+	if (value === void 0) return void 0;
+	if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
+	return value;
+}
+function environmentBoolean(env, name) {
+	if (env[name] === void 0) return void 0;
+	const value = env[name].trim().toLowerCase();
+	if ([
+		"true",
+		"1",
+		"yes",
+		"on"
+	].includes(value)) return true;
+	if ([
+		"false",
+		"0",
+		"no",
+		"off"
+	].includes(value)) return false;
+	throw new Error(`${name} must be a boolean (true/false, 1/0, yes/no, on/off)`);
+}
+function readSavedClient(host, env) {
+	const home = optionalText(env.HOME) ?? homedir();
+	const configuredPath = optionalText(env.POWERCONTEXT_CLIENT_CONFIG_FILE);
+	const path = configuredPath?.startsWith("~/") ? join(home, configuredPath.slice(2)) : configuredPath ?? join(home, ".config", "powercontext", "clients.json");
+	let contents;
+	try {
+		contents = readFileSync(path, "utf8");
+	} catch (error) {
+		if (error.code === "ENOENT") return {};
+		throw new Error("Unable to read PowerContext client configuration", { cause: error });
+	}
+	let document;
+	try {
+		document = JSON.parse(contents);
+	} catch {
+		throw new Error("PowerContext client configuration must be valid JSON");
+	}
+	if (!document || typeof document !== "object" || Array.isArray(document) || document.version !== 1) throw new Error("PowerContext client configuration must have version 1");
+	const hosts = document.hosts;
+	if (!hosts || typeof hosts !== "object" || Array.isArray(hosts)) throw new Error("PowerContext client configuration hosts must be an object");
+	const value = hosts[host];
+	if (value === void 0) return {};
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("PowerContext saved host configuration must be an object");
+	const entry = value;
+	if (entry.server_url !== void 0 && !optionalText(entry.server_url)) throw new Error("PowerContext saved server_url must be a non-empty string");
+	return {
+		server_url: optionalText(entry.server_url),
+		allow_insecure_http: optionalBoolean(entry.allow_insecure_http, "allow_insecure_http")
+	};
+}
+function normalizeServerUrl(value, allowInsecureHttp = false, name = "PowerContext server URL") {
+	optionalBoolean(allowInsecureHttp, "allowInsecureHttp");
+	let url;
+	try {
+		url = new URL(value);
+	} catch {
+		throw new Error(`${name} must be a valid HTTP(S) URL`);
+	}
+	if (!["http:", "https:"].includes(url.protocol)) throw new Error(`${name} must use HTTP or HTTPS`);
+	if (url.username || url.password || url.search || url.hash) throw new Error(`${name} must not contain credentials, a query, or a fragment`);
+	const host = url.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+	const octets = host.split(".");
+	const loopback = host === "localhost" || host === "::1" || octets.length === 4 && octets[0] === "127" && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
+	if (url.protocol === "http:" && !loopback && !allowInsecureHttp) throw new Error(`${name} must use HTTPS outside loopback; explicitly enable allow_insecure_http to permit plaintext HTTP`);
+	return url.toString().replace(/\/+$/, "").replace(/\/mcp$/, "").replace(/\/+$/, "");
+}
+function resolveTransport(host, env, nativeUrl, nativeConsent, defaultUrl) {
+	const prefix = `POWERCONTEXT_${host.toUpperCase()}`;
+	const saved = readSavedClient(host, env);
+	const environmentUrl = optionalText(env[`${prefix}_BASE_URL`]) ?? optionalText(env[`${prefix}_SERVER_URL`]) ?? optionalText(env[`${prefix}_ENDPOINT`]) ?? optionalText(env.POWERCONTEXT_CLIENT_SERVER_URL);
+	const pluginUrl = optionalText(nativeUrl);
+	const selectedUrl = environmentUrl ?? pluginUrl ?? saved.server_url ?? defaultUrl;
+	const normalized = selectedUrl === void 0 ? void 0 : normalizeServerUrl(selectedUrl, true, `${prefix}_BASE_URL`);
+	const savedUrl = saved.server_url === void 0 ? void 0 : normalizeServerUrl(saved.server_url, true);
+	const hostConsent = environmentBoolean(env, `${prefix}_ALLOW_INSECURE_HTTP`);
+	const commonConsent = environmentBoolean(env, "POWERCONTEXT_CLIENT_ALLOW_INSECURE_HTTP");
+	const pluginConsent = optionalBoolean(nativeConsent, "allowInsecureHttp");
+	const nativeEndpoint = pluginUrl === void 0 ? void 0 : normalizeServerUrl(pluginUrl, true);
+	const allowInsecureHttp = hostConsent ?? commonConsent ?? (pluginConsent === false ? false : normalized !== void 0 && normalized === nativeEndpoint ? pluginConsent : void 0) ?? (normalized !== void 0 && normalized === savedUrl ? saved.allow_insecure_http : void 0) ?? false;
+	return {
+		baseUrl: normalized === void 0 ? void 0 : normalizeServerUrl(normalized, allowInsecureHttp, `${prefix}_BASE_URL`),
+		allowInsecureHttp,
+		source: environmentUrl ? "environment" : pluginUrl ? "plugin" : saved.server_url ? "saved" : "default"
+	};
+}
 
 //#endregion
 //#region src/client.ts
@@ -621,41 +1437,78 @@ async function readLimitedBody(response) {
 	}
 	return body;
 }
-function bindOperationPath(spec, payload) {
-	const pathParameters = spec.pathParameters;
-	if (pathParameters.length === 0) return {
-		path: spec.path,
-		payload
-	};
-	const transportPayload = { ...payload };
+function queryString(payload) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(payload ?? {})) {
+		if (value === void 0 || value === null) continue;
+		for (const item of Array.isArray(value) ? value : [value]) params.append(key, String(item));
+	}
+	const encoded = params.toString();
+	return encoded ? `?${encoded}` : "";
+}
+function encodePathSegment(value) {
+	return encodeURIComponent(String(value)).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+function headerPayloadKey(name) {
+	return name.toLowerCase().replaceAll("-", "_");
+}
+function prepareRequest(spec, payload) {
+	const remaining = { ...payload ?? {} };
 	let path = spec.path;
-	for (const name of pathParameters) {
-		const value = transportPayload[name];
-		if (typeof value !== "string" || value.trim().length === 0) throw new TypeError(`operation requires string path parameter ${name}`);
-		path = path.replace(`{${name}}`, encodeURIComponent(value));
-		delete transportPayload[name];
+	for (const name of spec.pathParameters) {
+		const value = remaining[name];
+		if (value === void 0 || value === null) throw new TypeError(`${spec.method} ${spec.path} requires ${name}`);
+		path = path.replace(`{${name}}`, encodePathSegment(value));
+		delete remaining[name];
+	}
+	const headers = {};
+	for (const name of spec.headerParams) {
+		const alias = headerPayloadKey(name);
+		const value = remaining[name] ?? remaining[alias];
+		delete remaining[name];
+		delete remaining[alias];
+		if (value !== void 0 && value !== null) headers[name] = String(value);
+	}
+	const queryPayload = {};
+	for (const name of spec.queryParams) {
+		const value = remaining[name];
+		delete remaining[name];
+		if (value !== void 0 && value !== null) queryPayload[name] = value;
 	}
 	return {
 		path,
-		payload: transportPayload
+		query: queryString(queryPayload),
+		headers,
+		body: spec.location === "body" ? remaining : void 0
 	};
+}
+function hasStatus(statuses, status) {
+	return statuses.includes(status);
+}
+function isRedirect(status) {
+	return status >= 300 && status < 400;
 }
 var PowerContextClient = class {
 	fetchImpl;
 	constructor(options) {
 		this.options = options;
+		this.options = {
+			...options,
+			baseUrl: normalizeServerUrl(options.baseUrl, options.allowInsecureHttp)
+		};
 		this.fetchImpl = options.fetch ?? fetch;
 	}
 	async request(id, payload, signal) {
 		if (!(id in OPERATIONS)) throw new UnknownOperationError(id);
 		const spec = OPERATIONS[id];
-		const bound = bindOperationPath(spec, payload);
+		const prepared = prepareRequest(spec, payload);
 		try {
-			const response = await this.fetchImpl(this.url(bound.path), this.init(spec, bound.payload, signal));
-			if (response.status >= 300 && response.status < 400) throw new InvalidResponseError(spec.path);
+			const response = await this.fetchImpl(this.url(prepared), this.init(spec, prepared, signal));
+			const success = response.status >= 200 && response.status < 300 || hasStatus(spec.successStatuses, response.status);
+			if (isRedirect(response.status) && !success) throw new InvalidResponseError(spec.path);
 			const bytes = await readLimitedBody(response);
 			const requestId = response.headers.get(REQUEST_ID_HEADER) ?? void 0;
-			if (!response.ok) {
+			if (!success) {
 				let error = {};
 				try {
 					error = JSON.parse(Buffer.from(bytes).toString("utf8"));
@@ -667,28 +1520,40 @@ var PowerContextClient = class {
 					message: error.error?.message
 				});
 			}
+			if (hasStatus(spec.emptyStatuses, response.status)) {
+				if (bytes.byteLength !== 0) throw new InvalidResponseError(spec.path, requestId);
+				return {
+					kind: "json",
+					value: null,
+					status: response.status,
+					requestId,
+					etag: response.headers.get("ETag") ?? void 0
+				};
+			}
 			try {
 				return {
 					kind: "json",
 					value: JSON.parse(Buffer.from(bytes).toString("utf8")),
 					status: response.status,
-					requestId
+					requestId,
+					etag: response.headers.get("ETag") ?? void 0
 				};
 			} catch {
 				throw new InvalidResponseError(spec.path, requestId);
 			}
 		} catch (error) {
 			if (error instanceof ServerResponseError || error instanceof InvalidResponseError || error instanceof UnknownOperationError) throw error;
-			throw new UnavailableError(bound.path, error);
+			throw new UnavailableError(prepared.path, error);
 		}
 	}
-	url(path) {
-		return `${this.options.baseUrl.replace(/\/+$/, "")}${path}`;
+	url(request) {
+		return `${this.options.baseUrl.replace(/\/+$/, "")}${request.path}${request.query}`;
 	}
-	init(spec, payload, signal) {
+	init(spec, request, signal) {
 		const headers = {
 			Accept: "application/json",
-			"User-Agent": PLUGIN_USER_AGENT
+			"User-Agent": PLUGIN_USER_AGENT,
+			...request.headers
 		};
 		if (this.options.authorization) headers.Authorization = this.options.authorization;
 		const signals = [createTimeoutSignal(this.options.requestTimeoutMs)];
@@ -701,7 +1566,7 @@ var PowerContextClient = class {
 		};
 		if (spec.location === "body") {
 			headers["Content-Type"] = "application/json";
-			init.body = JSON.stringify(payload ?? {});
+			init.body = JSON.stringify(request.body ?? {});
 		}
 		return init;
 	}
@@ -711,6 +1576,7 @@ var PowerContextClient = class {
 //#region src/config.ts
 const DEFAULTS = {
 	baseUrl: "http://127.0.0.1:8000",
+	allowInsecureHttp: false,
 	scopeId: void 0,
 	authorization: void 0,
 	capturePrompts: true,
@@ -722,6 +1588,17 @@ const DEFAULTS = {
 };
 function envString(env, name) {
 	return env[name]?.trim() || void 0;
+}
+function contextAssembly(raw) {
+	if (raw === void 0) return void 0;
+	let value;
+	try {
+		value = JSON.parse(raw);
+	} catch {
+		throw new Error("PowerContext context assembly must be a JSON object");
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("PowerContext context assembly must be a JSON object");
+	return value;
 }
 function envBoolean(env, name) {
 	const value = envString(env, name)?.toLowerCase();
@@ -747,29 +1624,15 @@ function envInteger(env, name, fallback, minimum, maximum) {
 	if (!Number.isInteger(value) || value < minimum || value > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
 	return value;
 }
-function normalizeBaseUrl(value) {
-	let url;
-	try {
-		url = new URL(value);
-	} catch {
-		throw new Error("POWERCONTEXT_OPENCODE_BASE_URL must be a valid HTTP(S) URL");
-	}
-	if (!["http:", "https:"].includes(url.protocol)) throw new Error("POWERCONTEXT_OPENCODE_BASE_URL must use HTTP or HTTPS");
-	if (url.username || url.password || url.search || url.hash) throw new Error("POWERCONTEXT_OPENCODE_BASE_URL must not contain credentials, a query, or a fragment");
-	const loopback = [
-		"localhost",
-		"127.0.0.1",
-		"[::1]"
-	].includes(url.hostname);
-	if (url.protocol === "http:" && !loopback) throw new Error("POWERCONTEXT_OPENCODE_BASE_URL must use HTTPS outside loopback");
-	return url.toString().replace(/\/+$/, "");
-}
 function resolveConfig(env = process.env) {
+	const transport = resolveTransport("opencode", env, void 0, void 0, DEFAULTS.baseUrl);
 	const requestTimeoutMs = envInteger(env, "POWERCONTEXT_OPENCODE_REQUEST_TIMEOUT_MS", DEFAULTS.requestTimeoutMs, 50, 3e4);
 	const httpBudgetMs = envInteger(env, "POWERCONTEXT_OPENCODE_HTTP_BUDGET_MS", DEFAULTS.httpBudgetMs, 100, 6e4);
 	if (requestTimeoutMs > httpBudgetMs) throw new Error("POWERCONTEXT_OPENCODE_REQUEST_TIMEOUT_MS must not exceed POWERCONTEXT_OPENCODE_HTTP_BUDGET_MS");
 	return {
-		baseUrl: normalizeBaseUrl(envString(env, "POWERCONTEXT_OPENCODE_BASE_URL") ?? DEFAULTS.baseUrl),
+		contextAssembly: contextAssembly(envString(env, "POWERCONTEXT_OPENCODE_CONTEXT_ASSEMBLY")),
+		baseUrl: transport.baseUrl,
+		allowInsecureHttp: transport.allowInsecureHttp,
 		scopeId: envString(env, "POWERCONTEXT_OPENCODE_SCOPE_ID"),
 		authorization: envString(env, "POWERCONTEXT_OPENCODE_AUTHORIZATION"),
 		capturePrompts: envBoolean(env, "POWERCONTEXT_OPENCODE_CAPTURE_PROMPTS") ?? DEFAULTS.capturePrompts,
@@ -1043,7 +1906,8 @@ async function prepareTurn(runtime, input) {
 			const prepared = validatePreparedContext((await runtime.client.request("prepare_context", {
 				scope_id: context.scopeId,
 				query: input.prompt,
-				max_bytes: runtime.config.maxBytes
+				max_bytes: runtime.config.maxBytes,
+				...runtime.config.contextAssembly === void 0 ? {} : { assembly: runtime.config.contextAssembly }
 			}, signal)).value, runtime.config.maxBytes);
 			content = prepared.status === "ready" ? prepared.content ?? void 0 : void 0;
 			await runtime.log({
@@ -1095,6 +1959,7 @@ function createRuntime(input, config) {
 	const sessionContexts = /* @__PURE__ */ new Map();
 	const client = new PowerContextClient({
 		baseUrl: config.baseUrl,
+		allowInsecureHttp: config.allowInsecureHttp,
 		authorization: config.authorization,
 		requestTimeoutMs: config.requestTimeoutMs
 	});
@@ -1250,7 +2115,8 @@ function createTools(runtime) {
 			operationId: "prepare_context",
 			payload: (args) => ({
 				query: args.query,
-				max_bytes: runtime.config.maxBytes
+				max_bytes: runtime.config.maxBytes,
+				...runtime.config.contextAssembly === void 0 ? {} : { assembly: runtime.config.contextAssembly }
 			})
 		}),
 		pc_capture_source: operationTool(runtime, {

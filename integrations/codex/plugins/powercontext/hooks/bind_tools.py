@@ -24,9 +24,11 @@ from time import monotonic
 from typing import Any, cast
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS_ROOT = _PLUGIN_ROOT / "scripts"
 sys.path.insert(0, str(_PLUGIN_ROOT))
+sys.path.insert(0, str(_SCRIPTS_ROOT))
 
-from scripts.scope_binding import (  # noqa: E402
+from scope_binding import (  # noqa: E402
     ScopeBindingError,
     binding_keys,
     resolve_scope_id,
@@ -50,6 +52,7 @@ _CURRENT_OPERATIONS = frozenset({
     "download_skill_package",
     "finalize_handoff",
     "flush_memory",
+    "flush_topic_memory",
     "generate_experience",
     "generate_skill",
     "get_artifact_candidate",
@@ -57,6 +60,7 @@ _CURRENT_OPERATIONS = frozenset({
     "get_memory_entry",
     "get_skill",
     "get_skill_package_manifest",
+    "get_topic_memory",
     "handoff_current_work",
     "import_external_skill",
     "list_artifact_candidates",
@@ -83,6 +87,7 @@ _CURRENT_OPERATIONS = frozenset({
     "revoke_remote_skill_target",
     "scan_external_skills",
     "search_memory",
+    "search_topic_memory",
     "unpublish_remote_skill",
     "update_skill_lifecycle",
 })

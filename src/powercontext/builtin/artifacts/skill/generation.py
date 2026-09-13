@@ -18,10 +18,11 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from powercontext.builtin.artifacts.generation import ArtifactGenerationInput
 from powercontext.builtin.artifacts.skill.models import SkillContent
+from powercontext.builtin.artifacts.skill.package import SKILL_NAME_PATTERN, build_instruction_skill_package
 from powercontext.builtin.inference import GenerationResult, InvalidInferenceOutputError, StructuredGenerator
 
 
@@ -29,6 +30,13 @@ class _GeneratedSkillContent(SkillContent):
     """Model-authored instruction content cannot claim an existing package snapshot."""
 
     package: None = None
+    name: str = Field(min_length=1, max_length=64, pattern=SKILL_NAME_PATTERN)
+
+    @model_validator(mode="after")
+    def require_standard_package(self) -> _GeneratedSkillContent:
+        # Reject invalid names/frontmatter while model retries are still available, before proposing a write.
+        build_instruction_skill_package(self)
+        return self
 
 
 class SkillGenerationOutput(BaseModel):

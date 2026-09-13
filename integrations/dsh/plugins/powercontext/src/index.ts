@@ -40,7 +40,9 @@ export const Config = {
     validate(value: unknown) {
       try {
         const input = value && typeof value === 'object' ? value as PluginConfig : {}
-        return { value: resolveConfig(input) }
+        resolveConfig(input)
+        // Keep original inputs so runtime resolution can identify defaults and overrides.
+        return { value: input }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { issues: [{ message }] }
@@ -51,7 +53,10 @@ export const Config = {
 
 type CreateUserMessage = (input: {
   content: Array<{ type: 'text'; text: string }>
-  source: { kind: 'plugin'; plugin: string }
+  source: {
+    kind: 'plugin'; plugin: string; form: 'snapshot'
+    sections: Array<{ name: string; text: string }>
+  }
 }) => unknown
 
 type DefineTool = (definition: Record<string, unknown>) => unknown
@@ -60,6 +65,7 @@ function createRuntime(ctx: Context, config: PluginConfig): PluginRuntime {
   const resolved = resolveConfig(config)
   const client = new PowerContextClient({
     baseUrl: resolved.baseUrl,
+    allowInsecureHttp: resolved.allowInsecureHttp,
     authorization: resolved.authorization,
     requestTimeoutMs: resolved.requestTimeoutMs,
   })
@@ -67,12 +73,12 @@ function createRuntime(ctx: Context, config: PluginConfig): PluginRuntime {
   return {
     client,
     config: resolved,
-    resolveScope: (cwd) => resolveScopeId(client, cwd, resolved.scopeId),
+    resolveScope: (cwd, signal) => resolveScopeId(client, cwd, resolved.scopeId, signal),
     log: (event) => {
       const line = JSON.stringify({ component: 'powercontext.dsh', ...event })
       const quiet = event.outcome === 'ready' || event.outcome === 'ok' || event.outcome === 'empty'
-      if (quiet) ctx.logger.debug?.(line)
-      else emitDiagnostic({ component: 'powercontext.dsh', ...event })
+      if (quiet) return ctx.logger.debug?.(line)
+      return emitDiagnostic({ component: 'powercontext.dsh', ...event })
     },
   }
 }
@@ -98,7 +104,10 @@ function registerRecall(ctx: Context, runtime: PluginRuntime, createUserMessage:
       resolveScope: runtime.resolveScope,
       wrapContent: (text) => createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: PLUGIN_NAME },
+        source: {
+          kind: 'plugin', plugin: PLUGIN_NAME, form: 'snapshot',
+          sections: [{ name: 'PowerContext', text }],
+        },
       }),
       log: runtime.log,
     })

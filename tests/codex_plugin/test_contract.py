@@ -154,6 +154,42 @@ def test_codex_settings_normalize_the_mcp_path_to_http_base(
     assert settings_module._http_base_url("https://memory.example/api/mcp/") == "https://memory.example/api"
 
 
+@pytest.mark.parametrize(
+    "record",
+    [[], {"version": 1}, {"version": 1, "server_url": "http://127.0.0.1:8000"}],
+)
+def test_codex_settings_ignore_malformed_persisted_authorization_records(
+    settings_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    record: object,
+) -> None:
+    credential = tmp_path / "powercontext" / "credentials.json"
+    credential.parent.mkdir()
+    credential.write_text(json.dumps(record), encoding="utf-8")
+    credential.chmod(0o600)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+
+    assert settings_module._stored_authorization("http://127.0.0.1:8000") is None
+
+
+def test_codex_settings_match_persisted_base_url_with_mcp_endpoint(
+    settings_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    credential = tmp_path / "powercontext" / "credentials.json"
+    credential.parent.mkdir()
+    credential.write_text(
+        json.dumps({"version": 1, "server_url": "http://127.0.0.1:8000", "authorization": "Bearer saved"}),
+        encoding="utf-8",
+    )
+    credential.chmod(0o600)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+
+    assert settings_module._stored_authorization("http://127.0.0.1:8000/mcp") == "Bearer saved"
+
+
 def test_codex_hooks_fix_session_and_data_plane_bindings() -> None:
     configuration = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
 
@@ -172,6 +208,24 @@ def test_customer_artifact_workflow_does_not_parse_plugin_root_as_an_actions_exp
 def test_project_context_skill_requires_explicit_memory_routing_and_failure_reporting() -> None:
     content = (PLUGIN_ROOT / "skills" / "project-context" / "SKILL.md").read_text(encoding="utf-8")
 
+    assert 'description: Create and commit a current-work Handoff when the user says "交接"' in content
+    assert "uv run --frozen" not in content
+    assert "create_work_contract" in content
+    assert "select_handoff_workstream" in content
+    assert "handoff_current_work" in content
+    assert "acknowledge_handoff" in content
+    assert "record_task_outcome" in content
+    assert "`search_topic_memory` with a focused query and no more than eight results" in content
+    assert "`get_topic_memory` with an exact returned Artifact reference" in content
+    assert "Do not request Topic Memory flushes from\n  Codex" in content
+    assert "Complete a one-turn durable Handoff" in content
+    assert "do not ask for a second confirmation" in content
+    assert "Pass the returned `handoff` member unchanged" in content
+    assert "no durable Handoff milestone was committed" in content
+    assert "canonical temporary carrier" in content
+    assert 'selection: "prepared"' in content
+    assert "call `commit_handoff` only when" in content
+    assert "Do not treat every session stop as task completion" in content
     for required in (
         "## Explicit Memory Requests",
         "The examples below are illustrative, not an exhaustive keyword allowlist.",
