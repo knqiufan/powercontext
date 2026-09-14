@@ -177,6 +177,7 @@ export async function reportDirectFailure(runtime: PluginRuntime, event: string,
 }
 
 export interface PluginRuntime {
+  status?: import('./status.ts').RuntimeStatus
   client: PowerContextClient
   config: ResolvedConfig
   resolveScope: (cwd?: string, signal?: AbortSignal) => Promise<string | undefined>

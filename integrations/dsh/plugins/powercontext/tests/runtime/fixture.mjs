@@ -211,13 +211,20 @@ export function apply(ctx) {
     harnesses.push(instance)
     const diagnostics = () => existsSync(diagnosticsFile)
       ? readFileSync(diagnosticsFile, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : []
-    const doctor = async sessionId => {
-      const response = await fetch(readFileSync(commandAddress, 'utf8') + '/?session=' + encodeURIComponent(sessionId))
+    const command = async (sessionId, view) => {
+      const response = await fetch(readFileSync(commandAddress, 'utf8') + '/?session=' + encodeURIComponent(sessionId) + '&view=' + view)
       if (!response.ok) throw new Error(await response.text())
-      const result = await response.json()
+      return response.json()
+    }
+    const doctor = async sessionId => {
+      const result = await command(sessionId, 'doctor')
       return { kind: result.kind, ...JSON.parse(result.text) }
     }
-    return { instance, dshHome, workspace, installed, patch, env, diagnostics, doctor }
+    const status = async sessionId => {
+      const result = await command(sessionId, 'status')
+      return { kind: result.kind, ...JSON.parse(result.text.split('\nautomatic=')[1]) }
+    }
+    return { instance, dshHome, workspace, installed, patch, env, diagnostics, doctor, status }
   }
   return {
     home, api, scopeId, calls, modelRequests, harness, baseUrl: proxy.url,
