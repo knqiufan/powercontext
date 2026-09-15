@@ -166,11 +166,17 @@ class HandoffFixture:
         if self.prepared is None:
             return False
         decoder = json.JSONDecoder()
-        for index, character in enumerate(text):
-            if character != "{":
-                continue
+        index = 0
+        while (index := text.find("{", index)) >= 0:
             try:
-                value, _ = decoder.raw_decode(text[index:])
+                value, length = decoder.raw_decode(text[index:])
+            except ValueError:
+                index += 1
+                continue
+            # Skip the entire parsed value, including nested objects. A response
+            # wrapper containing a carrier is not itself a PreparedHandoff.
+            index += length
+            try:
                 # Optional null metadata may be omitted without changing the
                 # transport value. Required nullable fields (for example base)
                 # must still be present, and evidence/receipts must remain exact.
