@@ -481,7 +481,11 @@ def get_tool_schemas() -> list[dict[str, Any]]:
         "additionalProperties": False,
         "properties": {
             "text": {"type": "string", "minLength": 1},
-            "basis": {"type": "string", "enum": ["declared", "verified"]},
+            "basis": {
+                "type": "string",
+                "enum": ["declared", "verified"],
+                "description": "Use declared for inspected conversation or repository facts, even when the user calls progress verified. verified requires nonempty exact previously returned PowerContext evidence.",
+            },
             "evidence": {
                 "type": "array",
                 "items": {"type": "object"},
@@ -503,6 +507,28 @@ def get_tool_schemas() -> list[dict[str, Any]]:
             "omissions": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["schema", "trust", "objective", "state", "disposition", "next_action", "omissions"],
+    }
+    handoff_statement = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "text": {"type": "string", "minLength": 1},
+            "citations": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+        },
+        "required": ["text", "citations"],
+    }
+    handoff_draft = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "objective": {"type": "string", "minLength": 1},
+            "state": {"type": "array", "minItems": 1, "items": handoff_statement},
+            "disposition": {"type": "string", "enum": ["continuable", "blocked", "complete"]},
+            "next_action": {"anyOf": [handoff_statement, {"type": "null"}]},
+            "omissions": {"type": "array", "items": {"type": "object"}},
+            "generation": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        },
+        "required": ["objective", "state", "disposition", "next_action", "omissions"],
     }
     schemas = [
         {
@@ -657,6 +683,8 @@ def get_tool_schemas() -> list[dict[str, Any]]:
         _operation_schema(
             "powercontext_handoff_current_work",
             (
+                "This captures its own boundary; do not call capture_source or another Handoff operation first. "
+                "next_action is one claim object or null, never an array; omissions is an array of strings or []. "
                 "Capture the inspected boundary of a requested work transfer and prepare its Handoff. Use a unique "
                 "source_id, exact evidence where available, and declared facts otherwise. The returned handoff member "
                 "is the temporary carrier; commit only for an authorized durable milestone. A preview-only request "
@@ -734,11 +762,14 @@ def get_tool_schemas() -> list[dict[str, Any]]:
         _operation_schema(
             "powercontext_finalize_handoff",
             (
+                "Pass the prepare result itself or activate.draft, not the activation response, as draft. "
+                "Return the complete finalization result unchanged, including schema, scope_id, base, content, "
+                "and generation when present; do not return only content or an unfinished Draft. "
                 "Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use after "
                 "checking its evidence and next action. Preserve the complete returned value for the receiver. "
                 "Finalization does not commit a durable milestone, execute the work, or approve an artifact."
             ),
-            {"draft": json_object},
+            {"draft": handoff_draft},
             ("draft",),
         ),
         _operation_schema(

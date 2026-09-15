@@ -34,8 +34,10 @@ Ordinary coding needs no routine PowerContext call. Use sufficient current conte
 An explicit "remember this / 记住这个供以后使用" requires pc_remember and confirmation of its result. Current-turn instructions, conceptual questions, and previews do not authorize persistence. Never store secrets or duplicate automatic prompt capture. Preserve OpenCode confirmation for named mutations.
 Summarizing or drafting from facts supplied in the current turn needs no retrieval or Scope resolution. An empty search does not authorize an inventory. If inventory or Handoff is unavailable, do not emulate it with Memory search or storage.
 Tool names in this guidance describe possible capabilities, not proof of availability. Before selecting an operation, check that its exact name appears in the current tool catalog. If absent, stop that operation and explicitly report it unavailable and incomplete. Never emit a call to an absent tool, simulate a call in text, or substitute another persistence operation.
+A request for a temporary Handoff requires a finalized prepared carrier: do not stop at Draft generation. Finalization is temporary and does not commit a milestone.
+In the low-level Handoff flow, pc_handoff_prepare returns the Draft in data; pc_handoff_activate returns it in data.draft. Pass only that Draft to pc_handoff_finalize, never the whole response. Return finalize.data unchanged, including schema, scope_id, base, content, and generation when present.
 Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source as boundary_source (or wrap it as {kind: "source", source_ref: source} for evidence); no preliminary Memory search or inventory is needed.
-For a requested handoff, capture the inspected boundary, activate, inspect the generated Draft, and finalize the exact Draft. Commit only for an explicitly requested durable milestone. Preserve the exact returned transfer value; preparation is not commitment or receiver execution.
+For a normal requested handoff, use exactly this path: pc_capture_source -> pc_handoff_prepare -> pc_handoff_finalize -> return finalize.data. pc_handoff_activate is an alternative Draft producer for an explicit boundary-trigger activation; never call both prepare and activate for the same transfer. Commit only for an explicitly requested durable milestone. Preserve the exact returned transfer value; preparation is not commitment or receiver execution.
 Use pc_review_list / pc_review_get for requested candidate inspection. Generation and reading do not approve, install, publish, or execute artifacts. Candidate-review mutations are not model tools in this host; do not invent them or grant new approval authority.
 Memory correction or retirement requires the requested change and exact current citation. Empty retrieval is normal. On failure, denial, or missing Scope, report the operation and safe returned reason without guessing causes or claiming saved/restored context. Avoid repeated failed calls and continue ordinary work.
 Use project-context for a relevant detailed workflow if that Skill is available; no Skill detour is needed before every response.`
@@ -285,6 +287,15 @@ const handoffEvidence = z.union([
   z.object({ kind: z.literal('artifact'), artifact_ref: jsonObject() }),
   z.object({ kind: z.literal('memory'), memory_citation: jsonObject() }),
 ])
+const handoffStatement = z.object({ text: z.string().min(1), citations: z.array(handoffEvidence).min(1) })
+const handoffDraft = z.object({
+  objective: z.string().min(1),
+  state: z.array(handoffStatement).min(1),
+  disposition: z.enum(['continuable', 'blocked', 'complete']),
+  next_action: handoffStatement.nullable(),
+  omissions: z.array(z.object({ text: z.string().min(1), citation: handoffEvidence.nullable() })),
+  generation: z.object({ receipt: z.string().min(1) }).nullable().optional(),
+}).strict()
 const memoryKind = z.enum(['decision', 'constraint', 'current-state', 'task-outcome', 'next-step', 'agent-note'])
 const searchMode = z.enum(['auto', 'fts', 'vector', 'hybrid'])
 
@@ -420,6 +431,10 @@ function createTools(runtime: Runtime) {
     }),
     pc_handoff_activate: operationTool(runtime, {
       description:
+        'Use for explicitly requested boundary-trigger activation; normal transfer uses pc_handoff_prepare instead. ' +
+        'Do not call activate after prepare, since both generate a Draft. ' +
+        'When status is generated, data.draft is unfinished: inspect it, then call pc_handoff_finalize with draft=data.draft. ' +
+        'Only finalize.data is the transferable carrier. No durable commit is needed for temporary transfer. ' +
         'Start a requested work transfer from an existing exact boundary Source and objective. Inspect ' +
         'a generated Draft before finalizing it. An ignored boundary does not establish a new handoff; ' +
         'do not claim a committed milestone. Conceptual or preview-only requests do not authorize this ' +
@@ -430,7 +445,7 @@ function createTools(runtime: Runtime) {
     }),
     pc_handoff_prepare: operationTool(runtime, {
       description:
-        'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
+        'This returns an unfinished Draft in data, NOT a transferable Handoff. To complete a requested transfer, you must next call pc_handoff_finalize with draft=data, then return finalize.data. This does not require a durable commit. Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
         'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested ' +
         'transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is ' +
         'temporary and grants no authority; preparation is not a durable commit or proof that a ' +
@@ -441,11 +456,14 @@ function createTools(runtime: Runtime) {
     }),
     pc_handoff_finalize: operationTool(runtime, {
       description:
+        'Pass only prepare.data or activate.data.draft as draft, never the {ok, data} response wrapper. ' +
+        'Return the resulting data unchanged: schema=powercontext.prepared-handoff.v1, scope_id, base, content, ' +
+        'and generation when present. Do not return just content or the unfinished Draft. ' +
         'Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use ' +
         'after checking its evidence and next action. Preserve the complete returned value for the ' +
         'receiver. Finalization does not commit a durable milestone, execute the work, or approve an ' +
         'artifact.',
-      args: { draft: jsonObject() },
+      args: { draft: handoffDraft },
       operationId: 'finalize_handoff',
       payload: (args) => ({ draft: args.draft }),
     }),

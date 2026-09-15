@@ -10,6 +10,54 @@ The baseline is upstream `fe4002d37663213294ebffe4c080b6676b1c8014`. Measurement
 2026-09-09 with `step-3.7-flash` through the configured StepFun endpoint, temperature 0, a 6,000-token output budget,
 and no forced tool selection. Fixtures use fictional Aurora facts and an isolated `fixture-scope`.
 
+## Current qualification on master `847203dc`
+
+The 2026-09-15 evaluation uses `step-3.7-flash`, temperature 0, automatic tool selection, and fictional Aurora facts.
+DSH contributes 12 observations from `qualification` (10,000 output tokens); the other eight surfaces contribute
+96 observations from `qualification-final` (16,000 tokens). This is a composite of those two batches, not one run.
+
+| Surface | Valid sequence and carrier | After explicit reporting review |
+| --- | --- | --- |
+| DSH | 12/12 | 12/12 |
+| Pi | 12/12 | 12/12 |
+| OpenCode | 12/12 | 12/12 |
+| OpenClaw | 12/12 | 11/12 |
+| Hermes | 12/12 | 12/12 |
+| Codex MCP catalog | 12/12 | 12/12 |
+| Claude Code MCP catalog | 11/12 | 11/12 |
+| WorkBuddy MCP catalog | 12/12 | 12/12 |
+| Portable Agent Plugin with MCP | 11/12 | 11/12 |
+| Total | 106/108 | 105/108 |
+
+The [raw evidence](https://github.com/knqiufan/powercontext/blob/codex/align-powercontext-tool-routing/e2e/integration-guidance/results/step37-native-20260915.jsonl)
+retains all 276 observations across five batches, including intermediate failures, catalogs, actual native HTTP
+payloads, controlled replies, final answers, and transcript-bound review reasons. Reporting review was performed by
+Codex, not a human reviewer or an automatic truthfulness classifier. Two final Handoff failures mark inspected facts
+`verified` with empty evidence; diagnostics identify `handoff.state[0].basis/evidence`. Another structurally valid
+OpenClaw answer changes “no code changes” into “no code changes required”; reporting review rejects that stronger claim.
+
+The separate DSH/Codex reporting sample has 17/24 valid selections and 16/24 after review. All 12 failed-write cases
+report that nothing was saved. Seven missing-tool cases attempt an unavailable operation or fail to produce a terminal
+answer. One more answer correctly reports no save but suggests Source capture as an alternative; review rejects it.
+These failures remain unqualified. Passing deterministic tests does not turn them into model acceptance passes.
+
+Native Handoff measurements execute registered DSH, Pi, OpenCode, and built OpenClaw adapters with controlled transport
+and fixture approval. They verify actual argument selection, host Scope injection, generated Source identity, and
+response wrappers. Hermes and MCP catalog cases still use direct controlled replies. No real persistence or generation
+runs here, and no claim is made about every native host's permission channel or automatic Skill discovery.
+
+Carrier validation follows the HTTP contract: optional null metadata may be omitted, but required nullable `base`,
+exact evidence, and generation receipts must survive. Some answers include the complete carrier inside a response
+wrapper. The score establishes carrier presence and reporting accuracy, not strict bare-carrier output formatting.
+Memory calls now also validate required catalog arguments. Acceptance additionally requires an explicit review bound
+to the exact transcript hash; unreviewed observations stay incomplete and the evaluation command exits nonzero.
+
+All four native adapter regressions run in their package CI jobs. Local validation passed 28 evaluator regressions,
+102 focused evaluator/API/manifest tests, 85 MCP/Hermes tests, and 3 JavaScript operation contract tests. Package suites
+passed DSH 256, Pi 93, OpenCode 53, and OpenClaw 73 tests; the real DSH SDK runtime suite passed 5 tests. Generated API
+and JavaScript checks, package type checks/builds, applicable pre-commit hooks, and Linux-platform Python type checking
+passed. OpenClaw uses Node 24.15.0. Older measurements below retain their original, narrower qualification rules.
+
 ## Measured model behavior
 
 The [recorded calls, arguments, controlled results, and replies](https://github.com/oceanbase/powercontext/blob/master/e2e/integration-guidance/results/step37-20260909.jsonl)
@@ -74,7 +122,7 @@ The high-level input uses WorkClaims with `text`, `basis`, and `evidence`; inspe
 PowerContext references use `declared` and an empty evidence list. Skill discovery names remain unchanged.
 
 The 2026-09-10 Step 3.7 Flash qualification uses two cases, two languages, and three Skill states per surface.
-The latest observation for each condition totals **64/96**, composed from the recorded batches below; it is not
+The historical observation for each condition totals **64/96**, composed from the recorded batches below; it is not
 a single simultaneous run or an all-host acceptance result.
 
 | Surface | Complete sequences / observations | Evidence batch |
@@ -95,7 +143,7 @@ from registration specifications and do not establish that runtime contract. Mod
 results in this evaluation, including in the final DSH batch.
 
 Remaining failures include invalid provenance, malformed or unfinished Drafts, and incomplete or changed carriers.
-The exact-carrier check also rejects omitted nullable fields. No commit call occurred in these latest 96 observations,
+That historical exact-carrier check also rejected omitted nullable fields. No commit call occurred in these latest 96 observations,
 but early failures truncate those sequences and cannot establish the behavior of a later successful continuation.
 These model scenarios remain unqualified; deterministic schema and runtime regression checks do not convert them
 into passes.

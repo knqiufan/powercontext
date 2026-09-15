@@ -16,12 +16,17 @@
 
 import asyncio
 import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from scripts.evaluate_integration_guidance import run_scenario, validate_message
+from scripts.evaluate_integration_guidance import apply_reporting_review, run_scenario, validate_message
 from scripts.integration_guidance_handoff import HandoffFixture
+from scripts.integration_guidance_native import NativeHandoffSession
 
 
 def call(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -178,3 +183,134 @@ def test_native_handoff_preserves_evidence_through_finalization(fault: str | Non
         responses = [responses[0], {"content": "Handoff ready."}]
     result = asyncio.run(run_scenario(Model(responses), handoff_catalog(), "handoff", 0, "unloaded"))
     assert result["routing_passed"] is (fault is None)
+
+
+def test_memory_selection_cannot_pass_with_missing_required_arguments() -> None:
+    catalog = {
+        "host": "fixture",
+        "guidance": "",
+        "tools": [
+            {
+                "name": "remember_memory",
+                "parameters": {"type": "object", "required": ["scope_id", "kind", "text"]},
+            }
+        ],
+    }
+    result = asyncio.run(run_scenario(Model([call("remember_memory")]), catalog, "save", 0, "unloaded"))
+    assert not result["arguments_passed"] and not result["acceptance_passed"]
+    assert "scope_id" in result["error"]
+
+
+@pytest.mark.parametrize("case", ["failed_save", "unavailable_save"])
+def test_false_saved_reply_requires_explicit_reporting_review(case: str) -> None:
+    responses = [call("remember_memory"), {"content": "Saved."}] if case == "failed_save" else [{"content": "Saved."}]
+    catalog = {"host": "fixture", "guidance": "", "tools": [{"name": "remember_memory"}]}
+    result = asyncio.run(run_scenario(Model(responses), catalog, case, 0, "unloaded"))
+    assert result["routing_passed"]
+    assert result["reporting_passed"] is None
+    assert not result["acceptance_passed"]
+    apply_reporting_review(
+        result, {result["review_key"]: {"passed": False, "reason": "Claims saved without a successful write"}}
+    )
+    assert result["reporting_passed"] is False and not result["acceptance_passed"]
+
+
+def test_reporting_review_is_bound_to_the_exact_observation() -> None:
+    result: dict[str, Any] = {"routing_passed": True, "arguments_passed": True, "final_response": "Not saved."}
+    apply_reporting_review(result, {})
+    reviews = {result["review_key"]: {"passed": True, "reason": "Accurately reports the failed write"}}
+    apply_reporting_review(result, reviews)
+    assert result["acceptance_passed"]
+    result["final_response"] = "Saved."
+    apply_reporting_review(result, reviews)
+    assert result["reporting_passed"] is None and not result["acceptance_passed"]
+
+
+def test_carrier_accepts_omitted_optional_null_metadata_but_requires_scope_and_evidence() -> None:
+    fixture = HandoffFixture()
+    prepared = fixture.respond("handoff_current_work", handoff_payload())["handoff"]
+    prepared.pop("generation", None)
+    prepared["content"].pop("generation", None)
+    assert fixture.carrier_returned(json.dumps(prepared))
+    assert not fixture.carrier_returned(json.dumps({key: value for key, value in prepared.items() if key != "base"}))
+    prepared["content"]["state"][0]["citations"][0]["source_ref"]["source_id"] = "invented"
+    assert not fixture.carrier_returned(json.dumps(prepared))
+
+
+@pytest.mark.parametrize("host", ["dsh", "pi", "opencode"])
+def test_native_adapter_handoff_uses_real_request_mapping_and_response_envelopes(host: str) -> None:
+    root = Path(__file__).resolve().parents[1]
+    if not shutil.which("node") or not (root / "integrations" / host / "plugins/powercontext/node_modules").is_dir():
+        pytest.skip("Install the host package dependencies and Node 22.19+ for native adapter qualification")
+
+    async def scenario() -> None:
+        session, fixture = NativeHandoffSession(host), HandoffFixture()
+        try:
+            capture = await session.call(
+                "pc_capture_source", {"source_id": "aurora", "content": "README complete"}, fixture
+            )
+            source = capture["data"]["source"]
+            draft = await session.call(
+                "pc_handoff_prepare",
+                {
+                    "objective": "Document Aurora",
+                    "evidence": [{"kind": "source", "source_ref": source}],
+                    "boundary_source": json.dumps(source),
+                    "scope_id": "foreign-scope",
+                },
+                fixture,
+            )
+            request = session.requests[-1]["payload"]
+            assert request["scope_id"] == "fixture-scope"
+            assert "boundary_source" not in request
+            prepared = await session.call("pc_handoff_finalize", {"draft": draft["data"]}, fixture)
+            assert fixture.carrier_returned(json.dumps(prepared["data"]))
+            assert prepared["data"]["schema"] == "powercontext.prepared-handoff.v1"
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_openclaw_handoff_adapter_preserves_generated_source_identity() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "integrations/openclaw/plugins/memory-powercontext/dist/index.js").is_file():
+        pytest.skip("Build the OpenClaw package and use Node 24.15+ for native adapter qualification")
+    node = os.environ.get("POWERCONTEXT_GUIDANCE_NODE") or shutil.which("node")
+    if not node:
+        pytest.skip("Node is not installed")
+    version = subprocess.run([node, "--version"], capture_output=True, text=True, check=True, timeout=10).stdout
+    if tuple(int(part) for part in version.strip().lstrip("v").split(".")[:2]) < (24, 15):
+        pytest.skip("The pinned OpenClaw SDK requires Node 24.15+")
+
+    async def scenario() -> None:
+        session, fixture = NativeHandoffSession("openclaw"), HandoffFixture()
+        try:
+            reply = await session.call(
+                "powercontext_handoff_current_work",
+                {
+                    "handoff": handoff_payload()["handoff"],
+                    "scope_id": "foreign-scope",
+                },
+                fixture,
+            )
+            request = session.requests[-1]["payload"]
+            assert request["scope_id"] == "fixture-scope"
+            assert request["source_id"].startswith("openclaw-handoff-boundary-")
+            assert fixture.carrier_returned(json.dumps(reply["handoff"]))
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("field", ["state", "next_action"])
+def test_handoff_claim_error_identifies_field_without_accepting_a_source(field: str) -> None:
+    fixture = HandoffFixture()
+    payload = handoff_payload()
+    claim = payload["handoff"]["state"][0] if field == "state" else payload["handoff"]["next_action"]
+    claim["basis"] = "verified"
+    path = r"handoff.state\[0\]" if field == "state" else r"handoff.next_action"
+    with pytest.raises(ValueError, match=path + r"\.basis/evidence"):
+        fixture.respond("handoff_current_work", payload)
+    assert fixture.source is None

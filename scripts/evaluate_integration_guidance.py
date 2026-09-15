@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -36,6 +37,7 @@ import httpx
 import jsonschema
 from dotenv import dotenv_values
 from integration_guidance_handoff import HandoffFixture
+from integration_guidance_native import NATIVE_HOSTS, NativeHandoffSession
 
 ROUTES = {
     "search": {"pc_search", "search_memory", "powercontext_search_memory", "powercontext_memory_search"},
@@ -47,6 +49,7 @@ ROUTES = {
         "powercontext_capture_source",
         "handoff_current_work",
         "powercontext_handoff_current_work",
+        "pc_handoff_current",
     },
     "review": {"pc_review_list", "list_artifact_candidates", "powercontext_list_artifact_candidates"},
 }
@@ -220,12 +223,21 @@ def controlled_reply(case: str) -> dict[str, Any]:
     return {"ok": True, "data": {"status": "saved", "entry": {"text": "Aurora deploys on violet-cedar-1520."}}}
 
 
-def catalog_arguments(call: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
+def catalog_arguments(call: dict[str, Any], catalog: dict[str, Any], *, native: bool = False) -> dict[str, Any]:
     name = call["function"]["name"]
     if name not in catalog:
         raise ValueError("Selected an unavailable tool: " + name)
     arguments = json.loads(call["function"]["arguments"])
-    jsonschema.validate(arguments, catalog[name].get("parameters", {}))
+    schema = catalog[name].get("parameters", {})
+    # Native adapters select declared arguments when constructing an HTTP request.
+    # Validate their declared inputs here; execute the original call through the
+    # adapter below so the HTTP check observes its actual mapping and defaults.
+    declared = (
+        {key: value for key, value in arguments.items() if key in schema["properties"]}
+        if (native and isinstance(arguments, dict) and "properties" in schema)
+        else arguments
+    )
+    jsonschema.validate(declared, schema)
     return arguments
 
 
@@ -246,9 +258,12 @@ async def check_result_reporting(
     expected: set[str],
 ) -> None:
     case = record["case"]
+    catalog = {tool["name"]: tool for tool in tools}
     append_results(messages, response, case)
     followup = await model.complete(messages, tools)
     extra = validate_message(followup)
+    for call in extra:
+        catalog_arguments(call, catalog)
     # A focused reformulation after empty search is reasonable; inventory or writing is not.
     if case == "empty_search" and extra and {call["function"]["name"] for call in extra} <= expected:
         record["search_reformulation"] = extra
@@ -257,6 +272,8 @@ async def check_result_reporting(
     record["controlled_results"] = [message for message in messages if message["role"] == "tool"]
     record["final_response"] = followup.get("content")
     record["followup_calls"] = validate_message(followup)
+    for call in record["followup_calls"]:
+        catalog_arguments(call, catalog)
     # A confirmed write/failure is terminal; empty retrieval has a bounded evaluation budget.
     record["routing_passed"] &= not record["followup_calls"] and bool(record["final_response"])
 
@@ -275,6 +292,7 @@ async def run_scenario(
         "language": ("en", "zh")[language],
         "skill_mode": skill_mode,
         "prompt": prompts[language],
+        "arguments_passed": False,
     }
     try:
         catalog = {**catalog, **catalog.get("variants", {}).get(case, {})}
@@ -303,6 +321,10 @@ async def run_scenario(
             expected=sorted(expected), first_response=response.get("content"), calls=response.get("tool_calls") or []
         )
         calls = validate_message(response)
+        catalog_tools = {tool["name"]: tool for tool in tools}
+        for call in calls:
+            catalog_arguments(call, catalog_tools, native=route == "handoff" and catalog["host"] in NATIVE_HOSTS)
+        record["arguments_passed"] = True
         actual = {call["function"]["name"] for call in calls}
         record["routing_passed"] = (
             bool(actual) and actual <= expected if expected else not actual and bool(response.get("content"))
@@ -312,14 +334,47 @@ async def run_scenario(
             await check_handoff_sequence(model, record, messages, tools, response)
         elif calls and case in ("save", "failed_save", "empty_search"):
             await check_result_reporting(model, record, messages, tools, response, expected)
-    except (TypeError, ValueError, KeyError, RuntimeError, httpx.HTTPError, jsonschema.ValidationError) as error:
+    except (
+        TypeError,
+        ValueError,
+        KeyError,
+        RuntimeError,
+        TimeoutError,
+        httpx.HTTPError,
+        jsonschema.ValidationError,
+    ) as error:
         detail = (
             f"{list(error.absolute_path)}: {error.message}"
             if isinstance(error, jsonschema.ValidationError)
             else str(error)
         )
-        record.update(routing_passed=False, error=type(error).__name__ + ": " + detail)
+        record.update(routing_passed=False, arguments_passed=False, error=type(error).__name__ + ": " + detail)
+    apply_reporting_review(record, {})
     return record
+
+
+def apply_reporting_review(record: dict[str, Any], reviews: dict[str, Any]) -> None:
+    """Bind semantic review to the exact transcript; routing alone cannot qualify a case."""
+    ignored = {"review_key", "reporting_passed", "reporting_review", "acceptance_passed"}
+    transcript = {key: value for key, value in record.items() if key not in ignored}
+    key = hashlib.sha256(json.dumps(transcript, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    review = reviews.get(key)
+    if review is not None and (
+        not isinstance(review, dict)
+        or type(review.get("passed")) is not bool
+        or not isinstance(review.get("reason"), str)
+        or not review["reason"].strip()
+    ):
+        message = f"Invalid reporting review for {key}: require passed (boolean) and a nonempty reason"
+        raise ValueError(message)
+    record.update(
+        review_key=key,
+        reporting_passed=None if review is None else review["passed"],
+        reporting_review=review,
+        acceptance_passed=bool(
+            record.get("routing_passed") and record.get("arguments_passed") and review and review["passed"]
+        ),
+    )
 
 
 async def check_handoff_sequence(
@@ -328,6 +383,23 @@ async def check_handoff_sequence(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     response: dict[str, Any],
+) -> None:
+    native = NativeHandoffSession(record["host"]) if record["host"] in NATIVE_HOSTS else None
+    try:
+        await _handoff_sequence(model, record, messages, tools, response, native)
+    finally:
+        if native is not None:
+            record["http_requests"] = native.requests
+            await native.close()
+
+
+async def _handoff_sequence(
+    model: CompletionModel,
+    record: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    response: dict[str, Any],
+    native: NativeHandoffSession | None,
 ) -> None:
     fixture = HandoffFixture()
     catalog = {tool["name"]: tool for tool in tools}
@@ -350,8 +422,8 @@ async def check_handoff_sequence(
             raise ValueError(message)
         call = calls[0]
         name = call["function"]["name"]
-        arguments = catalog_arguments(call, catalog)
-        result = fixture.respond(name, arguments)
+        arguments = catalog_arguments(call, catalog, native=native is not None)
+        result = await native.call(name, arguments, fixture) if native else fixture.respond(name, arguments)
         reply = {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)}
         results.append(reply)
         messages.extend([response, reply])
@@ -371,11 +443,13 @@ async def evaluate(args: argparse.Namespace) -> int:
     output: list[dict[str, Any]] = []
     gate = asyncio.Semaphore(args.concurrency)
     report = {
-        "evaluation_version": "handoff-contract-sequence-v1",
+        "evaluation_version": "native-adapter-reporting-review-v2",
         "model": model_name,
         "provider_host": urlsplit(base_url).hostname,
         "method": "Live model over exported host catalogs; controlled tool replies; no mutations executed",
-        "limits": "Routing checks are automated. Arguments and final result reporting require review of recorded replies. "
+        "limits": "Routing and argument checks are automated. Result truthfulness requires transcript-bound review; "
+        "unreviewed cases never count as acceptance passes. Native Handoff adapters use controlled HTTP replies and "
+        "fixture approval, not a real host permission channel. "
         "Skill body presence is controlled; this is not Skill-discovery or full-host execution acceptance.",
         "max_tokens": args.max_tokens,
         "tool_choice": "auto",
@@ -391,7 +465,7 @@ async def evaluate(args: argparse.Namespace) -> int:
                 output.append(record)
                 print(
                     f"{len(output)} {record['host']} {case} {record['language']} {skill_mode}: "
-                    f"{'PASS' if record['routing_passed'] else 'FAIL'}",
+                    f"routing={'PASS' if record['routing_passed'] else 'FAIL'}; acceptance=UNREVIEWED",
                     flush=True,
                 )
                 args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -409,13 +483,20 @@ async def evaluate(args: argparse.Namespace) -> int:
         )
     failures = sum(not record["routing_passed"] for record in output)
     print(f"Routing: {len(output) - failures}/{len(output)} passed; review final replies in {args.output}")
-    return bool(failures)
+    print("Acceptance is pending. Review recorded replies, then apply --review-report with --reporting-review.")
+    return 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog", type=Path, action="append", required=True)
-    parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--catalog", type=Path, action="append")
+    parser.add_argument("--env-file", type=Path)
+    parser.add_argument(
+        "--review-report", type=Path, help="Apply reporting reviews to an existing report without model calls"
+    )
+    parser.add_argument(
+        "--reporting-review", type=Path, help="JSON mapping review_key to {passed: boolean, reason: string}"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model")
     parser.add_argument("--base-url")
@@ -425,7 +506,21 @@ def main() -> int:
     parser.add_argument(
         "--skill-modes", nargs="+", choices=("loaded", "unloaded", "unavailable"), default=["loaded", "unloaded"]
     )
-    return asyncio.run(evaluate(parser.parse_args()))
+    args = parser.parse_args()
+    if args.review_report:
+        if not args.reporting_review:
+            parser.error("--review-report requires --reporting-review")
+        report = json.loads(args.review_report.read_text(encoding="utf-8"))
+        reviews = json.loads(args.reporting_review.read_text(encoding="utf-8"))
+        if not report.get("results") or not isinstance(reviews, dict):
+            parser.error("Reporting review requires a nonempty results list and a review-key mapping")
+        for record in report["results"]:
+            apply_reporting_review(record, reviews)
+        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        return int(any(not record["acceptance_passed"] for record in report["results"]))
+    if not args.catalog or not args.env_file:
+        parser.error("Live evaluation requires --catalog and --env-file")
+    return asyncio.run(evaluate(args))
 
 
 if __name__ == "__main__":

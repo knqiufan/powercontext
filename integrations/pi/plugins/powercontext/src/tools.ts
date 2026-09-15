@@ -79,8 +79,12 @@ const HANDOFF_CITATION = Type.Union([
 ])
 const WORK_CLAIM = Type.Object({
   text: NON_EMPTY_STRING,
-  basis: Type.Union([Type.Literal('declared'), Type.Literal('verified')]),
-  evidence: Type.Array(HANDOFF_CITATION, { maxItems: 31 }),
+  basis: Type.Union([Type.Literal('declared'), Type.Literal('verified')], {
+    description: 'Use declared for inspected conversation/repository facts without existing exact PowerContext citations. verified requires nonempty exact evidence.',
+  }),
+  evidence: Type.Array(HANDOFF_CITATION, { maxItems: 31,
+    description: 'Must be [] when basis is declared. Never cite the new source_id being created by this operation.',
+  }),
 })
 const WORK_CONTRACT = Type.Object({
   schema: Type.Literal('powercontext.work-contract.v1'),
@@ -136,6 +140,14 @@ const HANDOFF_CONTENT = Type.Object({
   omissions: Type.Array(HANDOFF_OMISSION, { maxItems: 64 }),
   generation: Type.Optional(Type.Union([HANDOFF_GENERATION_METADATA, Type.Null()])),
 })
+const HANDOFF_DRAFT = Type.Object({
+  objective: NON_EMPTY_STRING,
+  state: Type.Array(HANDOFF_STATEMENT, { minItems: 1, maxItems: 64 }),
+  disposition: Type.Union([Type.Literal('continuable'), Type.Literal('blocked'), Type.Literal('complete')]),
+  next_action: Type.Union([HANDOFF_STATEMENT, Type.Null()]),
+  omissions: Type.Array(HANDOFF_OMISSION, { maxItems: 64 }),
+  generation: Type.Optional(Type.Union([HANDOFF_GENERATION_ENVELOPE, Type.Null()])),
+}, { additionalProperties: false })
 const PREPARED_HANDOFF = Type.Object({
   schema: Type.Literal('powercontext.prepared-handoff.v1'),
   scope_id: NON_EMPTY_STRING,
@@ -406,7 +418,13 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
   registerOperationTool(pi, runtime, {
     name: 'pc_handoff_current',
     label: 'PowerContext Handoff Current Work',
-    description: 'Capture an inspected current-work boundary and prepare a temporary Handoff for transfer.',
+    description:
+      'Prefer this for a requested transfer of inspected current facts. It captures its own Source: do not call ' +
+      'pc_capture_source or another Handoff tool first. Use a unique source_id. Each WorkClaim has ' +
+      'text, basis, and evidence: use declared with evidence=[] unless exact existing PowerContext citations exist. ' +
+      'next_action must be ONE claim object or null, never an array. omissions must be an array of strings (or []). ' +
+      'Return data.handoff unchanged, including schema, scope_id, base, content, and generation when present. ' +
+      'Do not separately finalize it. This captures a Source but does not commit a durable milestone; a preview makes no write.',
     parameters: Type.Object({
       source_id: ID_STRING,
       handoff: CURRENT_WORK_HANDOFF,
@@ -465,8 +483,8 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
     name: 'pc_handoff_prepare',
     label: 'PowerContext Handoff Prepare',
     description:
-      'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
-        'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. ' +
+      'This returns an unfinished Draft in data, NOT a transferable Handoff. To complete a requested transfer, you must next call pc_handoff_finalize with draft=data, then return finalize.data. This does not require a durable commit. Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
+      'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. ' +
       'Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and ' +
       'grants no authority; preparation is not a durable commit or proof that a receiver continued the ' +
       'work.',
@@ -482,11 +500,14 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
     name: 'pc_handoff_finalize',
     label: 'PowerContext Handoff Finalize',
     description:
+      'Pass only prepare.data or activate.data.draft as draft, never the {ok, data} response wrapper. ' +
+      'Return the resulting data unchanged: schema=powercontext.prepared-handoff.v1, scope_id, base, content, ' +
+      'and generation when present. Do not return just content or the unfinished Draft. ' +
       'Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use ' +
       'after checking its evidence and next action. Preserve the complete returned value for the ' +
       'receiver. Finalization does not commit a durable milestone, execute the work, or approve an ' +
       'artifact.',
-    parameters: Type.Object({ draft: JSON_OBJECT }),
+    parameters: Type.Object({ draft: HANDOFF_DRAFT }),
     operationId: 'finalize_handoff',
     payload: (params) => ({ draft: params.draft }),
   })

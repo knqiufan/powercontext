@@ -23,6 +23,10 @@ import {
   createMemorySearchTool, createMemoryGetTool, createMemoryStoreTool,
   createMemoryReviseTool, createMemoryRetireTool,
 } from "./tools.js";
+import {
+  createWorkContractTool, createHandoffCurrentWorkTool, createHandoffCommitTool,
+  createHandoffContinueTool, createHandoffAcknowledgeTool, createTaskOutcomeTool,
+} from "./work.js";
 
 it("mentions only currently available tools, including a write-only catalog", () => {
   const deps = {
@@ -31,12 +35,14 @@ it("mentions only currently available tools, including a write-only catalog", ()
   };
   const context = { agentId: "main", sessionKey: "agent:main:telegram:direct:fixture" };
   const tools = [createMemorySearchTool, createMemoryGetTool, createMemoryStoreTool,
-    createMemoryReviseTool, createMemoryRetireTool].map(create => create(context, deps)!);
+    createMemoryReviseTool, createMemoryRetireTool, createWorkContractTool, createHandoffCurrentWorkTool,
+    createHandoffCommitTool, createHandoffContinueTool, createHandoffAcknowledgeTool, createTaskOutcomeTool,
+  ].map(create => create(context, deps)!);
   expect(buildMemoryGuidance(new Set(), "off")).toEqual([]);
   for (const visible of [tools, ...tools.map(tool => [tool])]) {
     const names = new Set(visible.map(tool => tool.name));
     const guidance = buildMemoryGuidance(names, "off").join("\n");
-    const references = new Set(guidance.match(/\bpowercontext_memory_[a-z_]+\b/g));
+    const references = new Set(guidance.match(/\bpowercontext_[a-z_]+\b/g));
     expect(references).toEqual(names);
   }
   const output = process.env.POWERCONTEXT_GUIDANCE_EXPORT;

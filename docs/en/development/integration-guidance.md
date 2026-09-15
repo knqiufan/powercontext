@@ -39,8 +39,8 @@ These rules describe result interpretation; error classification follows the
 | --- | --- | --- |
 | DSH | Registered system section and native tools | `pc_search`, `pc_memory_list`, `pc_remember`; candidate decisions remain human `/pc review` commands. |
 | OpenCode | System transform and native tools | Same `pc_*` names; candidate-review mutations are not model tools. |
-| Pi | `before_agent_start` system prompt and native tools | Memory and Handoff; no candidate Review tool catalog. Guidance survives empty or failed automatic recall. |
-| OpenClaw | Memory capability prompt and provider tools | `powercontext_memory_search` / `powercontext_memory_store`; the prompt includes only tools available in the current context. No inventory, Handoff, or Review is inferred. |
+| Pi | `before_agent_start` system prompt and native tools | Memory, Topic Memory, structured work/Handoff, and read-only artifact/candidate inspection; no candidate mutations. Guidance survives empty or failed automatic recall. |
+| OpenClaw | Memory capability prompt and provider tools | `powercontext_memory_search` / `powercontext_memory_store`; the prompt includes only tools available in the current context. Memory and structured work/Handoff are available when their tools are enabled; inventory and candidate Review are not inferred. |
 | Hermes | Provider system block and schemas | `powercontext_search_memory`, `powercontext_remember`, and supported operation tools; existing `powercontext` Skill. |
 | Codex, Claude Code, WorkBuddy | MCP initialize instructions and OpenAPI-derived descriptions | `search_memory`, `list_memory_entries`, `remember_memory`; each existing `project-context` Skill stays consistent. |
 
@@ -93,3 +93,38 @@ the temporary path; only an explicit durable-milestone request authorizes a comm
 
 DSH exports its compiled tool schemas and system context from an actual SDK model request. The package registration
 test alone does not export a model catalog. Install the pinned runtime test dependencies before exporting DSH.
+
+## Adapter and reporting qualification
+
+Pi includes Topic Memory, artifact/candidate inspection, Work Contract, current-work Handoff, acknowledgement, and
+Task Outcome tools. OpenClaw includes Work Contract and structured Handoff/Outcome tools in eligible private sessions.
+Both retain the host's existing privacy and approval boundaries; candidate inspection never grants approval authority.
+
+Native Handoff evaluation executes the registered DSH, Pi, and OpenCode tool adapters and the built OpenClaw entry
+against controlled HTTP replies. It records the actual request after field selection, default values, generated Source
+identity, and Scope injection, then returns the adapter's real response wrapper. Install package dependencies and build
+OpenClaw first. Use Node 24.15+ for OpenClaw, or set `POWERCONTEXT_GUIDANCE_NODE` to that Node executable. Approval in
+this evaluator is a fixture, not proof of an interactive host approval channel. No real Server writes or generation run.
+
+A low-level prepare returns an unfinished Draft. Finalize `prepare.data` or `activate.data.draft`, not the enclosing
+`{ok, data}` response. Return the complete prepared carrier from `finalize.data`. Pi's high-level tool returns
+`data.handoff`; OpenClaw and Hermes return `handoff`. A high-level current-work call captures its own boundary and
+needs no preliminary capture or separate finalization. The carrier checker requires all mandatory fields and exact
+Scope, evidence, and receipts. Omitting optional null metadata is allowed by the contract; omitting required `base`
+even when null, changing a citation, or returning only `content` fails.
+
+`routing_passed` and `arguments_passed` do not establish truthful reporting. Every observation starts with
+`reporting_passed: null` and `acceptance_passed: false`. Review the recorded calls, controlled replies, and final answer
+for false success, fabricated evidence, and incomplete work. Write a JSON object keyed by each observation's
+`review_key`, with `passed` (boolean) and a specific nonempty `reason`, then apply it without another model call:
+
+```sh
+uv run python scripts/evaluate_integration_guidance.py \
+  --review-report /tmp/pc-guidance/results.json \
+  --reporting-review /tmp/pc-guidance/reporting-review.json \
+  --output /tmp/pc-guidance/reviewed-results.json
+```
+
+The key hashes the exact observation; changing its calls or final answer invalidates the review. A live run exits
+nonzero until reviewed. The review command exits zero only when every observation passes routing, arguments, and
+reporting checks. Keep failures and unreviewed cases visible; never infer acceptance from the routing total alone.

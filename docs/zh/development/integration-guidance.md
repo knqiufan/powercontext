@@ -35,8 +35,8 @@ Scope 由宿主和 Server 决定。复用解析后的绑定，不猜测身份或
 | --- | --- | --- |
 | DSH | 系统段和原生工具 | `pc_search`、`pc_memory_list`、`pc_remember`；候选决策由人工 `/pc review` 完成。 |
 | OpenCode | 系统 transform 和原生工具 | 同类 `pc_*` 名称；候选审核变更不作为模型工具开放。 |
-| Pi | `before_agent_start` 系统提示和原生工具 | 支持 Memory、Handoff，没有候选 Review 工具；自动召回为空或失败时仍有基础指引。 |
-| OpenClaw | Memory capability 提示和 provider 工具 | `powercontext_memory_search` / `powercontext_memory_store`；提示只列当前可用工具，不推断 inventory、Handoff 或 Review。 |
+| Pi | `before_agent_start` 系统提示和原生工具 | 支持 Memory、Topic Memory、结构化工作与 Handoff，以及只读产物和候选检查；不提供候选修改工具。自动召回为空或失败时仍有基础指引。 |
+| OpenClaw | Memory capability 提示和 provider 工具 | `powercontext_memory_search` / `powercontext_memory_store`；提示按当前目录说明 Memory 与结构化工作/Handoff，不推断 Memory 清单或候选 Review。 |
 | Hermes | provider 系统块和工具 schema | `powercontext_search_memory`、`powercontext_remember` 等实际工具；保留 `powercontext` Skill。 |
 | Codex、Claude Code、WorkBuddy | MCP 初始化指引和 OpenAPI 派生描述 | `search_memory`、`list_memory_entries`、`remember_memory`；各自现有 `project-context` Skill 保持一致。 |
 
@@ -82,3 +82,34 @@ uv run python scripts/evaluate_integration_guidance.py \
 
 DSH 从真实 SDK 模型请求导出编译后的工具 Schema 和系统上下文。单独运行包注册测试不导出模型目录；
 导出 DSH 前须安装固定版本的 runtime 测试依赖并运行上述 runtime 命令。
+
+## 适配器与结果陈述验收
+
+Pi 的能力包含 Topic Memory、产物和候选读取、Work Contract、当前工作交接、接收确认和 Task Outcome。
+OpenClaw 在符合条件的私密会话中支持 Work Contract 与结构化交接、Outcome。宿主既有的隐私和确认边界保持不变，
+读取候选不授予批准权限。
+
+原生 Handoff 评测执行实际注册的 DSH、Pi、OpenCode 工具适配器及构建后的 OpenClaw 入口，使用受控 HTTP 返回。
+记录的是经过字段选择、默认值、Source 标识生成和 Scope 注入之后的真实请求，返回值也经过实际适配器包装。
+先安装包依赖并构建 OpenClaw。OpenClaw 需要 Node 24.15+，可通过 `POWERCONTEXT_GUIDANCE_NODE` 指定解释器。
+评测中的授权为 fixture，不能证明真实宿主存在交互确认通道；评测不向真实 Server 写入，也不执行真实生成。
+
+底层 prepare 返回未完成的 Draft。将 `prepare.data` 或 `activate.data.draft` 传给 finalize，不能传整个
+`{ok, data}`。最终返回 `finalize.data` 中的完整载体。Pi 高层交接返回 `data.handoff`，OpenClaw 和 Hermes
+返回 `handoff`；高层当前工作交接自行记录边界，不需要先 capture 或再 finalize。载体验证要求全部必填字段，
+并保持 Scope、证据和 receipt 精确一致。契约允许省略值为 null 的可选元数据，但必填的 `base` 即使为 null
+也不能省略；改写引用或只返回 `content` 都会失败。
+
+`routing_passed` 和 `arguments_passed` 不代表结果陈述真实。每条观测初始为 `reporting_passed: null`、
+`acceptance_passed: false`。单独审查调用、受控返回和最终回答，检查虚报成功、虚构证据及未完成的工作。
+以观测的 `review_key` 为键编写 JSON，值包含布尔型 `passed` 和具体、非空的 `reason`，再执行：
+
+```sh
+uv run python scripts/evaluate_integration_guidance.py \
+  --review-report /tmp/pc-guidance/results.json \
+  --reporting-review /tmp/pc-guidance/reporting-review.json \
+  --output /tmp/pc-guidance/reviewed-results.json
+```
+
+此操作不再调用模型。键由完整观测的哈希生成，调用或回答变化后旧结论自动失效。实时评测在审查前以非零状态退出；
+只有全部观测的路由、参数和结果陈述均通过，审查命令才返回零。失败与未审查记录必须保留，不能只根据路由总数勾选验收。

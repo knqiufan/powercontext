@@ -99,4 +99,10 @@ model tools; Memory retirement still uses its guarded, citation-based tool.
 ## Degrade safely
 
 If PowerContext is unavailable, say so once and continue the task. Do not
-repeatedly retry or invent restored or saved memory.`
+repeatedly retry or invent restored or saved memory.
+
+For the lower-level Handoff flow, \`pc_handoff_prepare\` returns the Draft in \`data\`;
+\`pc_handoff_activate\` returns it in \`data.draft\`. Pass only that Draft to \`pc_handoff_finalize\`,
+never the \`{ok, data}\` wrapper. Return \`finalize.data\` unchanged, including \`schema\`, \`scope_id\`,
+\`base\`, \`content\`, and \`generation\` when present. Do not return an unfinished Draft or only \`content\`.
+`

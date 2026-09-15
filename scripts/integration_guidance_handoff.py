@@ -39,6 +39,7 @@ NATIVE_OPERATIONS = {
     "pc_handoff_activate": "activate_handoff",
     "pc_handoff_prepare": "prepare_handoff",
     "pc_handoff_finalize": "finalize_handoff",
+    "pc_handoff_current": "handoff_current_work",
     "powercontext_capture_source": "capture_content_source",
 }
 
@@ -66,20 +67,17 @@ class HandoffFixture:
             if self.source is not None:
                 message = "The Handoff already has a captured boundary"
                 raise ValueError(message)
-            self.source = {"name": "content", "source_id": payload["source_id"]}
             if operation == "capture_content_source":
+                self.source = {"name": "content", "source_id": payload["source_id"]}
                 return models.CaptureContentSourceResponse.model_validate({
                     "status": "accepted",
                     "source": self.source,
                     "position": 1,
                 }).model_dump(mode="json", by_alias=True)
-            # Use the Server's semantic validation too: declared facts cannot invent evidence.
+            self._validate_work_claims(payload["handoff"])
+            # Also retain the Server's validation of dispositions and other semantics.
             work = handoff_current_work_request(models.HandoffCurrentWorkRequest.model_validate(payload)).handoff
-            if any(
-                claim.evidence for claim in (*work.state, *(() if work.next_action is None else (work.next_action,)))
-            ):
-                message = "No prior exact evidence exists in this fixture"
-                raise ValueError(message)
+            self.source = {"name": "content", "source_id": payload["source_id"]}
             citation = {"kind": "source", "source_ref": self.source}
             draft = models.HandoffDraft.model_validate({
                 "objective": work.objective,
@@ -127,6 +125,21 @@ class HandoffFixture:
         self.prepared = self._prepare(self.draft)
         return self.prepared
 
+    @staticmethod
+    def _validate_work_claims(handoff: dict[str, Any]) -> None:
+        # Identify the exact claim before the Server's normalized semantic
+        # error; no Source is accepted when the request is invalid.
+        claims = [(f"handoff.state[{index}]", claim) for index, claim in enumerate(handoff["state"])]
+        if handoff["next_action"] is not None:
+            claims.append(("handoff.next_action", handoff["next_action"]))
+        for path, claim in claims:
+            if (claim["basis"] == "verified") != bool(claim["evidence"]):
+                message = f"{path}.basis/evidence: declared requires [], verified requires exact nonempty evidence"
+                raise ValueError(message)
+            if claim["evidence"]:
+                message = f"{path}.evidence: no prior exact PowerContext citation was returned in this scenario"
+                raise ValueError(message)
+
     def _check_evidence(self, operation: str, payload: dict[str, Any]) -> None:
         if self.source is None or self.draft is not None:
             message = "Prepare once, after capturing the inspected boundary"
@@ -158,7 +171,11 @@ class HandoffFixture:
                 continue
             try:
                 value, _ = decoder.raw_decode(text[index:])
-                if value == self.prepared:
+                # Optional null metadata may be omitted without changing the
+                # transport value. Required nullable fields (for example base)
+                # must still be present, and evidence/receipts must remain exact.
+                carrier = models.PreparedHandoff.model_validate(value).model_dump(mode="json", by_alias=True)
+                if carrier == self.prepared:
                     return True
             except ValueError:
                 continue

@@ -244,6 +244,8 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
     pcTool(defineTool, {
       name: 'pc_handoff_activate',
       description:
+        'When status is generated, data.draft is unfinished: inspect it, then call pc_handoff_finalize with draft=data.draft. ' +
+        'Only finalize.data is the transferable carrier. No durable commit is needed for temporary transfer. ' +
         'Start a requested work transfer from an existing exact boundary Source and objective. Inspect ' +
         'a generated Draft before finalizing it. An ignored boundary does not establish a new handoff; ' +
         'do not claim a committed milestone. Conceptual or preview-only requests do not authorize this ' +
@@ -261,7 +263,7 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
     pcTool(defineTool, {
       name: 'pc_handoff_prepare',
       description:
-        'Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
+        'This returns an unfinished Draft in data, NOT a transferable Handoff. To complete a requested transfer, you must next call pc_handoff_finalize with draft=data, then return finalize.data. This does not require a durable commit. Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: "source", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. ' +
         'Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested ' +
         'transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is ' +
         'temporary and grants no authority; preparation is not a durable commit or proof that a ' +
@@ -276,12 +278,17 @@ function handoffTools(runtime: PluginRuntime, defineTool: DefineTool): unknown[]
     pcTool(defineTool, {
       name: 'pc_handoff_finalize',
       description:
+        'Pass only prepare.data or activate.data.draft as draft, never the {ok, data} response wrapper. ' +
+        'Return the resulting data unchanged: schema=powercontext.prepared-handoff.v1, scope_id, base, content, ' +
+        'and generation when present. Do not return just content or the unfinished Draft. ' +
         'Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use ' +
         'after checking its evidence and next action. Preserve the complete returned value for the ' +
         'receiver. Finalization does not commit a durable milestone, execute the work, or approve an ' +
         'artifact.',
       kind: 'read',
-      parameters: { draft: { type: 'object', required: true, additionalProperties: true } },
+      parameters: { draft: { type: 'object', required: true, additionalProperties: true,
+        description: 'Only prepare.data or activate.data.draft: objective, state (text/citations), disposition, next_action (statement or null), omissions, and generation if present. Never include ok, data, scope_id, schema, or content in draft.',
+      } },
       execute: (args, exec) => run(runtime, exec, 'finalize_handoff', { draft: args.draft }),
     }),
     pcTool(defineTool, {

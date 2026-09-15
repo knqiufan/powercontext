@@ -869,9 +869,19 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
             "post": {
                 "tags": ["work"],
                 "summary": "Hand off current work in one high-level operation",
-                "description": "Capture an inspected "
-                "boundary and prepare a "
-                "temporary "
+                "description": "This operation captures "
+                "its own boundary; do not "
+                "call "
+                "capture_content_source "
+                "or another Handoff "
+                "operation first. "
+                "next_action is one "
+                "WorkClaim object or "
+                "null, never an array; "
+                "omissions is an array of "
+                "strings or []. Capture "
+                "an inspected boundary "
+                "and prepare a temporary "
                 "evidence-bearing Handoff "
                 "without committing it. "
                 "Capture the inspected "
@@ -1142,10 +1152,18 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
             "post": {
                 "tags": ["handoff"],
                 "summary": "Finalize an inspected Handoff Draft",
-                "description": "Finalize the exact inspected "
-                "PowerContext Handoff Draft into a "
-                "temporary transfer value. Use after "
-                "checking its evidence and next "
+                "description": "Pass the prepare response itself or "
+                "the activate response draft member, "
+                "never an enclosing response, as "
+                "draft. Return the complete "
+                "finalization result unchanged, "
+                "including schema, scope_id, base, "
+                "content, and generation when present. "
+                "Do not return only content or an "
+                "unfinished Draft. Finalize the exact "
+                "inspected PowerContext Handoff Draft "
+                "into a temporary transfer value. Use "
+                "after checking its evidence and next "
                 "action. Preserve the complete "
                 "returned value for the receiver. "
                 "Finalization does not commit a "
@@ -5584,7 +5602,17 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "type": "object",
                 "required": ["selection"],
             },
-            "WorkClaimBasis": {"type": "string", "enum": ["declared", "verified"]},
+            "WorkClaimBasis": {
+                "type": "string",
+                "enum": ["declared", "verified"],
+                "description": "Use declared for inspected "
+                "conversation or repository facts, "
+                "even when the user calls progress "
+                "verified. verified requires "
+                "nonempty exact PowerContext "
+                "citations returned by an earlier "
+                "operation.",
+            },
             "WorkClaim": {
                 "properties": {
                     "text": {"type": "string", "maxLength": 8192, "minLength": 1, "pattern": ".*\\S.*"},
@@ -5593,6 +5621,18 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                         "items": {"$ref": "#/components/schemas/HandoffCitation"},
                         "type": "array",
                         "maxItems": 31,
+                        "description": "Use [] with "
+                        "declared. "
+                        "verified "
+                        "requires "
+                        "exact "
+                        "previously "
+                        "returned "
+                        "citations; "
+                        "never invent "
+                        "evidence "
+                        "from the new "
+                        "Source ID.",
                     },
                 },
                 "additionalProperties": False,

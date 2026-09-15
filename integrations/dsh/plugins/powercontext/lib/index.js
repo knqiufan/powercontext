@@ -3228,7 +3228,13 @@ model tools; Memory retirement still uses its guarded, citation-based tool.
 ## Degrade safely
 
 If PowerContext is unavailable, say so once and continue the task. Do not
-repeatedly retry or invent restored or saved memory.`;
+repeatedly retry or invent restored or saved memory.
+
+For the lower-level Handoff flow, \`pc_handoff_prepare\` returns the Draft in \`data\`;
+\`pc_handoff_activate\` returns it in \`data.draft\`. Pass only that Draft to \`pc_handoff_finalize\`,
+never the \`{ok, data}\` wrapper. Return \`finalize.data\` unchanged, including \`schema\`, \`scope_id\`,
+\`base\`, \`content\`, and \`generation\` when present. Do not return an unfinished Draft or only \`content\`.
+`;
 
 //#endregion
 //#region src/skill.ts
@@ -3241,6 +3247,8 @@ Use pc_memory_list for an explicit inventory or audit ("list saved memories / �
 An explicit "remember this / 记住这个供以后使用" requires pc_remember and its successful result. Automatic Source capture or a verbal acknowledgement does not satisfy that request. Ordinary instructions and preview-only requests do not authorize a write. Never store secrets or duplicate prompts.
 Summarizing or drafting from facts supplied in the current turn needs no retrieval or Scope resolution. An empty search does not authorize an inventory. If inventory or Handoff is unavailable, do not emulate it with Memory search or storage.
 Tool names in this guidance describe possible capabilities, not proof of availability. Before selecting an operation, check that its exact name appears in the current tool catalog. If absent, stop that operation and explicitly report it unavailable and incomplete. Never emit a call to an absent tool, simulate a call in text, or substitute another persistence operation.
+A request for a temporary Handoff requires a finalized prepared carrier: do not stop at Draft generation. Finalization is temporary and does not commit a milestone.
+In the low-level Handoff flow, pc_handoff_prepare returns the Draft in data; pc_handoff_activate returns it in data.draft. Pass only that Draft to pc_handoff_finalize, never the whole response. Return finalize.data unchanged, including schema, scope_id, base, content, and generation when present.
 Handoff preparation requires exact returned Source or Artifact citations, not raw facts or invented references. When inspected current facts have no Source reference, call pc_capture_source first and use its returned source as boundary_source (or wrap it as {kind: "source", source_ref: source} for evidence); no preliminary Memory search or inventory is needed.
 For a requested handoff, capture the inspected boundary, activate it, inspect a generated Draft, then finalize the exact Draft for transfer. Commit only for an explicitly requested durable milestone. A temporary handoff is not a committed Revision or proof the receiver acted.
 Use pc_review_list / pc_review_get to inspect candidates. Generated candidates are not approved artifacts. Review decisions belong to the human /pc review command; never self-approve, install, publish, or execute a candidate.
@@ -3533,7 +3541,7 @@ function handoffTools(runtime, defineTool) {
 	return [
 		pcTool(defineTool, {
 			name: "pc_handoff_activate",
-			description: "Start a requested work transfer from an existing exact boundary Source and objective. Inspect a generated Draft before finalizing it. An ignored boundary does not establish a new handoff; do not claim a committed milestone. Conceptual or preview-only requests do not authorize this write.",
+			description: "When status is generated, data.draft is unfinished: inspect it, then call pc_handoff_finalize with draft=data.draft. Only finalize.data is the transferable carrier. No durable commit is needed for temporary transfer. Start a requested work transfer from an existing exact boundary Source and objective. Inspect a generated Draft before finalizing it. An ignored boundary does not establish a new handoff; do not claim a committed milestone. Conceptual or preview-only requests do not authorize this write.",
 			kind: "edit",
 			parameters: {
 				boundary_source: {
@@ -3557,7 +3565,7 @@ function handoffTools(runtime, defineTool) {
 		}),
 		pcTool(defineTool, {
 			name: "pc_handoff_prepare",
-			description: "Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: \"source\", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and grants no authority; preparation is not a durable commit or proof that a receiver continued the work.",
+			description: "This returns an unfinished Draft in data, NOT a transferable Handoff. To complete a requested transfer, you must next call pc_handoff_finalize with draft=data, then return finalize.data. This does not require a durable commit. Only call after an existing exact Source or Artifact reference was returned by a tool. If only current facts are available, call pc_capture_source first and wait for its result. Use evidence [{kind: \"source\", source_ref: data.source}] with the full returned name and source_id; never fabricate a reference. Prepare an inspectable PowerContext Handoff Draft from exact evidence for a requested transfer. Inspect facts, omissions, and the next action before finalizing. The Draft is temporary and grants no authority; preparation is not a durable commit or proof that a receiver continued the work.",
 			kind: "read",
 			parameters: {
 				objective: {
@@ -3577,12 +3585,13 @@ function handoffTools(runtime, defineTool) {
 		}),
 		pcTool(defineTool, {
 			name: "pc_handoff_finalize",
-			description: "Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use after checking its evidence and next action. Preserve the complete returned value for the receiver. Finalization does not commit a durable milestone, execute the work, or approve an artifact.",
+			description: "Pass only prepare.data or activate.data.draft as draft, never the {ok, data} response wrapper. Return the resulting data unchanged: schema=powercontext.prepared-handoff.v1, scope_id, base, content, and generation when present. Do not return just content or the unfinished Draft. Finalize the exact inspected PowerContext Handoff Draft into a temporary transfer value. Use after checking its evidence and next action. Preserve the complete returned value for the receiver. Finalization does not commit a durable milestone, execute the work, or approve an artifact.",
 			kind: "read",
 			parameters: { draft: {
 				type: "object",
 				required: true,
-				additionalProperties: true
+				additionalProperties: true,
+				description: "Only prepare.data or activate.data.draft: objective, state (text/citations), disposition, next_action (statement or null), omissions, and generation if present. Never include ok, data, scope_id, schema, or content in draft."
 			} },
 			execute: (args, exec) => run(runtime, exec, "finalize_handoff", { draft: args.draft })
 		}),

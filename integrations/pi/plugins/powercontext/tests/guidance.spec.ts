@@ -17,6 +17,8 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { Value } from 'typebox/value'
+import type { TSchema } from 'typebox'
 import powercontextPi from '../extensions/powercontext.ts'
 import { GUIDANCE } from '../src/guidance.ts'
 
@@ -27,6 +29,12 @@ it('routes only to the registered Pi tools without requiring a Skill load', () =
     registerTool: (tool: typeof tools[number]) => tools.push(tool),
   } as never)
   const names = new Set(tools.map(tool => tool.name))
+  const finalize = tools.find(tool => tool.name === 'pc_handoff_finalize')!
+  const citation = { kind: 'source', source_ref: { name: 'content', source_id: 'boundary' } }
+  const draft = { objective: 'Review docs', state: [{ text: 'README checked', citations: [citation] }],
+    disposition: 'complete', next_action: null, omissions: [], generation: null }
+  expect(Value.Check(finalize.parameters as TSchema, { draft })).toBe(true)
+  expect(Value.Check(finalize.parameters as TSchema, { draft: { ok: true, data: draft } })).toBe(false)
   for (const name of (GUIDANCE + tools.map(tool => tool.description).join('\n')).match(/\bpc_[a-z_]+\b/g) ?? []) {
     expect(names.has(name), `unavailable tool referenced in Pi guidance: ${name}`).toBe(true)
   }

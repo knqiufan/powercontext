@@ -10,6 +10,49 @@ description: tracking issue 1450 D 的工具选择测量、执行证据及模型
 StepFun endpoint 上的 `step-3.7-flash`，temperature 为 0，输出预算为 6,000 token，不强制工具选择。
 测试使用虚构的 Aurora 事实和隔离的 `fixture-scope`。
 
+## 基于主分支 `847203dc` 的当前验证
+
+2026-09-15 使用 `step-3.7-flash`、温度 0、自动工具选择及虚构的 Aurora 事实进行验证。DSH 的 12 条观测来自
+`qualification`（输出上限 10,000 token），其余八个入口的 96 条来自 `qualification-final`（16,000 token）。
+下表由这两个批次组成，不是一次运行的结果。
+
+| 入口 | 有效调用序列与完整载体 | 显式审查回复后通过 |
+| --- | --- | --- |
+| DSH | 12/12 | 12/12 |
+| Pi | 12/12 | 12/12 |
+| OpenCode | 12/12 | 12/12 |
+| OpenClaw | 12/12 | 11/12 |
+| Hermes | 12/12 | 12/12 |
+| Codex MCP 目录 | 12/12 | 12/12 |
+| Claude Code MCP 目录 | 11/12 | 11/12 |
+| WorkBuddy MCP 目录 | 12/12 | 12/12 |
+| 通用 Agent Plugin + MCP | 11/12 | 11/12 |
+| 合计 | 106/108 | 105/108 |
+
+[原始证据](https://github.com/knqiufan/powercontext/blob/codex/align-powercontext-tool-routing/e2e/integration-guidance/results/step37-native-20260915.jsonl)
+保留五个批次的全部 276 条观测，包括中间失败、目录、实际原生 HTTP 参数、受控返回、最终回复和绑定记录的审查理由。
+回复审查由 Codex 完成，并非人工审核或自动真实性评分。最终交接样本有两次将没有引用的已检查事实标成 `verified`，
+诊断明确指出 `handoff.state[0].basis/evidence`。另一次 OpenClaw 回答把“没有代码改动”扩大成“不需要代码改动”，
+即使结构有效，也被回复审查判为不通过。
+
+另行验证 DSH/Codex 的结果报告，工具选择为 17/24，审查后为 16/24。全部 12 个保存失败场景都说明未保存。
+七个工具缺失场景尝试调用不存在的工具，或没有给出最终回答；另一个回答虽然说明未保存，却建议改用 Source 捕获，
+也被判为不通过。这些模型失败完整保留，确定性的回归测试通过不能替代模型验收。
+
+原生交接测量执行 DSH、Pi、OpenCode 的实际注册适配器及构建后的 OpenClaw 插件，使用受控传输和确认 fixture，
+检查实际参数筛选、宿主 Scope 注入、生成的 Source 标识和响应包装。Hermes 与 MCP 目录仍直接使用受控返回。
+这里不进行真实持久化或生成，也不证明所有原生宿主的权限通道和 Skill 自动发现流程。
+
+载体验证遵循 HTTP 契约：可以省略可选的 null 元数据，但必须保留必填的可空 `base`、精确证据和生成回执。
+部分回答把完整载体放在响应包装内；此处评分证明载体存在且报告属实，不证明最终 JSON 只有裸载体。
+Memory 调用也会校验目录要求的必填参数。验收另外要求绑定完整记录哈希的显式回复审查；未经审查的观测保持未完成，
+评测命令以非零状态退出。
+
+四个原生适配器回归已接入各自的包 CI。本地通过 28 个评测器回归、102 个评测器/API/能力清单测试、85 个 MCP/Hermes
+测试及 3 个 JavaScript 操作契约测试。包测试通过 DSH 256、Pi 93、OpenCode 53、OpenClaw 73 项；真实 DSH SDK
+运行时测试通过 5 项。API/JavaScript 生成检查、包类型检查与构建、适用的 pre-commit hooks 及 Linux 平台 Python
+类型检查通过。OpenClaw 使用 Node 24.15.0。以下历史测量保留原有、较窄的验证口径。
+
 ## 模型行为测量
 
 [调用、参数、受控返回及回复记录](https://github.com/oceanbase/powercontext/blob/master/e2e/integration-guidance/results/step37-20260909.jsonl)
@@ -61,7 +104,7 @@ list，仍保留为有限预算场景的失败。服务超时和空回答也计�
 作为 evidence 时包装为 `{kind: "source", source_ref: source}`。高层输入的 WorkClaim 使用 `text`、`basis`、
 `evidence`；没有现成 PowerContext 精确引用的已检查事实使用 `declared` 和空 evidence。Skill 名称保持不变。
 
-2026-09-10 的 Step 3.7 Flash 验证对每个宿主覆盖两个场景、两种语言和三种 Skill 状态。按各条件最近一次观测
+2026-09-10 的 Step 3.7 Flash 验证对每个宿主覆盖两个场景、两种语言和三种 Skill 状态。按当时各条件最后一次观测
 合计 **64/96**，由下表列出的批次组成，并非一次同步运行，也不代表所有宿主验收通过。
 
 | 宿主 | 完整交接通过 / 观测数 | 证据批次 |
@@ -79,7 +122,7 @@ list，仍保留为有限预算场景的失败。服务超时和空回答也计�
 WorkClaim 探测和中间失败。各批次包含导出的目录及模型配置。DSH 最终批次使用真实 SDK 编译后的模型请求；中间
 批次从注册声明导出目录，不能证明运行时契约。包括 DSH 最终批次在内，这里的模型调用仍然使用受控返回结果。
 
-剩余失败包括无效的事实依据、格式错误或未完成的 Draft，以及不完整或被改写的载体。精确载体检查也会拒绝省略
+剩余失败包括无效的事实依据、格式错误或未完成的 Draft，以及不完整或被改写的载体。当时的精确载体检查还会拒绝省略
 可空字段的回答。最近这 96 条观测没有出现 commit 调用，但较早失败会截断序列，不能证明后续成功路径的行为。
 这些模型场景仍未通过验收，确定性的 schema 与运行时回归检查不能将其转换成通过。
 

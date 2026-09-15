@@ -26,6 +26,13 @@ it('exposes guidance through the actual system transform and resolves its tool n
   await hooks['experimental.chat.system.transform']?.({ model: {} as never }, output)
   const tools = Object.entries(hooks.tool ?? {}).map(([name, definition]) => ({ name, ...definition }))
   const names = new Set(tools.map(tool => tool.name))
+  const finalize = tools.find(tool => tool.name === 'pc_handoff_finalize')!
+  const parameters = tool.schema.object(finalize.args)
+  const citation = { kind: 'source', source_ref: { name: 'content', source_id: 'boundary' } }
+  const draft = { objective: 'Review docs', state: [{ text: 'README checked', citations: [citation] }],
+    disposition: 'complete', next_action: null, omissions: [], generation: null }
+  expect(parameters.safeParse({ draft }).success).toBe(true)
+  expect(parameters.safeParse({ draft: { ok: true, data: draft } }).success).toBe(false)
   expect(output.system.length).toBeGreaterThan(0)
   for (const name of (output.system.join('\n') + tools.map(tool => tool.description).join('\n')).match(/\bpc_[a-z_]+\b/g) ?? []) {
     expect(names.has(name), `unavailable tool referenced in OpenCode guidance: ${name}`).toBe(true)
