@@ -333,3 +333,12 @@ def test_handoff_response_wrapper_is_not_a_transferable_carrier(wrapper: str) ->
     fixture.respond("handoff_current_work", handoff_payload())
     assert fixture.carrier_returned(json.dumps(fixture.prepared))
     assert not fixture.carrier_returned(json.dumps({wrapper: fixture.prepared}))
+
+
+def test_handoff_array_and_broken_json_do_not_hide_a_nested_carrier() -> None:
+    fixture = HandoffFixture()
+    fixture.respond("handoff_current_work", handoff_payload())
+    carrier = json.dumps(fixture.prepared)
+    assert fixture.carrier_returned(f"Here is the carrier:\n```json\n{carrier}\n```")
+    assert not fixture.carrier_returned(f"[{carrier}]")
+    assert not fixture.carrier_returned('{"handoff":' + carrier)

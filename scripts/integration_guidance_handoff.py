@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from powercontext.http._generated import models
@@ -166,17 +167,15 @@ class HandoffFixture:
         if self.prepared is None:
             return False
         decoder = json.JSONDecoder()
-        index = 0
-        while (index := text.find("{", index)) >= 0:
-            try:
-                value, length = decoder.raw_decode(text[index:])
-            except ValueError:
-                index += 1
+        blocks = re.findall(r"```(?:json)?[ \t]*\r?\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        for block in blocks or [text]:
+            start = re.search(r"[\[{]", block)
+            if start is None:
                 continue
-            # Skip the entire parsed value, including nested objects. A response
-            # wrapper containing a carrier is not itself a PreparedHandoff.
-            index += length
             try:
+                # Inspect the outer JSON value only. A wrapper/array or broken
+                # response containing a nested carrier cannot be transferred.
+                value, _ = decoder.raw_decode(block[start.start() :])
                 # Optional null metadata may be omitted without changing the
                 # transport value. Required nullable fields (for example base)
                 # must still be present, and evidence/receipts must remain exact.
