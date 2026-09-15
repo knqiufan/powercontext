@@ -167,6 +167,45 @@ test('prepare, capture and flush fail independently and recover across real host
   } finally { await env.close() }
 })
 
+test('real DSH distinguishes rejected writes from incomplete HTTP responses', { timeout: 120000 }, async () => {
+  const env = await environment()
+  try {
+    await env.api('/v1/memory/remember', { scope_id: env.scopeId, kind: 'decision', text: CANARY })
+    const { instance, status } = env.harness({ requestTimeoutMs: 1000, timeoutMs: 10000 }, { commands: true })
+    for (const path of ['/v1/sources/content', '/v1/memory/flush']) {
+      for (const holdBody of [false, true]) {
+        env.setFault({ path, status: 401, holdBody })
+        const run = await instance.run('What is the aurora deployment color?')
+        assert.ok(run.finalResponse)
+        const observation = await status(run.sessionId)
+        const stage = path === '/v1/sources/content' ? 'capture' : 'flush'
+        assert.equal(observation.stages[stage].code, 'authentication_failed')
+        assert.equal(observation.stages[stage].http_status, 401)
+        assert.equal(observation.stages[stage].confirmation, 'rejected')
+        if (holdBody) {
+          assert.equal(observation.stages[stage].request_id, 'req-runtime-body')
+          assert.equal(observation.stages[stage].response_body_error, 'request_timeout')
+          assert.equal(observation.stages[stage].failure_phase, 'response_body')
+        }
+        if (stage === 'flush') assert.equal(observation.stages.capture.state, 'accepted')
+        else assert.equal(observation.stages.flush.code, 'capture_rejected')
+        assert.equal(observation.stages.injection.state, 'appended')
+        assert.ok(!JSON.stringify(observation).includes('private-response-marker'))
+      }
+    }
+    env.setFault({ path: '/v1/sources/content', status: 202, holdBody: true })
+    const incomplete = await instance.run('What is the aurora deployment color?')
+    const observation = await status(incomplete.sessionId)
+    assert.equal(observation.stages.capture.http_status, 202)
+    assert.equal(observation.stages.capture.code, 'request_timeout')
+    assert.equal(observation.stages.capture.confirmation, 'unconfirmed')
+    assert.equal(observation.stages.flush.code, 'capture_not_confirmed')
+    env.setFault(undefined)
+    const recovered = await instance.run('What is the aurora deployment color?')
+    assert.equal((await status(recovered.sessionId)).stages.capture.state, 'accepted')
+  } finally { await env.close() }
+})
+
 test('real DSH does not recall or capture into another configured Scope', { timeout: 120000 }, async () => {
   const env = await environment()
   try {

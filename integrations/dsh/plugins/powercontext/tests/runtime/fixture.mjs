@@ -138,6 +138,14 @@ export async function environment({ realModel } = {}) {
         await new Promise(resolve => res.once('close', () => { call.closed = true; resolve() }))
         return
       }
+      if (fault.holdBody) {
+        call.status = fault.status
+        res.writeHead(fault.status, { 'Content-Type': 'application/json', 'X-PowerContext-Request-ID': 'req-runtime-body' })
+        res.flushHeaders()
+        res.write('{"error":{"message":"private-response-marker')
+        await new Promise(resolve => res.once('close', () => { call.closed = true; resolve() }))
+        return
+      }
       json(res, { error: { code: fault.code, message: 'private-response-marker' } }, fault.status)
       call.status = fault.status
       return

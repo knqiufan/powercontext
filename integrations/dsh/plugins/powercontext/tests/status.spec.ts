@@ -203,7 +203,7 @@ describe('registered /pc automatic status', () => {
     })
     await h.run({ signal: controller.signal })
     expect((await h.status()).automatic.stages.capture).toMatchObject({ state: 'unavailable', http_status: 401,
-      code: 'authentication_failed' })
+      code: 'authentication_failed', confirmation: 'rejected' })
   })
 
   it('reports protocol failures without echoing the returned context', async () => {

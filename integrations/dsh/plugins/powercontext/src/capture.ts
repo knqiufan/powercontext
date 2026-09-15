@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import type { PowerContextClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import { logSafely, reportFailure } from './diagnostics.ts'
-import { MAX_SOURCE_LENGTH, TransportError } from './errors.ts'
+import { authenticationRejection, MAX_SOURCE_LENGTH, RequestNotSentError } from './errors.ts'
 import { containsSecret } from './secrets.ts'
 import { cancellationReason, type StatusAttempt } from './status.ts'
 
@@ -48,7 +48,7 @@ async function flushThrough(
   signal?: AbortSignal,
 ): Promise<boolean> {
   for (let i = 0; i < config.flushMaxCalls; i += 1) {
-    if (signal?.aborted) throw new TransportError('', signal.reason)
+    if (signal?.aborted) throw new RequestNotSentError('', signal.reason)
     const result = await client.request('flush_memory', { scope_id: scopeId }, signal)
     const cursor = result.kind === 'json' && result.value && typeof result.value === 'object'
       ? (result.value as { current_cursor?: unknown }).current_cursor
@@ -85,7 +85,7 @@ export async function captureUserPrompt(input: CaptureInput): Promise<void> {
   }
   observation?.record('capture', { state: 'running' })
   try {
-    if (input.signal?.aborted) throw new TransportError('', input.signal.reason)
+    if (input.signal?.aborted) throw new RequestNotSentError('', input.signal.reason)
     const result = await input.client.request('capture_content_source', {
       scope_id: input.scopeId,
       source_id: buildSourceId(input.scopeId, input.sessionId, input.turnId, input.prompt),
@@ -102,7 +102,7 @@ export async function captureUserPrompt(input: CaptureInput): Promise<void> {
     captureStatus = result.status
   } catch (error) {
     observation?.fail('capture', error, true, input.signal)
-    observation?.skip('flush', 'capture_not_confirmed')
+    observation?.skip('flush', authenticationRejection(error) ? 'capture_rejected' : 'capture_not_confirmed')
     reportFailure(input.log, 'capture_content_source', error)
     return
   }

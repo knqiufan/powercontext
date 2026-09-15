@@ -124,6 +124,17 @@ DNS 或 TLS 原因，无法细分时不会猜测。
 
 例如，`prepare: empty` 和 `capture: accepted` 可以同时成立。捕获或处理失败不会抹掉成功的读取结果。
 超时等未确认写入会带有 `confirmation: unconfirmed`：请求可能已经生效，不能据此断言没有写入，也不能盲目重试。
+这包括成功响应未完整读取，以及无法确定写入结果的 HTTP 错误。
+
+已收到 HTTP 401/403 时则显示 `confirmation: rejected`，表示该请求被认证或授权检查拒绝，不代表先前的捕获
+或同一轮中更早的 flush 请求被撤销。capture 已被拒绝时，flush 的跳过原因是 `capture_rejected`；捕获结果未知时
+仍使用 `capture_not_confirmed`。明确在请求发送前发生的失败不会带上未确认写入标记。
+
+响应头已收到、响应体未能完整读取时，会保留 `http_status` 和通过校验的 `request_id`，并提供
+`failure_phase: response_body` 及 `response_body_error`，后者区分 `request_timeout`、`cancelled`、
+`connection_failed` 和 `response_too_large`。例如 401 响应体超时仍显示 `authentication_failed`、`rejected`
+和响应体超时信息，应先检查凭据，再用请求 ID 定位日志。202 响应体超时仍为未确认，不会启动 flush。
+404 的错误响应体没有读到时，不能据此判断缺少路由。
 
 `attempt`、`turn`、`started_at`、各阶段的 `observed_at` 和 `age_ms` 标识记录属于哪次尝试、发生了多久。
 `freshness: current` 表示尝试发生在五分钟内，并且记录中的 Scope 与当前解析结果一致。

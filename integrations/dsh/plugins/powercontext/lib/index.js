@@ -29,23 +29,35 @@ const MAX_SOURCE_LENGTH = 2e5;
 const PLUGIN_NAME = "powercontext-dsh";
 const PLUGIN_VERSION = "0.0.2";
 const PLUGIN_USER_AGENT = `${PLUGIN_NAME}/${PLUGIN_VERSION}`;
+function safeRequestId(value) {
+	return value && /^[a-zA-Z0-9._:-]{1,128}$/.test(value) ? value : void 0;
+}
 var ClientError = class extends Error {
 	requestId;
 	constructor(message, requestId$1) {
 		super(message);
 		this.name = new.target.name;
-		this.requestId = requestId$1;
+		this.requestId = safeRequestId(requestId$1);
 	}
 };
 var TransportError = class extends ClientError {
 	path;
-	constructor(path, cause) {
-		super(`request to ${path} failed`);
+	constructor(path, cause, requestId$1) {
+		super(`request to ${path} failed`, requestId$1);
 		this.path = path;
 		this.cause = cause;
 	}
 };
 var UnavailableError = class extends TransportError {};
+var RequestNotSentError = class extends TransportError {};
+/** Headers were received, but the response body could not be read to completion. */
+var ResponseReadError = class extends TransportError {
+	statusCode;
+	constructor(path, cause, statusCode, requestId$1) {
+		super(path, cause, requestId$1);
+		this.statusCode = statusCode;
+	}
+};
 const RESPONSE_ISSUES = {
 	invalid_json: "The response body is not valid JSON.",
 	redirect: "The operation returned a redirect; the client does not follow redirects.",
@@ -101,6 +113,45 @@ var ServerResponseError = class extends ClientError {
 		this.serverMessage = options.message;
 	}
 };
+function observedResponse(error) {
+	if ((error instanceof ServerResponseError || error instanceof ResponseReadError || error instanceof InvalidResponseError) && error.statusCode !== void 0) return {
+		statusCode: error.statusCode,
+		...error.requestId ? { requestId: error.requestId } : {}
+	};
+}
+function bodyFailureDetails(error) {
+	if (error instanceof InvalidResponseError && error.issue === "response_too_large") return {
+		failure_phase: "response_body",
+		response_body_error: "response_too_large"
+	};
+	if (!(error instanceof ResponseReadError)) return {};
+	const name$1 = error.cause instanceof Error ? error.cause.name : void 0;
+	return {
+		failure_phase: "response_body",
+		response_body_error: name$1 === "TimeoutError" ? "request_timeout" : name$1 === "AbortError" ? "cancelled" : "connection_failed"
+	};
+}
+function authenticationRejection(error) {
+	const response = observedResponse(error);
+	return response && [401, 403].includes(response.statusCode) ? new ServerResponseError(response) : void 0;
+}
+function writeFailureConfirmation(error) {
+	if (error instanceof RequestNotSentError) return void 0;
+	if (authenticationRejection(error)) return "rejected";
+	if (error instanceof TransportError && !(error instanceof ResponseReadError)) {
+		const cause = error.cause instanceof Error ? error.cause : void 0;
+		const code = cause?.cause?.code ?? cause?.code;
+		if (code && [
+			"ECONNREFUSED",
+			"ENOTFOUND",
+			"EAI_AGAIN",
+			"CERT_HAS_EXPIRED",
+			"DEPTH_ZERO_SELF_SIGNED_CERT",
+			"UNABLE_TO_VERIFY_LEAF_SIGNATURE"
+		].includes(code)) return void 0;
+	}
+	if (error instanceof TransportError || error instanceof ServerResponseError || error instanceof InvalidResponseError) return "unconfirmed";
+}
 
 //#endregion
 //#region src/operations.generated.ts
@@ -1548,32 +1599,36 @@ var PowerContextClient = class {
 		const spec = OPERATIONS$1[id];
 		const prepared = prepareRequest(spec, payload);
 		const url = `${this.baseUrl}${prepared.path}${prepared.query}`;
+		const init = this.buildInit(spec, prepared, signal);
+		if (init.signal?.aborted) throw new RequestNotSentError(prepared.path, this.transportCause(void 0, init.signal));
 		try {
-			const response = await this.fetchImpl(url, this.buildInit(spec, prepared, signal));
-			return await this.parseResponse(id, spec, payload, response, options.readinessResponse === true);
+			const response = await this.fetchImpl(url, init);
+			return await this.parseResponse(id, spec, payload, response, options.readinessResponse === true, init.signal);
 		} catch (error) {
 			if (error instanceof ServerResponseError || error instanceof InvalidResponseError) throw error;
 			if (error instanceof UnknownOperationError) throw error;
-			throw this.wrapTransport(prepared.path, error);
+			throw this.wrapTransport(prepared.path, error, init.signal);
 		}
 	}
 	async readOpenApi(signal) {
 		const path = "/openapi.json";
 		const spec = OPERATIONS$1.get_liveness;
+		const init = this.buildInit(spec, {
+			path,
+			query: "",
+			headers: {},
+			body: void 0
+		}, signal);
+		if (init.signal?.aborted) throw new RequestNotSentError(path, this.transportCause(void 0, init.signal));
 		try {
-			const response = await this.fetchImpl(this.baseUrl + path, this.buildInit(spec, {
-				path,
-				query: "",
-				headers: {},
-				body: void 0
-			}, signal));
+			const response = await this.fetchImpl(this.baseUrl + path, init);
 			return await this.parseResponse("openapi_document", {
 				...spec,
 				path
-			}, void 0, response);
+			}, void 0, response, false, init.signal);
 		} catch (error) {
 			if (error instanceof ServerResponseError || error instanceof InvalidResponseError) throw error;
-			throw this.wrapTransport(path, error);
+			throw this.wrapTransport(path, error, init.signal);
 		}
 	}
 	buildInit(spec, request, signal) {
@@ -1595,21 +1650,24 @@ var PowerContextClient = class {
 		}
 		return init;
 	}
-	wrapTransport(path, error) {
-		if (error instanceof Error && error.name === "TimeoutError") return new UnavailableError(path, error);
-		if (error instanceof DOMException && error.name === "AbortError") return new UnavailableError(path, error);
-		return new UnavailableError(path, error);
+	transportCause(error, signal) {
+		if (!signal?.aborted) return error;
+		return new DOMException("HTTP operation stopped", signal.reason instanceof Error && signal.reason.name === "TimeoutError" ? "TimeoutError" : "AbortError");
 	}
-	async parseResponse(id, spec, payload, response, readinessResponse = false) {
+	wrapTransport(path, error, signal) {
+		if (error instanceof TransportError) return error;
+		return new UnavailableError(path, this.transportCause(error, signal));
+	}
+	async parseResponse(id, spec, payload, response, readinessResponse = false, signal) {
 		const success = response.status >= 200 && response.status < 300 || hasStatus(spec.successStatuses, response.status) || readinessResponse && id === "get_readiness" && response.status === 503;
-		const requestId$1 = response.headers.get(REQUEST_ID_HEADER) ?? void 0;
+		const requestId$1 = safeRequestId(response.headers.get(REQUEST_ID_HEADER) ?? void 0);
 		if (isRedirect(response.status) && !success) throw new InvalidResponseError(spec.path, requestId$1, response.status, "redirect");
 		let bytes;
 		try {
 			bytes = await readLimitedBody(response);
 		} catch (error) {
 			if (error instanceof InvalidResponseError) throw new InvalidResponseError(spec.path, requestId$1, response.status, error.issue);
-			throw error;
+			throw new ResponseReadError(spec.path, this.transportCause(error, signal), response.status, requestId$1);
 		}
 		if (!success) throw this.httpError(response.status, spec.path, requestId$1, bytes);
 		if (hasStatus(spec.emptyStatuses, response.status)) {
@@ -1742,6 +1800,7 @@ function responseDiagnostic(event, outcome, error) {
 		event,
 		outcome,
 		http_status: error.statusCode,
+		...error.requestId ? { request_id: error.requestId } : {},
 		...code ? { error_code: code } : {}
 	};
 }
@@ -1749,6 +1808,19 @@ function isDomainStatus(status) {
 	return status === 404 || status === 409 || status === 422;
 }
 function failureEvent(event, error) {
+	const rejection = authenticationRejection(error);
+	if (rejection && !(error instanceof ServerResponseError)) return {
+		...responseDiagnostic(event, rejection.statusCode === 401 ? "authentication_failed" : "invalid_response", rejection),
+		...bodyFailureDetails(error)
+	};
+	if (error instanceof ResponseReadError) return {
+		event,
+		outcome: "server_unavailable",
+		http_status: error.statusCode,
+		...error.requestId ? { request_id: error.requestId } : {},
+		...bodyFailureDetails(error),
+		recovery: "powercontext doctor"
+	};
 	if (error instanceof ServerResponseError) {
 		if (error.statusCode === 401) return responseDiagnostic(event, "authentication_failed", error);
 		if (isVersionMismatch(error)) return responseDiagnostic(event, "version_mismatch", error);
@@ -1947,6 +2019,26 @@ function transportFailure(error) {
 	];
 }
 function operationFailure(operation, error) {
+	const rejection = authenticationRejection(error);
+	if (rejection && !(error instanceof ServerResponseError)) {
+		const result = operationFailure(operation, rejection);
+		const body = bodyFailureDetails(error);
+		return {
+			...result,
+			...body,
+			message: result.message + (body.response_body_error ? ` Reading the response body also failed (${body.response_body_error}).` : ""),
+			...error instanceof InvalidResponseError && error.issue ? { protocol_issue: error.issue } : {}
+		};
+	}
+	if (error instanceof ResponseReadError) {
+		const body = bodyFailureDetails(error);
+		return {
+			...check(operation, error.statusCode === 404 ? "unclassified_not_found" : error.statusCode === 503 ? "service_unavailable" : error.statusCode >= 400 ? "http_error" : body.response_body_error, `Received HTTP ${error.statusCode}, but reading the response body failed (${body.response_body_error}).` + (error.statusCode === 404 ? " The unread error body cannot distinguish a missing resource from a missing route." : ""), "Use this operation, HTTP status and request ID in Server logs; check Server/proxy response-body delivery. The operation result was not validated."),
+			http_status: error.statusCode,
+			...requestId(error.requestId),
+			...body
+		};
+	}
 	if (error instanceof ServerResponseError) {
 		const code = publicErrorCode(error.code);
 		let result;
@@ -1956,7 +2048,7 @@ function operationFailure(operation, error) {
 		else if (error.statusCode === 404 && code === "scope_not_found") result = check(operation, code, "The Server could not find the requested Scope.", "Check POWERCONTEXT_DSH_SCOPE_ID first, then the session workspace binding and Server default Scope. Select an existing Scope explicitly; Doctor does not change bindings.");
 		else if (error.statusCode === 404) result = code ? check(operation, code, "The Server returned a recognized domain-level HTTP 404 for this operation.", "Inspect the selected resource and Scope in the Server. This domain response does not establish a missing HTTP route.") : check(operation, "unclassified_not_found", "The operation returned HTTP 404 with an unrecognized error code.", "Use the operation and request ID in the Server logs. This response cannot distinguish a missing resource from a missing route; inspect the contract check separately.");
 		else if (error.statusCode === 503) result = check(operation, code ?? "service_unavailable", "The Server returned HTTP 503 for this operation.", "Inspect the separate readiness dependency results and the running Server logs for this operation.");
-		else result = check(operation, code ?? "http_error", "The Server rejected this operation.", "Use this operation, HTTP status and request ID to locate the request in the Server logs.");
+		else result = check(operation, code ?? "http_error", "The Server returned an HTTP error for this operation.", "Use this operation, HTTP status and request ID to locate the request in the Server logs.");
 		return {
 			...result,
 			http_status: error.statusCode,
@@ -1967,7 +2059,8 @@ function operationFailure(operation, error) {
 		...check(operation, "invalid_response", error.issue ? RESPONSE_ISSUES[error.issue] : "The response does not satisfy this operation protocol.", "Verify the effective endpoint and proxy target serve PowerContext, and use matching Server/plugin refs. Inspect Server logs using the request ID."),
 		...requestId(error.requestId),
 		...error.issue ? { protocol_issue: error.issue } : {},
-		...error.statusCode === void 0 ? {} : { http_status: error.statusCode }
+		...error.statusCode === void 0 ? {} : { http_status: error.statusCode },
+		...bodyFailureDetails(error)
 	};
 	if (error instanceof TransportError || error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
 		const [code, message, recovery] = transportFailure(error);
@@ -2182,6 +2275,8 @@ function toolResultSchema() {
 			message: { type: "string" },
 			status: { type: "number" },
 			request_id: { type: "string" },
+			failure_phase: { type: "string" },
+			response_body_error: { type: "string" },
 			data: {
 				type: "object",
 				additionalProperties: true
@@ -2205,6 +2300,13 @@ function mapServerError(error) {
 		code: "authentication_failed",
 		message: "PowerContext authentication failed. Check Authorization.",
 		status: 401,
+		...requestIdField(error.requestId)
+	};
+	if (error.statusCode === 403) return {
+		ok: false,
+		code: "authorization_failed",
+		message: "PowerContext authorization failed. Check the principal and Scope permissions.",
+		status: 403,
 		...requestIdField(error.requestId)
 	};
 	if (error.statusCode === 404) {
@@ -2265,11 +2367,25 @@ function toToolResult(error) {
 		message: error.message
 	};
 	if (error instanceof ServerResponseError) return mapServerError(error);
+	const rejection = authenticationRejection(error);
+	if (rejection) return {
+		...mapServerError(rejection),
+		...bodyFailureDetails(error)
+	};
+	if (error instanceof ResponseReadError) return {
+		ok: false,
+		code: "unavailable",
+		message: "PowerContext response-body reading failed; the operation result was not validated.",
+		status: error.statusCode,
+		...requestIdField(error.requestId),
+		...bodyFailureDetails(error)
+	};
 	if (error instanceof InvalidResponseError) return {
 		ok: false,
 		code: "invalid_response",
 		message: "PowerContext returned an invalid response.",
-		...requestIdField(error.requestId)
+		...requestIdField(error.requestId),
+		...bodyFailureDetails(error)
 	};
 	if (error instanceof TransportError) return {
 		ok: false,
@@ -2390,6 +2506,7 @@ const SKIP_REASONS = {
 	downstream_rejected: "The downstream pre-step did not enter a model request.",
 	flush_disabled: "Automatic flushing after Source capture is disabled.",
 	capture_not_confirmed: "Source acceptance was not confirmed; flushing was not started.",
+	capture_rejected: "The capture request was rejected; flushing was not started.",
 	capture_skipped: "Source capture was skipped; see the capture observation.",
 	source_position_missing: "The capture response did not provide a valid position for flushing."
 };
@@ -2449,13 +2566,18 @@ var RuntimeStatus = class {
 				code: reason,
 				message: SKIP_REASONS[reason]
 			}),
-			fail: (stage, error, writeDispatched = false, signal) => {
-				const observedError = signal?.aborted && !(error instanceof ServerResponseError) && !(error instanceof InvalidResponseError) ? new TransportError("", new DOMException("Automatic operation stopped", cancellationReason(signal) === "deadline_exceeded" ? "TimeoutError" : "AbortError")) : error;
+			fail: (stage, error, writeAttempted = false, signal) => {
+				let observedError = error;
+				if (signal?.aborted && !(error instanceof ServerResponseError) && !(error instanceof InvalidResponseError) && !(error instanceof ResponseReadError)) {
+					const cause = new DOMException("Automatic operation stopped", cancellationReason(signal) === "deadline_exceeded" ? "TimeoutError" : "AbortError");
+					observedError = error instanceof RequestNotSentError ? new RequestNotSentError("", cause) : new TransportError("", cause);
+				}
 				const { state: _state, operation: _operation, ...failure } = operationFailure(OPERATIONS[stage], observedError);
+				const confirmation = writeAttempted ? writeFailureConfirmation(observedError) : void 0;
 				record$1(stage, {
 					...failure,
 					state: "unavailable",
-					...writeDispatched ? { confirmation: "unconfirmed" } : {}
+					...confirmation ? { confirmation } : {}
 				});
 			}
 		};
@@ -2482,7 +2604,7 @@ var RuntimeStatus = class {
 				observed_at: value.observed_at === null ? null : new Date(value.observed_at).toISOString(),
 				age_ms: value.observed_at === null ? null : Math.max(0, now - value.observed_at)
 			}])),
-			coverage: "Local observation age is not Memory freshness. Source acceptance and flush progress do not prove Memory production. Appended means added to pre-step messages, not proof of model consumption. Unconfirmed writes may have taken effect. Use /pc doctor for current Server/configuration diagnosis."
+			coverage: "Local observation age is not Memory freshness. Source acceptance and flush progress do not prove Memory production. Appended means added to pre-step messages, not proof of model consumption. Unconfirmed writes may have taken effect. Rejected describes the failed request only; earlier capture or flush work is not rolled back. Use /pc doctor for current Server/configuration diagnosis."
 		};
 	}
 };
@@ -2748,7 +2870,7 @@ function buildSourceId(scopeId, sessionId, turnId, prompt) {
 }
 async function flushThrough(client, config, scopeId, position, signal) {
 	for (let i = 0; i < config.flushMaxCalls; i += 1) {
-		if (signal?.aborted) throw new TransportError("", signal.reason);
+		if (signal?.aborted) throw new RequestNotSentError("", signal.reason);
 		const result = await client.request("flush_memory", { scope_id: scopeId }, signal);
 		const cursor = result.kind === "json" && result.value && typeof result.value === "object" ? result.value.current_cursor : void 0;
 		if (typeof cursor === "number" && cursor >= position) return true;
@@ -2784,7 +2906,7 @@ async function captureUserPrompt(input) {
 	}
 	observation?.record("capture", { state: "running" });
 	try {
-		if (input.signal?.aborted) throw new TransportError("", input.signal.reason);
+		if (input.signal?.aborted) throw new RequestNotSentError("", input.signal.reason);
 		const result = await input.client.request("capture_content_source", {
 			scope_id: input.scopeId,
 			source_id: buildSourceId(input.scopeId, input.sessionId, input.turnId, input.prompt),
@@ -2801,7 +2923,7 @@ async function captureUserPrompt(input) {
 		captureStatus = result.status;
 	} catch (error) {
 		observation?.fail("capture", error, true, input.signal);
-		observation?.skip("flush", "capture_not_confirmed");
+		observation?.skip("flush", authenticationRejection(error) ? "capture_rejected" : "capture_not_confirmed");
 		reportFailure(input.log, "capture_content_source", error);
 		return;
 	}

@@ -17,7 +17,8 @@
 import { createHash } from 'node:crypto'
 import { operationFailure } from './doctor.ts'
 import { sessionCwd } from './scope.ts'
-import { InvalidResponseError, ServerResponseError, TransportError } from './errors.ts'
+import { type BodyFailureDetails, InvalidResponseError, RequestNotSentError, ResponseReadError, ServerResponseError, TransportError,
+  writeFailureConfirmation } from './errors.ts'
 
 export const STATUS_SESSION_LIMIT = 64
 export const STATUS_STALE_AFTER_MS = 300_000
@@ -30,7 +31,7 @@ export type StatusStage = keyof typeof OPERATIONS
 type State = 'not_yet_observed' | 'running' | 'resolved' | 'ready' | 'empty' | 'accepted'
   | 'completed' | 'incomplete' | 'appended' | 'skipped' | 'unavailable'
 
-export interface StageResult {
+export interface StageResult extends BodyFailureDetails {
   state: State
   code?: string
   message?: string
@@ -39,7 +40,7 @@ export interface StageResult {
   request_id?: string
   protocol_issue?: string
   content_bytes?: number
-  confirmation?: 'unconfirmed'
+  confirmation?: 'rejected' | 'unconfirmed'
 }
 
 interface Observation extends StageResult {
@@ -60,7 +61,7 @@ export interface StatusAttempt {
   scope: (scopeId: string) => void
   record: (stage: StatusStage, result: StageResult) => void
   skip: (stage: StatusStage, reason: SkipReason) => void
-  fail: (stage: StatusStage, error: unknown, writeDispatched?: boolean, signal?: AbortSignal) => void
+  fail: (stage: StatusStage, error: unknown, writeAttempted?: boolean, signal?: AbortSignal) => void
 }
 
 const SKIP_REASONS = {
@@ -78,6 +79,7 @@ const SKIP_REASONS = {
   downstream_rejected: 'The downstream pre-step did not enter a model request.',
   flush_disabled: 'Automatic flushing after Source capture is disabled.',
   capture_not_confirmed: 'Source acceptance was not confirmed; flushing was not started.',
+  capture_rejected: 'The capture request was rejected; flushing was not started.',
   capture_skipped: 'Source capture was skipped; see the capture observation.',
   source_position_missing: 'The capture response did not provide a valid position for flushing.',
 } as const
@@ -133,13 +135,18 @@ export class RuntimeStatus {
       },
       record,
       skip: (stage, reason) => record(stage, { state: 'skipped', code: reason, message: SKIP_REASONS[reason] }),
-      fail: (stage, error, writeDispatched = false, signal) => {
-        const observedError = signal?.aborted && !(error instanceof ServerResponseError) && !(error instanceof InvalidResponseError)
-          ? new TransportError('', new DOMException('Automatic operation stopped',
-            cancellationReason(signal) === 'deadline_exceeded' ? 'TimeoutError' : 'AbortError')) : error
+      fail: (stage, error, writeAttempted = false, signal) => {
+        let observedError = error
+        if (signal?.aborted && !(error instanceof ServerResponseError) && !(error instanceof InvalidResponseError)
+          && !(error instanceof ResponseReadError)) {
+          const cause = new DOMException('Automatic operation stopped',
+            cancellationReason(signal) === 'deadline_exceeded' ? 'TimeoutError' : 'AbortError')
+          observedError = error instanceof RequestNotSentError ? new RequestNotSentError('', cause) : new TransportError('', cause)
+        }
         const { state: _state, operation: _operation, ...failure } = operationFailure(OPERATIONS[stage], observedError)
+        const confirmation = writeAttempted ? writeFailureConfirmation(observedError) : undefined
         record(stage, { ...failure, state: 'unavailable',
-          ...(writeDispatched ? { confirmation: 'unconfirmed' as const } : {}) })
+          ...(confirmation ? { confirmation } : {}) })
       },
     }
   }
@@ -170,6 +177,7 @@ export class RuntimeStatus {
       }])),
       coverage: 'Local observation age is not Memory freshness. Source acceptance and flush progress do not prove Memory production. '
         + 'Appended means added to pre-step messages, not proof of model consumption. Unconfirmed writes may have taken effect. '
+        + 'Rejected describes the failed request only; earlier capture or flush work is not rolled back. '
         + 'Use /pc doctor for current Server/configuration diagnosis.',
     }
   }

@@ -126,7 +126,19 @@ connection-refusal, DNS and TLS causes; an unidentified transport failure does n
 
 For example, `prepare: empty` and `capture: accepted` is a valid combination. A capture or flush failure does not
 erase a successful prepare. A timed-out or otherwise unconfirmed write carries `confirmation: unconfirmed`:
-the request may have taken effect. Do not interpret it as proof that nothing was written or blindly retry it.
+the request may have taken effect. This includes incomplete successful responses and HTTP failures that do not
+establish whether a write took effect. Do not interpret it as proof that nothing was written or blindly retry it.
+
+An observed HTTP 401/403 instead carries `confirmation: rejected`: that request was refused for authentication
+or authorization. It does not undo an earlier capture or earlier calls in a bounded flush sequence. Capture
+rejection skips flush with `capture_rejected`; unknown capture outcomes use `capture_not_confirmed`. A failure
+known to occur before sending the request does not carry an unconfirmed-write marker.
+
+If headers arrive but the body cannot be read, status retains `http_status` and a validated `request_id`, with
+`failure_phase: response_body` and `response_body_error` (`request_timeout`, `cancelled`, `connection_failed`, or
+`response_too_large`). For example, a stalled 401 body still reports `authentication_failed` and `rejected`,
+alongside the body timeout; fix credentials first and use the request ID to locate the request. A stalled 202
+body remains unconfirmed and does not start flush. An unread 404 body cannot establish a missing route.
 
 `attempt`, `turn`, `started_at`, per-stage `observed_at`, and `age_ms` identify the observation. `freshness: current`
 means the attempt is less than five minutes old and its observed Scope still matches the resolved Scope.
