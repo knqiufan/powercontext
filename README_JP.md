@@ -14,7 +14,10 @@ PowerContext は、会話をまたいでもコンテキストを作業ととも�
 
 ![あなたと Agent が作業を引き継ぎ、保存されたコンテキストから継続する流れ](docs/assets/readme-workflow.svg)
 
-[公式サイト](https://powercontext.oceanbase.io/en/) · [ドキュメントを読む](https://powercontext.oceanbase.io/en/docs/)
+[Web サイト](https://powercontext.oceanbase.io/en/) · [インストール手順](https://powercontext.oceanbase.io/en/docs/get-started/quickstart/)
+
+PowerContext 1.0.0 には対話式セットアップが含まれています。
+以下のコマンドで正式リリースと同じバージョンの Agent 連携をインストールします。
 
 ## 作業の続きをそのまま引き継ぐ
 
@@ -24,29 +27,36 @@ PowerContext は、会話をまたいでもコンテキストを作業ととも�
 
 ## 利用中の Agent と接続する
 
-最新リリースの [PowerContext](https://pypi.org/project/powercontext/) をインストールします：
+Git、uv、Agent CLI を用意して、1.0.0 をインストールします：
 
 ```bash
-uv tool install "powercontext[cli,server]==0.2.0"
+uv tool install --force "powercontext[cli,server]==1.0.0"
+mkdir -p powercontext-config
+cd powercontext-config
+powercontext config init --language en --output .env
 ```
 
-別のターミナルでローカル Server を起動します：
+ウィザードは英語と中国語に対応しています。自動 Memory と Topic Memory を試すには Full memory を選択し、
+Generation と Embedding の API 接続を設定してください。Agent のサブスクリプションとは別の認証情報が必要です。
+Basic memory は追加のモデル API なしで明示的な保存・検索を利用できます。
+
+生成された設定で Server を起動します：
 
 ```bash
-powercontext server run
+powercontext server run --env-file .env
 ```
 
-Server はデフォルトで、コンテキストをローカルの SQLite データベースに保存します。
-
-次に同じリリースから Agent との連携を設定します。例：
+Server を起動したまま、別のターミナルで同じ設定ディレクトリに移動し、`.env.next-steps.md` に従って
+クライアント環境の読み込み、Scope の作成・紐付け、同じバージョンの Agent プラグインのインストールを行います。例：
 
 ```bash
-powercontext setup codex --ref powercontext-v0.2.0
+powercontext setup codex --ref powercontext-v1.0.0
+powercontext doctor codex
 ```
 
-PowerContext ツールと Agent 連携には、常に同じ Git ref を使用してください。`master` のインストール、他の Agent、
-個人用サービスの設定は [Quick Start](https://powercontext.oceanbase.io/en/docs/get-started/quickstart/) と
-[インストールガイド](https://powercontext.oceanbase.io/en/docs/get-started/install-and-run/)を参照してください。
+PowerContext ツールと Agent 連携には、常に同じ Git ref を使用してください。
+[Quick Start](https://powercontext.oceanbase.io/en/docs/get-started/quickstart/) で Dashboard、SSH、HTTPS、
+Source から Topic 生成・更新、新しいセッションでの検索まで確認できます。
 Python 3.11+ が必要です。macOS と Linux をサポートし、Windows のサポートは `experimental` です。
 
 Codex は `official`、他のホストと Python Agent フレームワークは `community`、Bub は評価専用の `evaluation` です。
@@ -94,13 +104,24 @@ make test
 
 ## さらに詳しく
 
-- [はじめる](https://powercontext.oceanbase.io/en/docs/get-started/)
+- [はじめる](https://powercontext.oceanbase.io/en/docs/get-started/quickstart/)
 - [Agent と接続する](https://powercontext.oceanbase.io/en/docs/integrations/)
 - [コンテキストの管理](https://powercontext.oceanbase.io/en/docs/workflows/)
 - [デプロイと運用](https://powercontext.oceanbase.io/en/docs/operate/)
 - [開発と API](https://powercontext.oceanbase.io/en/docs/develop/)
 
 PowerContext は [PowerMem](https://www.powermem.ai/) の後継プロジェクトです。
+
+## コントリビューター
+
+PowerContext に貢献してくださる皆さまに感謝します。❤️
+
+<a href="https://github.com/oceanbase/powercontext/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=oceanbase/powercontext&amp;max=100&amp;columns=12" alt="PowerContext のコントリビューター" />
+</a>
+
+[すべてのコントリビューターを見る](https://github.com/oceanbase/powercontext/graphs/contributors) ·
+[開発に参加する](CONTRIBUTING.md)
 
 ## ライセンス
 

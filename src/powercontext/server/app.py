@@ -117,6 +117,12 @@ from powercontext.builtin.artifacts.topic_memory import (
     TopicMemoryCurrentItem,
     TopicMemorySearchResult,
 )
+from powercontext.builtin.dream.application import DreamApplication
+from powercontext.builtin.dream.models import CreateDreamRunRequest as RuntimeCreateDreamRunRequest
+from powercontext.builtin.dream.models import DreamError
+from powercontext.builtin.dream.models import GetDreamRunRequest as RuntimeGetDreamRunRequest
+from powercontext.builtin.dream.models import ListDreamRunsRequest as RuntimeListDreamRunsRequest
+from powercontext.builtin.evidence.models import EvidenceResolutionError
 from powercontext.builtin.handoff_report import (
     HandoffReportApplication,
     HandoffReportError,
@@ -289,7 +295,7 @@ from powercontext.builtin.runtime import (
 from powercontext.builtin.runtime import (
     SubmitSourceObservation as RuntimeSubmitSourceObservation,
 )
-from powercontext.builtin.runtime.application import PromptApplication
+from powercontext.builtin.runtime.application import BuiltinRuntime, PromptApplication
 from powercontext.builtin.scope import (
     ScopeApplication,
     ScopeBindingNotFoundError,
@@ -389,6 +395,7 @@ from powercontext.http import (
     ArtifactCreated,
     ArtifactFamilyAccessCapability,
     ArtifactPage,
+    ArtifactReadFamily,
     ArtifactRevision,
     ArtifactRevisionPage,
     BaseArtifactFamily,
@@ -405,6 +412,7 @@ from powercontext.http import (
     ContinueHandoffRequest,
     CreateAccessBindingRequest,
     CreateArtifactRequest,
+    CreateDreamRunRequest,
     CreatePromptArtifactRequest,
     CreateRemoteSkillTargetRequest,
     CreateScopeRequest,
@@ -413,6 +421,8 @@ from powercontext.http import (
     CreateSubjectSourceResponse,
     CreateWorkContractRequest,
     DownloadRemoteSkillPackageRequest,
+    DreamRun,
+    DreamRunPage,
     EnrollRemoteSkillTargetRequest,
     ErrorDetail,
     ErrorResponse,
@@ -451,6 +461,7 @@ from powercontext.http import (
     ListArtifactCandidatesRequest,
     ListArtifactRevisionsRequest,
     ListArtifactsRequest,
+    ListDreamRunsRequest,
     ListExternalSkillsRequest,
     ListExternalSkillsResponse,
     ListManagedSkillsRequest,
@@ -633,6 +644,7 @@ from powercontext.http._generated.operations import (
     CONTINUE_HANDOFF,
     CREATE_ACCESS_BINDING,
     CREATE_ARTIFACT,
+    CREATE_DREAM_RUN,
     CREATE_REMOTE_SKILL_TARGET,
     CREATE_SCOPE,
     CREATE_SOURCE,
@@ -656,6 +668,7 @@ from powercontext.http._generated.operations import (
     GET_CAPABILITIES,
     GET_CONNECTOR_CHECKPOINT,
     GET_DEFAULT_SCOPE,
+    GET_DREAM_RUN,
     GET_EXPERIENCE,
     GET_HANDOFF_REPORT,
     GET_LIVENESS,
@@ -679,6 +692,7 @@ from powercontext.http._generated.operations import (
     LIST_ARTIFACT_CANDIDATES,
     LIST_ARTIFACT_REVISIONS,
     LIST_ARTIFACTS,
+    LIST_DREAM_RUNS,
     LIST_EXTERNAL_SKILLS,
     LIST_MANAGED_SKILLS,
     LIST_MEMORY_CHANGES,
@@ -776,6 +790,7 @@ from powercontext.server.context import (
     is_internal_bridge,
     reset_request_id,
 )
+from powercontext.server.dream_access import DreamAccess, principal_identity
 from powercontext.server.tracing import request_id_from_span
 from powercontext.sources import ConnectorBinding as RuntimeConnectorBinding
 from powercontext.sources import SourceDefinitionManifest as RuntimeSourceDefinitionManifest
@@ -1192,6 +1207,8 @@ class ServerApplication(Protocol):
     prompts: PromptApplication
     profiles: Any
     subject_sources: Any
+
+    dream: DreamApplication
     scopes: ScopeApplication | None
     publications: ArtifactPublicationApplication | None
     sources: _SourceApplication
@@ -1254,6 +1271,7 @@ def create_app(
     app.state.access_mode = (
         ("disabled" if access_control is None else access_control.mode) if access_mode is None else access_mode
     )
+    _bind_evidence_access(application, app.state.access_control, app.state.access_mode)
     app.state.metrics = metrics
     app.state.tracing = tracing
     app.state.allow_insecure_remote_http = allow_insecure_remote_http
@@ -1313,8 +1331,7 @@ def create_app(
     async def application_error(request: Request, error: Exception) -> JSONResponse:
         response_status, code, message, details = _map_error(error)
         response = _error_response(response_status, code=code, message=message, details=details)
-        if isinstance(error, RemoteTargetAuthenticationError):
-            response.headers["WWW-Authenticate"] = "Bearer"
+        _set_error_headers(response, error)
         return response
 
     @app.exception_handler(Exception)
@@ -1329,6 +1346,9 @@ def create_app(
         response.headers[REQUEST_ID_HEADER] = request_id
         return response
 
+    _add_route(app, CREATE_DREAM_RUN, create_dream_run)
+    _add_route(app, GET_DREAM_RUN, get_dream_run)
+    _add_route(app, LIST_DREAM_RUNS, list_dream_runs)
     _add_route(app, GET_LIVENESS, get_liveness)
     _add_route(app, GET_READINESS, get_readiness)
     _add_route(app, GET_CAPABILITIES, get_capabilities)
@@ -2367,7 +2387,7 @@ def _list_artifacts_query(
 
 async def list_artifacts(
     scope_id: Annotated[str, Path(min_length=1, max_length=256, pattern=r".*\S.*")],
-    family: Annotated[BaseArtifactFamily, Path()],
+    family: Annotated[ArtifactReadFamily, Path()],
     request: Annotated[ListArtifactsRequest, Depends(_list_artifacts_query)],
     application: Annotated[ServerApplication, Depends(_require_application)],
 ) -> ArtifactPage:
@@ -2427,7 +2447,7 @@ def _list_artifact_revisions_query(
 
 async def list_artifact_revisions(
     scope_id: _ScopePathId,
-    family: Annotated[BaseArtifactFamily, Path()],
+    family: Annotated[ArtifactReadFamily, Path()],
     artifact_id: Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[\x21-\x7E]+$")],
     request: Annotated[ListArtifactRevisionsRequest, Depends(_list_artifact_revisions_query)],
     application: Annotated[ServerApplication, Depends(_require_application)],
@@ -2579,7 +2599,7 @@ async def query_artifact_tags(
 
 async def get_artifact(
     scope_id: Annotated[str, Path(min_length=1, max_length=256, pattern=r".*\S.*")],
-    family: Annotated[BaseArtifactFamily, Path()],
+    family: Annotated[ArtifactReadFamily, Path()],
     artifact_id: Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[\x21-\x7E]+$")],
     response: Response,
     application: Annotated[ServerApplication, Depends(_require_application)],
@@ -2629,7 +2649,7 @@ async def replace_artifact(
 
 async def get_artifact_revision(
     scope_id: Annotated[str, Path(min_length=1, max_length=256, pattern=r".*\S.*")],
-    family: Annotated[BaseArtifactFamily, Path()],
+    family: Annotated[ArtifactReadFamily, Path()],
     artifact_id: Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[\x21-\x7E]+$")],
     revision: Annotated[int, Path(ge=1)],
     application: Annotated[ServerApplication, Depends(_require_application)],
@@ -2656,12 +2676,13 @@ def _source_record_response(value: RuntimeSourceRecord) -> SourceRecord:
 def _artifact_revision_response(value: RuntimeArtifactRecord) -> ArtifactRevision:
     return ArtifactRevision(
         scope_id=value.scope_id,
-        family=BaseArtifactFamily(value.family),
+        family=ArtifactReadFamily(value.family),
         artifact_id=value.artifact_id,
         revision=value.revision,
         content=value.content,
         sources=[mapping.source_type_reference(ref) for ref in value.sources],
         artifacts=[mapping.artifact_reference(ref) for ref in value.artifacts],
+        memory_citations=[mapping.transport_citation(ref) for ref in value.memory_citations],
         content_digest=value.content_digest,
     )
 
@@ -2680,12 +2701,16 @@ def _artifact_created_response(value: RuntimeArtifactCreated) -> ArtifactCreated
 def _artifact_collection_item_response(value: RuntimeArtifactCollectionItem) -> ArtifactCollectionItem:
     return ArtifactCollectionItem(
         scope_id=value.scope_id,
-        family=BaseArtifactFamily(value.family),
+        family=ArtifactReadFamily(value.family),
         artifact_id=value.artifact_id,
         revision=value.revision,
         sources=[mapping.source_type_reference(ref) for ref in value.sources],
         artifacts=[mapping.artifact_reference(ref) for ref in value.artifacts],
         content_digest=value.content_digest,
+        title=value.title,
+        summary=value.summary,
+        published_at=value.published_at,
+        source_count=value.source_count,
     )
 
 
@@ -3083,6 +3108,74 @@ async def list_memory_changes(
 ) -> ListMemoryChangesResponse:
     result = await application.memory.for_scope(request.scope_id).changes(since_revision=request.since_revision)
     return mapping.changes_response(result)
+
+
+def _bind_evidence_access(
+    application: ServerApplication | None,
+    access: AccessControlService | None,
+    mode: str,
+) -> None:
+    if mode == "enforced" and isinstance(access, AccessControlService) and isinstance(application, BuiltinRuntime):
+        DreamAccess(access).bind(application)
+
+
+def _dream_principal(request: Request) -> str:
+    if request.app.state.access_mode == "disabled":
+        return "runtime"
+    principal = _require_principal()
+    return principal_identity(principal)
+
+
+async def create_dream_run(
+    scope_id: str,
+    request: CreateDreamRunRequest,
+    response: Response,
+    application: Annotated[ServerApplication, Depends(_require_application)],
+    http_request: Request,
+) -> DreamRun:
+    result = await application.dream.for_scope(scope_id, principal_id=_dream_principal(http_request)).create(
+        RuntimeCreateDreamRunRequest.model_validate_json(request.model_dump_json(exclude_unset=True)),
+    )
+    response.status_code = 200 if result.terminal else 202
+    return DreamRun.model_validate_json(result.model_dump_json())
+
+
+async def get_dream_run(
+    scope_id: str,
+    run_id: str,
+    application: Annotated[ServerApplication, Depends(_require_application)],
+    http_request: Request,
+) -> DreamRun:
+    result = await application.dream.for_scope(scope_id, principal_id=_dream_principal(http_request)).get(
+        RuntimeGetDreamRunRequest(run_id=run_id),
+    )
+    return DreamRun.model_validate_json(result.model_dump_json())
+
+
+def _list_dreams_query(
+    status: str | None = None,
+    operation: str | None = None,
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> ListDreamRunsRequest:
+    return ListDreamRunsRequest.model_validate({
+        "status": status,
+        "operation": operation,
+        "cursor": cursor,
+        "limit": limit,
+    })
+
+
+async def list_dream_runs(
+    scope_id: str,
+    request: Annotated[ListDreamRunsRequest, Depends(_list_dreams_query)],
+    application: Annotated[ServerApplication, Depends(_require_application)],
+    http_request: Request,
+) -> DreamRunPage:
+    result = await application.dream.for_scope(scope_id, principal_id=_dream_principal(http_request)).list(
+        RuntimeListDreamRunsRequest.model_validate_json(request.model_dump_json(exclude_unset=True)),
+    )
+    return DreamRunPage.model_validate_json(result.model_dump_json())
 
 
 async def propose_experience(
@@ -4562,11 +4655,18 @@ def _path_artifact_family(payload: Mapping[str, Any]) -> str:
         raise AccessInvalidRequestError("artifact-family") from error
 
 
+def _path_artifact_read_family(payload: Mapping[str, Any]) -> str:
+    try:
+        return ArtifactReadFamily(_nested_request_value(payload, "family")).value
+    except ValueError as error:
+        raise AccessInvalidRequestError("artifact-family") from error
+
+
 def _path_artifact_read_access(
     payload: Mapping[str, Any],
     _deployment_id: str,
 ) -> tuple[tuple[AccessAction, ResourceRef], ...]:
-    if _path_artifact_family(payload) == BaseArtifactFamily.MEMORY.value:
+    if _path_artifact_read_family(payload) in {BaseArtifactFamily.MEMORY.value, "topic-memory"}:
         return _path_scope_access(payload, action=AccessAction.SCOPE_READ)
     return _path_artifact_access(payload, action=AccessAction.ARTIFACT_READ)
 
@@ -4979,10 +5079,30 @@ def _validation_error_details(error: RequestValidationError | PydanticValidation
     return details
 
 
+def _set_error_headers(response: Response, error: Exception) -> None:
+    if isinstance(error, DreamError) and error.code == "capacity_exceeded":
+        response.headers["Retry-After"] = "1"
+    if isinstance(error, RemoteTargetAuthenticationError):
+        response.headers["WWW-Authenticate"] = "Bearer"
+
+
 def _map_error(error: Exception) -> tuple[int, str, str, dict[str, Any] | None]:
     access_error = _map_access_error(error)
     if access_error is not None:
         return access_error
+    if isinstance(error, (DreamError, EvidenceResolutionError)):
+        statuses = {
+            "idempotency_conflict": 409,
+            "artifact_conflict": 409,
+            "dream_not_found": 404,
+            "scope_not_found": 404,
+            "reference_not_found": 404,
+            "access_revoked": 403,
+            "capability_unavailable": 503,
+            "access_unavailable": 503,
+            "capacity_exceeded": 429,
+        }
+        return statuses.get(error.code, 422), error.code, "The Dream request could not be completed.", None
     service_error = _map_service_error(error)
     return _map_domain_error(error) if service_error is None else service_error
 

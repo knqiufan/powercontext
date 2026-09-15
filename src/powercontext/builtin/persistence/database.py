@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from powercontext.builtin.persistence.errors import DatabaseClosedError
 
+# Repositories that read a whole Scope selection in one statement chunk it to stay
+# below the lowest bind-parameter ceiling across the supported backends.
+SELECTION_BATCH_SIZE = 500
+
 
 class AsyncDatabase:
     """Own or attach to one SQLAlchemy async engine.
@@ -82,6 +86,10 @@ class AsyncDatabase:
         try:
             guard = self._shared_connection_lock if self._shared_connection_lock is not None else nullcontext()
             async with guard, self._engine.begin() as connection:
+                if connection.dialect.name == "mysql":
+                    # The MySQL dialect's begin hook is a no-op. Explicitly start
+                    # the owned transaction even when the server session uses autocommit.
+                    await connection.exec_driver_sql("START TRANSACTION")
                 if self._shared_connection_lock is not None:
                     self._transaction_owner = owner
                     self._shared_connection = connection

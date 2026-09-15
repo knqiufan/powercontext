@@ -100,8 +100,28 @@ describe('PowerContext Pi extension', () => {
     })
   })
 
-  it('retains routing guidance without injecting recalled content when PowerContext is unavailable', async () => {
+  it('keeps stderr clean by default so the TUI input bar is not corrupted', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network unavailable')))
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const beforeAgentStart = installExtension().get('before_agent_start')
+
+    await expect(beforeAgentStart?.({
+      prompt: 'continue implementation',
+      systemPrompt: 'Base instructions',
+    }, {
+      cwd: '/workspace/repo',
+      sessionManager: {
+        getSessionId: () => 'session-42',
+        getBranch: () => [],
+      },
+    })).resolves.toEqual({ systemPrompt: `Base instructions\n\n${GUIDANCE}` })
+    expect(warning).not.toHaveBeenCalled()
+  })
+
+  it('retains routing guidance without injecting recalled content when PowerContext is unavailable', async () => {
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network unavailable')))
+    vi.stubEnv('POWERCONTEXT_PI_DIAGNOSTICS', 'stderr')
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const beforeAgentStart = installExtension().get('before_agent_start')
 
@@ -129,6 +149,7 @@ describe('PowerContext Pi extension', () => {
       return new Response(JSON.stringify({ error: { code: 'invalid_request' } }), { status: 422 })
     })
     vi.stubGlobal('fetch', fetch)
+    vi.stubEnv('POWERCONTEXT_PI_DIAGNOSTICS', 'stderr')
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const beforeAgentStart = installExtension().get('before_agent_start')
 
@@ -163,6 +184,7 @@ describe('PowerContext Pi extension', () => {
       return new Response(JSON.stringify({ error: { code: 'invalid_request' } }), { status: 422 })
     })
     vi.stubGlobal('fetch', fetch)
+    vi.stubEnv('POWERCONTEXT_PI_DIAGNOSTICS', 'stderr')
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const beforeAgentStart = installExtension().get('before_agent_start')
 
@@ -202,6 +224,7 @@ describe('PowerContext Pi extension', () => {
       return new Response(JSON.stringify({ error: { code: 'conflict' } }), { status: 409 })
     })
     vi.stubGlobal('fetch', fetch)
+    vi.stubEnv('POWERCONTEXT_PI_DIAGNOSTICS', 'stderr')
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const beforeAgentStart = installExtension().get('before_agent_start')
 

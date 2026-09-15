@@ -131,8 +131,8 @@ boundary flushing fail open; explicit durable writes require interactive confirm
 Set `POWERCONTEXT_SCOPE_ID` to an existing ID returned by `create_scope` before running scoped content commands.
 
 ```text
-powercontext setup <host> --source oceanbase/powercontext --ref master
-powercontext setup select --host codex --host dsh --source oceanbase/powercontext --ref master
+powercontext setup <host>
+powercontext setup select --host codex --host dsh
 powercontext config init --output .env
 powercontext config show --env-file .env
 powercontext config validate --env-file .env
@@ -144,6 +144,8 @@ powercontext server run --env-file .env
 powercontext ready
 powercontext capabilities
 powercontext experience generate --scope-id "$POWERCONTEXT_SCOPE_ID" --source-ref content/SOURCE_ID
+powercontext experience list --scope-id "$POWERCONTEXT_SCOPE_ID"
+powercontext experience show --scope-id "$POWERCONTEXT_SCOPE_ID" --revision 1 EXPERIENCE_ID
 powercontext skill generate --scope-id "$POWERCONTEXT_SCOPE_ID" --origin experience \
   --artifact-ref experience/EXPERIENCE_ID@REVISION
 powercontext skill show --scope-id "$POWERCONTEXT_SCOPE_ID" --revision 1 SKILL_ID
