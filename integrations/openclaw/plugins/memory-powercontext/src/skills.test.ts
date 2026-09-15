@@ -26,6 +26,8 @@ it("OpenClaw discovers the packaged router and its workflow files in an isolated
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const home = await mkdtemp(join(tmpdir(), "pc-openclaw-skills-"));
   try {
+    // The host selects runtimeExtensions, so discovery needs the built entry.
+    await readFile(join(root, "dist", "index.js"), "utf8");
     const config = join(home, "openclaw.json");
     await writeFile(config, JSON.stringify({
       agents: { defaults: { workspace: join(home, "workspace") } },
@@ -45,7 +47,7 @@ it("OpenClaw discovers the packaged router and its workflow files in an isolated
         env,
       });
     const skill = JSON.parse(stdout).skills.find((item: { name: string }) => item.name === "powercontext-project-context");
-    expect(skill).toMatchObject({ eligible: true, modelVisible: true, disabled: false });
+    expect(skill, `OpenClaw did not discover powercontext-project-context from ${root}/skills`).toMatchObject({ eligible: true, modelVisible: true, disabled: false });
     expect(skill.description).toMatch(/[\u4e00-\u9fff]/);
     const directory = join(root, "skills", skill.name);
     const entry = await readFile(join(directory, "SKILL.md"), "utf8");
