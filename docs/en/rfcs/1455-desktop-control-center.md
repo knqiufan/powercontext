@@ -11,21 +11,13 @@ description: "A Tauri desktop client with explicit API, identity, installation, 
 
 # Summary
 
-Build **PowerContext Desktop** with Tauri 2, a trusted bundled React + TypeScript UI built with Vite, and the existing
-independent Python Server.
-The desktop manages connections, local installation and service health, Scopes, assets, Review, and supported Handoff
-workflows through public contracts. Rust owns constrained native capabilities and credential-bearing transport;
-the Server owns domain behavior, authorization, persistence, and durable processing.
+Build **PowerContext Desktop** as a Tauri 2 application with a bundled React + TypeScript UI built by Vite.
+It manages connections, Scopes, context assets, Review and supported local setup/Handoff flows through public
+contracts. Rust owns constrained native capabilities and credential-bearing transport; the independent Python
+Server owns domain behavior, authorization and persistence. Share suitable presentation resources with the personal
+Dashboard while keeping a separate client management entry. Propose Windows 11 x64 with SQLite as the first target.
 
-Reuse the personal Dashboard's brand resources, presentation conventions, translations, and suitable display components.
-Its Jinja/HTMX pages are not a portable desktop application. The desktop has its own client-side management entry;
-sharing an entire Web management application is not a prerequisite.
-
-The proposed first qualified target is **Windows 11 x64 with SQLite**. A connect-only preview can precede managed
-installation. Authorized browsing can precede durable Handoff delivery. Completing #1428 requires the complete
-installed-product journey on one qualified platform; accepting this RFC or releasing a preview does not close it.
-
-# Motivation and user journey
+# Motivation
 
 A user should be able to determine whether PowerContext is installed, whether an Agent uses the intended Scope, what
 needs review, where a Handoff went, and how to recover from an update in one application. Native credentials, file
@@ -36,17 +28,84 @@ The product serves new personal users, users attaching to existing installations
 Servers. It is not a chat client, IDE, Agent runtime, orchestrator, database replica, or prerequisite for CLI/SDK/MCP use.
 It does not execute downloaded Skills or automatically run Agent tasks.
 
-1. Choose **This computer** or **Remote Server**. Remote-only use needs no local Python environment. For managed local
-   setup, approve an installer-owned plan showing immutable releases, components, selected hosts, locations and recovery.
-2. Connect or install through supported interfaces. When managed installation is unavailable, explain the connect-only
-   scope and provide supported installation instructions instead of a nonfunctional install control.
-3. Inspect identity, authorization mode, readiness and capabilities separately. Without configuring models, store one
-   small Memory item and recall it with full-text search in the same exact Scope.
-4. Check the chosen Agent separately: installed, observed host loading, and actual capture/recall are different facts.
-   Unobserved checks remain unverified. Model-dependent operations explain their prerequisites.
-5. Browse assets and review supported Candidates. When delivery exists, open an exact Handoff from its inbox. Accepted
-   Source input is not proof that Memory extraction completed.
-6. Find redacted diagnostics, local data location, recovery, and separately named desktop/service removal actions.
+The intended outcome is a complete installed-product journey on one qualified platform. A connect-only preview can
+arrive before managed installation and delivery, with its limits visible. Accepting this design does not complete
+[#1428](https://github.com/oceanbase/powercontext/issues/1428). Implementation phases, task owners, acceptance evidence
+and tuning work are tracked in the [delivery plan](../development/desktop-delivery-plan.md).
+
+# Guide-level explanation
+
+The desktop is a control center for a Server. A **connection** selects a Server and credentials; the Server resolves
+the **Principal** whose permissions apply. A **Scope** identifies the context being observed or changed. Selecting a
+Scope for browsing does not change an Agent's binding. A **Candidate** is a proposal awaiting review, while a Handoff
+**delivery** is a durable record for an authorized receiver. Opening either item does not approve or accept it.
+
+## Connect to a Server
+
+On a machine without PowerContext, choose **This computer**. When managed installation is supported, inspect and
+approve the installer's plan: releases, components, selected Agent hosts, locations and recovery. Setup works before
+Python is installed. A connect-only preview explains its limit and links to supported installation instructions.
+
+If the Server already exists, save its endpoint and credentials as a connection. For example, keep separate
+“Personal” and “Team” connections, with Team using HTTPS. Remote-only use needs no local Python. The overview shows
+the resolved identity, authorization mode, service readiness and available features separately. A healthy Server
+does not mean every feature is configured or that the current user may use it. An unsupported version or login
+method produces an actionable explanation; the desktop does not guess compatibility or downgrade authentication.
+
+## Choose a Scope and manage context
+
+In Personal, select the exact Scope displayed as “Documentation” and explicitly save “Use British spelling in the
+guide.” Recall it through full-text search in that same Scope; this path needs no model configuration. The result
+opens its exact citation. A broader browsing selection does not silently become the destination of a write.
+
+Importing a UTF-8 notes file first shows the connection, exact Scope and duplicate policy. Importing the same text
+again in that Scope, even after renaming the file, reuses its capture identity. Changed text creates another Source.
+“Source accepted” does not claim that Memory extraction has finished. If complete Memory browsing or history is
+unavailable, the page says so and offers supported search/detail instead of presenting a truncated directory as complete.
+
+Inspect the chosen Agent's binding separately. Browsing Documentation does not redirect that Agent's saves there.
+“Installed,” “host loading observed,” and “capture/recall verified” remain separate states; an unobserved check is
+unverified. Changing a binding is an explicit authorized action with its own exact target.
+
+## Review a proposal and follow a Handoff
+
+Open a pending Profile Candidate, inspect its typed proposal and evidence, then approve the version shown. If another
+client revises it first, the desktop reports the conflict and loads the new state for a fresh decision. It never
+approves the replacement automatically. Rejecting a Candidate requires a reason.
+
+A shared Handoff opens the exact authorized revision, even when its containing Scope cannot be listed. Sharing and
+delivery are distinct: without a supported delivery contract, the desktop offers authorized reports/shared items,
+not a fabricated inbox. With delivery support, open the inbox record and inspect its target and state. Viewing it
+does not accept work on an Agent's behalf; acceptance requires the supported receiver flow and its live observations.
+
+## Understand notifications and incomplete results
+
+Review monitoring covers the active connection's current exact Scope. For example, if only part of Documentation's
+pending list has been scanned, show “Pending items observed; scan incomplete,” with its coverage and last refresh.
+Any number is labelled as observed, not a complete current total. An unread page is not zero, and items can change
+between pages. Completing a traversal alone does not establish a point-in-time total without Server support.
+
+Initial monitoring presents a summary rather than one notification per historical item. Later hints are coalesced
+and contain no private titles or bodies. Clicking a hint reopens its original context and checks permission again;
+a removed or revoked item produces a safe unavailable state. Denying system notifications leaves an in-app view.
+
+## Switch connections, recover and exit
+
+Switching from Personal to Team clears Personal's private views and prompts before discarding unsaved input when
+needed. A late Personal search result never appears in Team. An already submitted write still targets Personal;
+a lost response is shown as uncertain until its supported recovery establishes the result. Disconnection does not
+create an offline write queue, and reconnecting refreshes identity and authorization.
+
+With a tray, closing the last window hides the desktop; **Quit** exits it. Without a tray, the window explains that
+closing it exits. Neither action stops the independent Server or accepted durable work. Notifications stop on Quit;
+reopening refreshes Server state. Desktop and Server login startup are separate choices.
+
+Updates show the affected components, interruption and recovery plan before applying. After an interrupted update,
+use the producer's durable status instead of assuming all components succeeded or repeating the operation blindly.
+“Remove desktop,” “Remove local service” and “Delete data” are distinct actions; desktop/service removal preserves
+business data by default. Diagnostics can be previewed and exported without private content or credentials.
+
+## Screens and scope
 
 | Screen | First-release behavior |
 | --- | --- |
@@ -62,12 +121,13 @@ Read Topic Memory and Profile through supported contracts. Prompt editing, Dream
 marketplace, a Handoff editor and arbitrary Skill execution are excluded. Unsupported types never gain generic editing
 or approval. Existing processes can be connected to without being adopted; local controls require verified ownership.
 
-Closing the last window hides the application if a tray exists; **Quit** exits. Without a tray, closing the last window
-exits and the UI explains it. Neither stops the independent Server. Desktop login startup and Server login startup are
-separate settings. Notifications require a running desktop; durable Server work and an implemented inbox survive exit.
-Remote offline mode does not queue writes.
+# Reference-level explanation
 
-# Technical design
+The connection and switching examples depend on compatibility, native transport and identity isolation (§§4–7).
+Scope, import and Review behavior use the public API and typed family rules (§§3, 8, 11–12). Handoff and incomplete
+notification coverage have separate authority and recovery (§§9–10). Closing, updating and removing the desktop
+preserve producer ownership and durable Server state (§§6, 13–15). These are architectural contracts, independent of
+the implementation schedule.
 
 ## 1. Baseline and producer dependencies
 
@@ -86,30 +146,30 @@ every release. Each desktop release pins and qualifies its supported Server and 
 | Assets/processing | Profile, Topic Memory, Prompt, tags, Dream and processing supervisor | Family-specific write and maintenance migration rules remain authoritative |
 | Distribution | Versioned Python releases and maintained integration manifest | Unified installer remains dependent work; Windows support is currently experimental |
 
-The following are requirements on the responsible producers, **not implemented interfaces**. Each producer fixes the
-schema, owner and conformance tests before its consumer ships. An unavailable dependency gates the named feature.
+The following are requirements on the responsible producers, **not implemented interfaces**. Each producer defines its
+schema and semantics before a desktop feature relies on them. An unavailable dependency disables only that feature;
+staffing, delivery gates and qualification evidence belong to the delivery plan.
 
-| ID | Producer / related work | Required contract | Gate |
-| --- | --- | --- | --- |
-| D1 | Server/API | `server-info`, deployment identity lifecycle, explicit compatibility profiles | Compatibility-dependent P1/P2 controls |
-| D2 | Server/Memory | Authorized bounded entry listing and, before history UI, bounded change/history queries | Complete Memory browsing in P2 |
-| D3 | Service/configuration, [RFC 1299](1299_local_server_availability_and_service_installation.md) | Noninteractive structured mutations, protected input, ownership and recovery | Managed service/configuration changes in P3 |
-| D4 | Installer [#1406](https://github.com/oceanbase/powercontext/issues/1406), RFC [#1408](https://github.com/oceanbase/powercontext/pull/1408) | Verified bootstrap, plans, locks, durable operation/status and recovery | Managed install/update in P3 |
-| D5 | Distribution [#1405](https://github.com/oceanbase/powercontext/issues/1405), RFC [#1410](https://github.com/oceanbase/powercontext/pull/1410) | Immutable host artifacts, compatibility and host-owned install adapters | Selected-host install in P3 |
-| D6 | Delivery [#1419](https://github.com/oceanbase/powercontext/issues/1419) | Receiver association, envelope, durable inbox, exact references, deduplication and recovery | Delivery consumption in P4 |
-| D7 | Desktop/release maintainers | Named owners, Windows/host qualification, supported versions and measured budgets | P0 exit and P5 release |
-| D8 | Server/connector owners | Public connector discovery, health and administrative operations, if offered | Only corresponding connector controls |
+| ID | Producer / related work | Required contract |
+| --- | --- | --- |
+| D1 | Server/API | `server-info`, deployment identity lifecycle, explicit compatibility profiles |
+| D2 | Server/Memory | Authorized bounded entry listing and, before history UI, bounded change/history queries |
+| D3 | Service/configuration, [RFC 1299](1299_local_server_availability_and_service_installation.md) | Noninteractive structured mutations, protected input, ownership and recovery |
+| D4 | Installer [#1406](https://github.com/oceanbase/powercontext/issues/1406), RFC [#1408](https://github.com/oceanbase/powercontext/pull/1408) | Verified bootstrap, plans, locks, durable operation/status and recovery |
+| D5 | Distribution [#1405](https://github.com/oceanbase/powercontext/issues/1405), RFC [#1410](https://github.com/oceanbase/powercontext/pull/1410) | Immutable host artifacts, compatibility and host-owned install adapters |
+| D6 | Delivery [#1419](https://github.com/oceanbase/powercontext/issues/1419) | Receiver association, envelope, durable inbox, exact references, deduplication and recovery |
+| D8 | Server/connector owners | Public connector discovery, health and administrative operations, if offered |
 
-D4/D5 RFCs and D6 tracking work remain open at this baseline. Existing authorization need not wait for D6: qualify
-access in each consuming phase. Scope integration bindings and Access role bindings are separately named concepts.
+D4/D5 RFCs and D6 tracking work remain open at this baseline. Existing authorization need not wait for D6: authorize
+each consuming operation independently. Scope integration bindings and Access role bindings are separately named concepts.
 
 ## 2. Components and UI sharing
 
 ```text
-Bundled desktop UI -> typed Rust IPC -> public Server HTTP API
-                          |
-                          +-> OS credentials, tray, notifications, file handles
-                          +-> installer/service/configuration machine interfaces
+Bundled desktop UI -> typed IPC -> Rust host -> public HTTP API -> independent Python Server
+                                    |
+                                    +-> OS credentials, tray, notifications, file handles
+                                    +-> installer/service/configuration machine interfaces
 OS service manager -> independent Python Server -> persistence and durable processing
 Installer          -> verified runtime/Agent artifacts and installation journal
 Personal Dashboard -> its own server-rendered pages -> public API authorization
@@ -124,7 +184,7 @@ The installed frontend needs no Node.js server, SSR or Next.js runtime; setup/re
 Keep the desktop build independent of the documentation website. React does not migrate Jinja/HTMX pages automatically
 or require a Dashboard rewrite. State and request handling must still enforce connection/identity isolation; adopting
 React does not replace native validation or Server authorization. Domain rules stay on the Server; installation and
-service logic stay with their existing owners. Qualify frontend dependencies and rendering costs under the P0 budgets.
+service logic stay with their existing owners. Evaluate frontend dependencies and rendering costs in the delivery plan.
 
 Initially share brand assets, design conventions, translations and suitable display components. Shared code must have
 one canonical source, deterministic build/copy and drift verification. The extraction PR identifies files and licenses.
@@ -140,27 +200,27 @@ this RFC does not expand the personal Dashboard's read-oriented scope or enable 
 
 The desktop does not import Runtime objects, open databases, scrape HTML or consume private Dashboard endpoints.
 Generate or validate operation IDs, schemas, path encoding and response types against `openapi/powercontext.yaml`.
-Avoid separate hand-maintained Rust/JavaScript catalogs. Contract changes require `make api-generate` and
-`make contract-test` before delivery. Permissions below identify relevant checks, not the complete Server policy:
+Avoid separate hand-maintained Rust/JavaScript catalogs. Permissions below identify relevant checks, not the complete
+Server policy:
 compound evidence, target, publication and current-state checks still apply.
 
-| UI behavior | Existing operation IDs | Authorization / consistency | Phase or gap |
+| UI behavior | Existing operation IDs | Authorization / consistency | Availability / boundary |
 | --- | --- | --- | --- |
-| Connection | `get_liveness`, `get_readiness`, `get_capabilities`, `get_access_principal` | Health is not identity; protected calls use current policy | P1; D1 handshake |
-| Scope directory | `list_scopes`, `get_scope`, `get_default_scope`, `resolve_scope_selection` | Authorized discovery, opaque cursor and actual selection semantics | P2 |
-| Scope/binding changes | `create_scope`, `update_scope`, `set_scope_binding`, `clear_scope_binding`, `resolve_scope_binding` | Creation/admin checks, defined expected versions, exact target | P2; no global binding-list promise |
-| Memory | `remember_memory`, `search_memory`, `list_memory_entries`, `get_memory_entry`, `revise_memory_entry`, `retire_memory_entry`, `list_memory_changes` | Applicable Scope/resource checks; exact citation | P1 store/search; D2 full browse/history |
-| Source | `list_sources`, `get_source`, `capture_content_source` | Authorized Scope/source access, paging, immutable capture identity | P2 |
-| Artifact browsing | `list_artifacts`, `get_artifact`, `get_artifact_revision`, `list_artifact_revisions` | Family policy, exact revision, ETag and opaque paging | P2 |
-| Topic Memory detail/search | `get_topic_memory`, `search_topic_memory` | Dedicated selection/search limits and current family policy | P2 read only; no manual write/flush |
-| Tags | `get_artifact_tags`, `replace_artifact_tags`, `get_memory_entry_tags`, `replace_memory_entry_tags`, `query_artifact_tags` | Supported taggable families, exact logical target and required tag-state `If-Match` | P2; tags do not change content revisions |
-| Review | `list_artifact_candidates`, `get_artifact_candidate`, `approve_artifact_candidate`, `reject_artifact_candidate`, `revise_artifact_candidate` | Read/review and proposal/evidence checks; `expected_version` | P2; list requires exact Scope |
-| Skill lifecycle/package | `list_managed_skills`, `update_skill_lifecycle`, `get_skill_package_manifest`, `download_skill_package` | Resource checks, `expected_generation`, exact reviewed package | P2; never execute downloaded code |
-| Publication | `publish_artifact`, `publish_remote_skill` | Share/target administration and publication policy; exact reference/generation | P2 only for qualified targets |
-| Sharing | `get_access_principal`, `check_access`, `list_access_resources` | Current Principal, safe filtering, exact share unit | P2; role-administration UI excluded |
-| Handoff | `get_handoff_report`, `continue_handoff`, `acknowledge_handoff`, `record_task_outcome` | Report versus exact evidence/receipt rights; receiver observations | P2 read; P4 supported receiver actions |
-| Statistics | `get_stats` | Authorized projection and supported selection; missing is not zero | P2 |
-| Local management | Producer machine interfaces; `service status --json`, `doctor integrations --json` | Verified local ownership and protected configuration | P1 read; P3 mutations |
+| Connection | `get_liveness`, `get_readiness`, `get_capabilities`, `get_access_principal` | Health is not identity; protected calls use current policy | D1 handshake |
+| Scope directory | `list_scopes`, `get_scope`, `get_default_scope`, `resolve_scope_selection` | Authorized discovery, opaque cursor and actual selection semantics | Existing contract |
+| Scope/binding changes | `create_scope`, `update_scope`, `set_scope_binding`, `clear_scope_binding`, `resolve_scope_binding` | Creation/admin checks, defined expected versions, exact target | No global binding-list promise |
+| Memory | `remember_memory`, `search_memory`, `list_memory_entries`, `get_memory_entry`, `revise_memory_entry`, `retire_memory_entry`, `list_memory_changes` | Applicable Scope/resource checks; exact citation | D2 full browse/history |
+| Source | `list_sources`, `get_source`, `capture_content_source` | Authorized Scope/source access, paging, immutable capture identity | Existing contract |
+| Artifact browsing | `list_artifacts`, `get_artifact`, `get_artifact_revision`, `list_artifact_revisions` | Family policy, exact revision, ETag and opaque paging | Existing contract |
+| Topic Memory detail/search | `get_topic_memory`, `search_topic_memory` | Dedicated selection/search limits and current family policy | Read only; no manual write/flush |
+| Tags | `get_artifact_tags`, `replace_artifact_tags`, `get_memory_entry_tags`, `replace_memory_entry_tags`, `query_artifact_tags` | Supported taggable families, exact logical target and required tag-state `If-Match` | Tags do not change content revisions |
+| Review | `list_artifact_candidates`, `get_artifact_candidate`, `approve_artifact_candidate`, `reject_artifact_candidate`, `revise_artifact_candidate` | Read/review and proposal/evidence checks; `expected_version` | List requires exact Scope |
+| Skill lifecycle/package | `list_managed_skills`, `update_skill_lifecycle`, `get_skill_package_manifest`, `download_skill_package` | Resource checks, `expected_generation`, exact reviewed package | Never execute downloaded code |
+| Publication | `publish_artifact`, `publish_remote_skill` | Share/target administration and publication policy; exact reference/generation | Qualified targets only |
+| Sharing | `get_access_principal`, `check_access`, `list_access_resources` | Current Principal, safe filtering, exact share unit | Role-administration UI excluded |
+| Handoff | `get_handoff_report`, `continue_handoff`, `acknowledge_handoff`, `record_task_outcome` | Report versus exact evidence/receipt rights; receiver observations | Existing reads; D6 for delivery/receiver flow |
+| Statistics | `get_stats` | Authorized projection and supported selection; missing is not zero | Existing contract |
+| Local management | Producer machine interfaces; `service status --json`, `doctor integrations --json` | Verified local ownership and protected configuration | Existing status; D3/D4/D5 mutations |
 
 Memory entry listing currently returns the full collection without cursor/limit; changes also lack paging. Client
 pagination or a response-size cap does not fix that. D2 specifies server-side limits/filters, stable order, cursor
@@ -215,6 +275,8 @@ Changing profile, endpoint, TLS trust, credential or observed Principal advances
 reads, clear private views/cursors and volatile drafts after any required discard confirmation, and reject late results.
 Submitted writes stay bound to their original endpoint, identity, Scope, reference and generation. Selection changes
 never retarget them. Endpoint edits detach old credential references and require explicit new-target provisioning.
+In the Personal-to-Team example, this generation check discards the late Personal result while retaining the original
+target of any write already submitted there.
 
 First-release remote transport is HTTPS-only. Loopback HTTP follows `tests/fixtures/transport_loopback_vectors.json`.
 Current CLI/SDK non-loopback plaintext opt-in is intentionally unsupported on desktop; importing it explains this limit.
@@ -243,11 +305,12 @@ text/Markdown reject executable HTML and remote image loading. External HTTP(S) 
 on user action; other schemes need a qualified allowlist. Do not copy Dashboard inline scripts by weakening CSP.
 Server text, imports and update notes are untrusted data.
 
-Initial transport budgets are 10 seconds to connect, 30 seconds for ordinary reads and 8 MiB decoded JSON per response;
-lower Server limits win. Define per-operation exceptions before implementation. Supported binary packages stream in
-native code under a separately declared export budget with package digest verification, not unbounded JSON/base64.
-Long mutations follow their own contracts, not global replay. Errors return safe category/code/request ID, never
-arbitrary response bodies or CLI stdout/stderr.
+Transport policies bound connect/read waits and decoded response size; stricter Server limits take precedence.
+Operation-specific limits must explain unsupported or oversized results without silent truncation. Binary packages
+stream in native code under a declared export limit with digest verification, not unbounded JSON/base64. Timeouts
+and byte budgets are selected through implementation and measurement. Long mutations retain their own recovery
+contracts; a timeout is not permission to replay. Errors return safe category/code/request ID, never arbitrary
+response bodies or CLI stdout/stderr.
 
 ## 6. Service, installer and configuration contracts
 
@@ -331,7 +394,8 @@ retain type and identity but disable review until a typed display/validator exis
 fields. Distinguish Source pending, Candidate, committed Artifact, published package and retired entry.
 
 Review sends `expected_version`; rejection requires the contract's nonblank reason, and revision preserves evidence
-and omitted-field semantics. Conflicts reload state without silently approving a new version. Skill lifecycle uses
+and omitted-field semantics. The Profile example submits the version actually shown to the user. Conflicts reload
+state without silently approving a new version. Skill lifecycle uses
 `expected_generation`, packages use exact reviewed references. An exact Handoff grant does not authorize latest/adjacent
 revision, broad reports, unrelated searches or unauthorized evidence. Exact shared items remain reachable without
 permission to enumerate their containing Scope.
@@ -361,35 +425,43 @@ access grants, accepted receipt and Task Outcome are separately named actions.
 `accepted`, `needs_clarification` and `declined` preserve existing semantics. Acceptance needs actual receiver live-state,
 capability, authorization and evidence observations; browsing cannot attest to another Agent's environment. Only offer
 acknowledgement through a qualified flow supplying those checks. Use declared exact-item host launch mechanisms;
-otherwise offer supported copy/open without tokens/bodies in URLs. D6/D7 qualify a named sender/receiver pair and versions.
+otherwise offer supported copy/open without tokens/bodies in URLs. Only qualified sender/receiver pairs and versions expose those actions.
 
 ## 10. Notifications and background limits
 
-Notifications are best-effort hints, not a queue or exactly-once guarantee. Server Candidate state and implemented
-inbox are authoritative. Initially monitor the active connection and **current exact Scope** for Review; all/subtree
-browsing does not subscribe every Scope. Preserve that Scope while hidden in the tray and display coverage clearly.
+The incomplete-scan example uses Server Candidate state as authority; an implemented delivery inbox has its own
+authority. Notifications are best-effort hints, not a queue or exactly-once guarantee. Initially monitor only the
+active connection's **current exact Scope** for Review. All/subtree browsing does not subscribe every Scope. Preserve
+the monitored Scope while hidden in the tray and show its coverage explicitly.
 
-Initial Review limits: one request at a time, at most 100 Candidates/page, five page requests/minute, 60-second polling
-with up to 20% jitter. Continue bounded paging without treating its cursor as an event cursor. Discard a traversal that
-cannot finish within five minutes, refresh and report partial coverage. Complete global counts/history need another
-Server contract; this background limit does not prevent explicit paged Review navigation.
+Polling must bound concurrency, request rate, response size and background work. Respect the Server's pagination
+contract; the current Candidate list allows `limit` from 1 to 100 and defaults to 50. This is a Server limit, not a
+chosen desktop page size. Its response contains `candidates` and `next_cursor`, with no total. A list cursor is not an
+event cursor. Whole-system counts or event history require a separate Server contract.
 
-First activation or coverage change displays a summary, not a notification for every historical Candidate. Subsequent
-complete traversals deduplicate by profile/Principal/Scope/Candidate ID/version; a changed pending version can produce
-one coalesced hint. Partial scans say “observed pending items”, never complete count or zero for unread pages. Stop on
-401; back off transient errors to at most 15 minutes, honoring a longer Server retry delay. Manual retry cannot create
-an uncontrolled background loop.
+Show coverage, refresh time and whether traversal is incomplete, complete or stale. A partial scan can report items
+observed during that scan, never a complete total or zero for unread pages. Even a complete traversal can span
+concurrent changes; without a snapshot/count contract, label its count as observed rather than an exact current total.
+If a traversal becomes stale or its cursor expires, explain the limitation and refresh through supported semantics.
+The scheduling policy must consider backlog progress as well as freshness; repeatedly restarting at the first page
+must not silently imply coverage of later pages. Background limits do not prevent explicit paged Review navigation.
 
-D6 delivery uses a separate bounded consumer whose request budget is fixed before P4 delivery. Persist only opaque
-cursors and deduplication/navigation metadata, initially at most 1,000 records/profile for seven days. Reject expired
-handles. Clear private metadata on identity changes and dismiss posted notifications where possible; a remaining
-generic OS hint grants no access.
+First activation or coverage change displays a summary, not a notification for every historical Candidate. Deduplicate
+subsequent observations within their profile/Principal/Scope/Candidate ID/version context; a changed pending version
+can produce a coalesced hint. Stop protected polling on authentication rejection; back off transient failures and
+honor Server retry delays. Manual retry cannot create an uncontrolled background loop. Polling interval, page size,
+jitter, traversal expiry and backoff values are implementation choices established through measurement.
+
+D6 delivery uses a separate bounded consumer. Persist only opaque cursors and deduplication/navigation metadata with
+bounded storage and retention. Expired or evicted handles fail safely; metadata expiry does not mark Server items as
+read or erase durable deliveries. Set capacity and retention through implementation and validation. Identity changes
+clear private metadata and dismiss posted notifications where possible; a remaining generic OS hint grants no access.
 
 Use a generic “PowerContext has items needing attention” message with a local opaque navigation handle, not bodies,
-sensitive titles, paths, tokens or raw errors, including on lock screens. Clicking deliberately restores the relevant
+sensitive titles, paths, tokens or raw errors, including on lock screens. Clicking deliberately restores the original
 profile and reauthorizes the exact item; forged handles cannot silently switch credentials or mutate. Explain/request
-permission; provide in-app fallback and suppress repetitive offline errors. Quit stops notifications; reopen refreshes
-Server state. Test installed notification/cold activation, including clicking an existing hint after the app exited.
+permission; provide in-app fallback and suppress repetitive offline errors. Quit stops notifications; reopening
+refreshes Server state. An existing hint activated after exit follows the same authorization rules.
 
 ## 11. Source import, connectors and Agent diagnostics
 
@@ -399,9 +471,10 @@ handle, not a renderer path; prevent replacement/link races, traversal and unreq
 
 Use one platform-independent import policy:
 
-1. Reject files above 1 MiB before exceeding that read budget. Decode strict UTF-8, remove one leading BOM, preserve
+1. Declare and enforce a bounded file-read budget before reading. Decode strict UTF-8, remove one leading BOM, preserve
    remaining Unicode code points, line endings and whitespace. Reject invalid encoding and blank content.
-2. Limit content to 200,000 Unicode code points and any smaller declared transport/Server limit. Never truncate.
+2. Enforce declared content and transport/Server limits, explaining them before confirmation. Reject oversize input;
+   never truncate. Concrete client limits are chosen during implementation and measurement.
 3. SHA-256 hash the submitted UTF-8 text. Set `source_id` to `desktop-text-v1:<lowercase-hex-digest>` and metadata to
    the constant `{"importer":"powercontext-desktop-text-v1"}`. No filename/path/time/device/user metadata enters the
    payload. Confirmation may display the local filename without uploading it.
@@ -502,100 +575,26 @@ export. Normalize CLI/Server errors rather than attaching stdout/stderr.
 Export is local, explicit and previewable. Crash reporting is off by default; content-free diagnostics never justify
 memory dumps or raw requests. Bound log size/retention. Threats include malicious content/imports, forged activation/IPC,
 wrong endpoints and tampered artifacts, not a promise against compromised OS, arbitrary same-user malware or privileged
-administrators. Test secret canaries in credentials, paths, provider settings, failures and content against all outputs.
+administrators. The privacy guarantees apply to every observable output, including failures and diagnostic exports.
 
-## 16. Platform, accessibility and budgets
+## 16. Platform and accessibility
 
-| Platform | Proposed status | Qualification |
-| --- | --- | --- |
-| Windows 11 x64 + SQLite | First target; current project Windows support is experimental | Signed standard-user install, WebView2 absent/present, Credential Manager, Task Scheduler/login, notifications/activation, non-ASCII paths |
-| macOS | Follow-up | Named architectures, Keychain, LaunchAgent, signing/notarization, WebView/notification behavior |
-| Linux | Follow-up per distro/desktop | WebKitGTK/system libraries, Secret Service, systemd session, tray, package/activation |
+Propose Windows 11 x64 with SQLite as the first qualified platform; Windows support at the source baseline remains
+experimental. Windows ARM and Windows embedded seekdb are excluded. macOS/Linux follow only after their installed
+behavior is qualified. Framework compilation alone does not establish platform support.
 
-Windows ARM and Windows embedded seekdb are excluded. Compiling a framework does not qualify a platform. P0 names
-Desktop/Install/Server/Release owners and one maintained Agent Host/version, with observed Windows load and explicit
-capture/recall. “Any maintained integration” cannot pass that gate; P4 names an actual sender/receiver pair.
+Maintain English/Chinese UI and docs, keyboard navigation, visible focus, screen-reader labels, IME-safe forms,
+high contrast and non-color-only status. Supported actions, confirmations and recovery remain usable in small windows
+and with enlarged text. Locale/theme changes preserve identity and current context. The delivery plan records tested
+environments, viewport/zoom cases and measured performance budgets for the complete desktop, WebView and Server.
 
-At the source baseline, native Windows type checking exposes `Connection`/`PipeConnection` mismatches in processing
-workers and POSIX-only `os.WNOHANG` references in tests. Resolve or correctly platform-scope these checks before Windows
-qualification; passing a Linux-target type check does not establish Windows support.
-
-P0 Go/No-Go evidence: UI without Python/Server, authenticated API read/write, credentials, signed standard-user package,
-WebView2 bootstrap, independent service/login, installed notification cold activation. D4/D5 full bootstrap can remain
-gated at P3; P0 records producer commitments and limits preview to connect-only. Native blockers must be solved or the
-platform/scope reconsidered. Electron fallback addresses demonstrated shell/WebView/maintenance blockers, not installer gaps.
-
-Maintain English/Chinese UI and docs, keyboard navigation, focus, screen-reader labels, IME-safe forms, high contrast,
-non-color-only status, and usable confirmation/recovery at 800 × 600 and 200% zoom. Locale/theme changes retain identity.
-
-Measure cold start, idle CPU/wakeups, desktop+WebView+Server memory, full installation/download size and list/search
-latency. P0 records hardware, OS/WebView versions, datasets, repeat count and p50/p95; fixes numeric release budgets before
-P2 expansion. Include empty/multi-page, model-free/configured cases. D7 owns the published budget; there is no current
-performance claim. Transport/notification operating caps do not replace measurements.
-
-## 17. Delivery phases
-
-| Phase | Deliverable | Exit requirement |
-| --- | --- | --- |
-| P0: architecture | Bundled client, narrow transport, credentials, installed Windows spike, UI reuse and measurements | D7 owners/host; security evidence; D1/D2 assigned; D3–D6 limits recorded |
-| P1: connect-only preview | Existing local/remote connection, tested compatibility, service status, explicit Memory store/recall, Agent diagnostics | Qualified operations/identity; no unimplemented install claim |
-| P2: management/access | Scope/assets/Sources, typed Review, exact shared resources/reports, import, covered Review notifications, diagnostics | D2 full Memory browsing; authorization/concurrency/family contracts |
-| P3: managed installation | Clean-machine install, chosen host, service/config changes, migration/update/recovery/removal | D3/D4/D5, signed immutable artifacts and ownership acceptance |
-| P4: delivery | Durable inbox, target association, resume, exact navigation and supported receiver actions | D6, named sender/receiver, bounded consumer and installed activation |
-| P5: first qualified release | Complete #1428 journey on Windows 11 x64 | All applicable AC, compatibility/support matrix, published budgets |
-| P6: more platforms | Qualified macOS/Linux packages | Repeat installed acceptance per advertised environment |
-
-P3/P4 progress independently when dependencies exist; P2 authorization does not wait for delivery. Reuse existing
-tracking issues. Keep producer contracts and consumers in focused PRs. A blocked mandatory AC cannot be marked
-inapplicable to close #1428: full closure needs managed local setup, authorized remote use, durable Handoff delivery,
-Review/Handoff notifications, recovery, accessibility and data-preserving removal on one platform.
-
-## 18. Acceptance and verification
-
-Owners: Desktop owns packaged UI/native behavior; Server public semantics; Install installer/service/configuration/
-distribution; Delivery D6; Release signed-platform qualification. These are responsibilities, not named staffing;
-D7 binds maintainers before P0 exit. Each record identifies versions, environment, fixture, result and owner; one smoke
-test cannot stand for every scenario in a row.
-
-| ID | Phase / owner | Required observable behavior | Evidence entry |
-| --- | --- | --- | --- |
-| AC-01 | P3/P5 · Install + Desktop | Clean machine: verified runtime/host, model-free Memory store/fts recall | Installed first use |
-| AC-02 | P1/P3 · Install | Stale/foreign/occupied states distinguished, unknown ownership preserved | Service JSON/native lifecycle |
-| AC-03 | P3/P5 · Desktop + Install | Close/Quit/restart/login preserves independent service/work and chosen startup | Installed lifecycle/recovery |
-| AC-04 | P3/P5 · Install + Release | Interrupted update/signature/readiness failure has durable component status and compatible recovery | Installer fault/restart |
-| AC-05 | P1/P2 · Server + Desktop | Missing/old/unknown handshake, missing feature, changed identity: no guessed support/retarget | D1 connection fixtures |
-| AC-06 | P1 · Desktop | Loopback/base path/plaintext/TLS/redirect/proxy limits are accurate, no credential forwarding | Shared vectors/native transport |
-| AC-07 | P1/P2 · Desktop | Profile/endpoint/token/Principal changes isolate responses, cursors, drafts and mutation targets | Concurrent packaged interactions |
-| AC-08 | P2 · Server + Desktop | Exact Handoff grant works without Scope listing; latest/adjacent/broad/evidence leakage denied | Access plus desktop journey |
-| AC-09 | P2 · Server + Desktop | Filter before paging/counts, no unsafe fallback, Review/publication authorized | Access/mutation contracts |
-| AC-10 | P2 · Server + Desktop | Stale version/citation, duplicate submit, lost response: no silent approval/replay | Mutation recovery scenarios |
-| AC-11 | P4 · Delivery + Desktop | Offline arrival, cursor expiry, revocation/cancellation recover exact authorized inbox | D6 and receiver pair |
-| AC-12 | P0/P4 · Desktop + Release | Installed hints, permission denial, bursts, Quit and stale activation safely navigate/fall back | Native/cold activation |
-| AC-13 | P2 · Server + Desktop | Same/renamed/changed text, BOM/newlines, invalid/oversize and ambiguous import follow identity/limits | Import/handle fixtures |
-| AC-14 | P0/P2 · Desktop | Malicious content, fake generation/window/path/link cannot execute, leak secrets or mutate unexpectedly | Packaged capability/CSP |
-| AC-15 | P0/P5 · Desktop + Release | Secret canaries absent from logs, URLs, notifications, exports, renderer storage and telemetry | Output inspection |
-| AC-16 | P3/P5 · Install | Removal preserves data, user edits and referenced independent consumers | Installed removal |
-| AC-17 | P2/P5 · Desktop | Both locales, keyboard/IME/reader/contrast/small window/200% zoom complete supported actions | Accessibility journey |
-| AC-18 | P0/P5 · Release | Exact signed artifacts measured on reference machine meet published budget at P5 | Benchmark/support record |
-| AC-19 | P2 · Server + Desktop | Large/changing Memory fully traversable under D2 or honestly limited before D2 | Large-Scope fixtures |
-| AC-20 | P2 · Server + Desktop | Profile Review, Topic Memory and unknown family retain typed/read-only boundaries | Family/Review fixtures |
-| AC-21 | P1/P3 · Server + Install + Desktop | Static/injected Provider, generic 401/503, partial rotation have true identity/error/recovery | Auth/configuration journey |
-| AC-22 | P2 · Desktop | Backlog, multi-page, changed/partial coverage obey budgets without fabricated counts/history | Polling behavior |
-| AC-23 | P3 · Install + Release | Updater exit and stable/preview sharing preserve producer recovery and single management owner | Packaged update/channel |
-| AC-24 | P0/P2 · Desktop | No Python/Server: setup works; shared assets do not drift; management uses public API only | Desktop build/Dashboard regression |
-| AC-25 | P3 · Server + Install | Maintenance migration resumes same ID, verifies before traffic, no incompatible rollback | Migration/install recovery |
-| AC-26 | P4 · Delivery + Desktop | Multiple devices/targets and unenrolled Agent do not impersonate or convert hints into acceptance | Target association |
-
-Implementation PRs run `make check` and relevant behavior tests; changed contracts additionally run `make api-generate`
-and `make contract-test`. Reuse Server/access/transport/migration/native service tests. Shared UI needs Dashboard
-regression plus desktop behavior; packaging needs real installed tests. Docs run `make docs-test` (Fumadocs), verify
-titles/navigation/links and matching bilingual phase/dependency/AC IDs. A mock or docs build cannot qualify native behavior.
-
-# Drawbacks and alternatives
+# Drawbacks
 
 This adds Rust/native maintenance, a client UI/build, signing/updates and platform tests. Sharing presentation reduces
 some duplication, not the need for client management flows. Python/WebView may dominate footprint. Independent runtime
 updates require compatibility/data recovery; delivery remains another producer's dependency.
+
+# Rationale and alternatives
 
 | Consideration | Tauri 2 | Electron | Decision |
 | --- | --- | --- | --- |
@@ -603,14 +602,23 @@ updates require compatibility/data recovery; delivery remains another producer's
 | Native boundary | Rust with application/plugin permissions | Main process and constrained preload/IPC | Prefer small Rust host, verify permissions |
 | Footprint/rendering | System dependencies/engine differences | Larger engine, more consistent rendering | Measure complete installed product |
 | Python/service/data | External runtime and migration | Same requirement | Neither replaces installer/service contracts |
-| Maintenance | Rust/platform experience | Electron/JavaScript experience | D7 names maintenance/release owners |
+| Maintenance | Rust/platform experience | Electron/JavaScript experience | Requires sustainable maintenance/release ownership |
 
-Choose Tauri 2 subject to P0 gates. Electron is the fallback for demonstrated WebView/native-integration or sustainable
-maintenance blockers while retaining all API/ownership rules; do not maintain two production shells. Web-only remains
-useful but lacks required native capabilities. Privileged remote pages, desktop-owned Server children, Runtime rewrites
+Choose Tauri 2 subject to installed-platform validation. Electron is the fallback for demonstrated WebView/native
+integration or sustainable maintenance blockers while retaining all API/ownership rules; do not maintain two
+production shells. Web-only remains useful but lacks required native capabilities. Privileged remote pages,
+desktop-owned Server children, Runtime rewrites
 or a fully native duplicate presentation are not justified by this scope.
 
-# Related design and references
+Without a desktop, existing CLI and Dashboard use remains available, but users must coordinate native credentials,
+service setup, updates and notifications through separate tools.
+
+# Prior art
+
+The personal Dashboard provides server-rendered read-oriented presentation; it does not supply portable client-side
+management flows. The accepted service design supplies independent runtime ownership, and the Scope/access/asset
+contracts supply the same domain semantics used by CLI and other clients. This proposal composes those boundaries
+with a constrained native host. Tauri and Electron provide shell mechanisms, not a replacement Server or installer.
 
 Project contracts: [service](1299_local_server_availability_and_service_installation.md),
 [Scopes](1345_scope_organization_and_agent_integration.md), [access](1396_handoff_access_control.md),
@@ -625,20 +633,19 @@ Qualify framework mechanisms in actual packages: [Tauri architecture](https://v2
 [updater](https://v2.tauri.app/plugin/updater/), [Stronghold](https://v2.tauri.app/plugin/stronghold/),
 [Electron security](https://www.electronjs.org/docs/latest/tutorial/security).
 
-# Decisions requiring maintainer agreement
+# Unresolved questions
 
-These questions have proposed defaults and explicit gates. Missing dependencies remain delivery prerequisites, not
-claims of implemented functionality or a reason to withhold this design from review.
+Before accepting this RFC, maintainers should agree on the first platform (proposed Windows 11 x64 + SQLite), the
+Tauri/client boundary and presentation-only Dashboard sharing, direct HTTPS with operator-issued Bearer for remote
+use, and whether a clearly limited connect-only preview is useful before managed installation and delivery.
 
-| Practical question | Proposed default | Decision gate |
-| --- | --- | --- |
-| Which OS first, and who maintains/releases it? | Windows 11 x64 + SQLite; name Desktop/Install/Server/Release owners and one Agent Host/version | Platform at RFC acceptance; staffing/host before P0 exit |
-| How much UI do we share? | Assets/conventions/translations/components; independent client management entry, no mandatory Dashboard rewrite | RFC acceptance |
-| Can we ship before installation/delivery are ready? | Connect-only preview, then management; independent P3/P4; #1428 remains open until complete | RFC acceptance |
-| Which remote deployments work initially? | Direct HTTPS, operator-issued Bearer; no proxy/SSO/plaintext opt-in | RFC acceptance; expand only through qualified adapters |
-| Which Server versions work, and how do restore/clone affect identity? | D1 explicit versions/lifecycle; qualify 1.0.0 as legacy candidate | P0 contract agreement before dependent controls |
-| Who supplies installation/delivery and when? | D3–D6 producers own schemas/recovery; no private desktop replacement | Before P3/P4 commitments |
-| How fast and small must the complete product be? | Measure named hardware, publish numeric budgets including Python/WebView | P0 exit before P2 expansion |
+Producer contracts still need separate agreement: D1 compatibility/version support and deployment restore/clone
+identity; D3–D5 machine management, provisioning and recovery; D6 receiver association, durable inbox and read state.
+These block the corresponding features, not unrelated authorized browsing. The desktop must not invent private
+replacements while those contracts are unavailable. The delivery plan tracks owners, qualification and measurements.
+
+Proxy/browser login, persistent offline writes and broader Agent execution are outside this proposal; supporting
+them requires separate contract decisions rather than silently extending the first release.
 
 # Future possibilities
 
