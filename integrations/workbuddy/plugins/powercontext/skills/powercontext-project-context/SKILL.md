@@ -1,5 +1,5 @@
 ---
-name: project-context
+name: powercontext-project-context
 description: PowerContext memory search/save, inventory, work handoff and candidate review (搜索记忆、记住、盘点、交接、审查候选). Use for explicit requests or missing project history; ordinary coding and current-context summaries need no Skill detour.
 ---
 

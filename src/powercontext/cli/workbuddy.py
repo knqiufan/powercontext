@@ -49,7 +49,7 @@ WORKBUDDY_PLUGIN_NAME = "powercontext"
 WORKBUDDY_PLUGIN_RELATIVE = Path("integrations") / "workbuddy" / "plugins" / "powercontext"
 WORKBUDDY_HOOKS_DIRNAME = "hooks"
 WORKBUDDY_SKILLS_DIRNAME = "skills"
-WORKBUDDY_SKILL_NAME = "project-context"
+WORKBUDDY_SKILL_NAME = "powercontext-project-context"
 WORKBUDDY_SKILL_MANIFEST = ".powercontext.json"
 WORKBUDDY_PYTHON_PLACEHOLDER = "${POWERCONTEXT_PYTHON}"
 WORKBUDDY_SCOPE_BINDING_PLACEHOLDER = "${POWERCONTEXT_SCOPE_BINDING_SCRIPT}"
@@ -332,7 +332,7 @@ def _owned_workbuddy_skill(path: Path) -> bool:
 
 
 def _install_workbuddy_skill(plugin_dir: Path, skills_dir: Path, hooks_dir: Path) -> None:
-    """Copy the project-context Skill and resolve its hooks directory placeholder."""
+    """Copy the powercontext-project-context Skill and resolve its hooks directory placeholder."""
 
     source = plugin_dir / WORKBUDDY_SKILLS_DIRNAME / WORKBUDDY_SKILL_NAME
     target = skills_dir / WORKBUDDY_SKILL_NAME

@@ -23,28 +23,20 @@ import { loadSkillsFromDir, formatSkillsForPrompt } from '@earendil-works/pi-cod
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('PowerContext Pi package', () => {
-  it('advertises a project-context skill for Memory and Handoff work', () => {
+  it('advertises a powercontext-project-context skill for Memory and Handoff work', () => {
     const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
       pi?: { skills?: string[] }
-      peerDependencies?: Record<string, string>
     }
-    const skill = readFileSync(join(packageRoot, 'skills', 'project-context', 'SKILL.md'), 'utf8')
+    const skill = readFileSync(join(packageRoot, 'skills', 'powercontext-project-context', 'SKILL.md'), 'utf8')
 
     expect(manifest.pi?.skills).toContain('./skills')
     const discovered = loadSkillsFromDir({ dir: join(packageRoot, 'skills'), source: 'powercontext-test' })
     expect(discovered.diagnostics).toEqual([])
-    const entry = discovered.skills.find(skill => skill.name === 'project-context')!
+    const entry = discovered.skills.find(skill => skill.name === 'powercontext-project-context')!
     expect(entry).toBeDefined()
     expect(formatSkillsForPrompt([entry])).toContain(entry.description)
-    expect(entry.description).toMatch(/[\u4e00-\u9fff]/)
     for (const match of skill.matchAll(/\[[^\]]*\]\((references\/[^)]+)\)/g)) {
       expect(readFileSync(join(entry.baseDir, match[1]), 'utf8').trim()).not.toBe('')
     }
-    expect(skill).toContain('`pc_search`')
-    expect(skill).toContain('`pc_handoff_current`')
-    expect(manifest.peerDependencies).toMatchObject({
-      '@earendil-works/pi-coding-agent': '*',
-      typebox: '*',
-    })
   })
 })

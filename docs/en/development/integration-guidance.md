@@ -42,11 +42,11 @@ These rules describe result interpretation; error classification follows the
 | Pi | `before_agent_start` system prompt and native tools | Memory, Topic Memory, structured work/Handoff, and read-only artifact/candidate inspection; no candidate mutations. Guidance survives empty or failed automatic recall. |
 | OpenClaw | Memory capability prompt and provider tools | `powercontext_memory_search` / `powercontext_memory_store`; the prompt includes only tools available in the current context. Memory and structured work/Handoff are available when their tools are enabled; inventory and candidate Review are not inferred. |
 | Hermes | Provider system block and schemas | `powercontext_search_memory`, `powercontext_remember`, and supported operation tools; existing `powercontext` Skill. |
-| Codex, Claude Code, WorkBuddy | MCP initialize instructions and OpenAPI-derived descriptions | `search_memory`, `list_memory_entries`, `remember_memory`; each existing `project-context` Skill stays consistent. |
+| Codex, Claude Code, WorkBuddy | MCP initialize instructions and OpenAPI-derived descriptions | `search_memory`, `list_memory_entries`, `remember_memory`; each existing `powercontext-project-context` Skill stays consistent. |
 
 The portable Agent Plugin's existing Skill shares these semantics. Framework adapters and the Bub evaluation harness
 are outside this migration. Host names, tool authority, persistence formats, and distribution ownership do not change.
-E adds [layered Skill routing](layered-skills.md), tracked by #1620. The distribution generator belongs to #1405 / #1410.
+[Layered Skill routing](layered-skills.md) provides focused workflows behind the shared `powercontext-project-context` entry.
 
 ## Reproduce validation
 

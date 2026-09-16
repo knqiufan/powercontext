@@ -1,5 +1,5 @@
 ---
-name: powercontext
+name: powercontext-project-context
 description: PowerContext memory search/save, inventory, work handoff and candidate review (搜索记忆、记住、盘点、交接、审查候选). Use for explicit requests or missing project history; ordinary coding and current-context summaries need no Skill detour.
 ---
 
@@ -11,11 +11,11 @@ Read only the relevant reference when its workflow detail is needed; self-contai
 
 | Intent / 意图 | Operation and detail |
 | --- | --- |
-| Find prior decisions / 搜索历史记忆 | `powercontext_search_memory`; [Scope and Memory](references/scope-memory.md). |
-| Inventory or audit / 盘点、列出记忆 | `powercontext_list_memory_entries`; [Scope and Memory](references/scope-memory.md). Empty search does not authorize inventory. |
-| Save, correct, retire / 记住、纠正、停用记忆 | `powercontext_remember` for explicit save; [Scope and Memory](references/scope-memory.md). |
-| Transfer or resume work / 交接、接续工作 | `powercontext_handoff_current_work`; [Work Handoff](references/work-handoff.md). Ordinary transfer is temporary; durable commit needs explicit intent. |
-| Inspect candidates / 审查候选 | `powercontext_list_artifact_candidates`; [Review and publication](references/review-publication.md). Inspection grants no decision authority. |
+| Find prior decisions / 搜索历史记忆 | `search_memory`; [Scope and Memory](references/scope-memory.md). |
+| Inventory or audit / 盘点、列出记忆 | `list_memory_entries`; [Scope and Memory](references/scope-memory.md). Empty search does not authorize inventory. |
+| Save, correct, retire / 记住、纠正、停用记忆 | `remember_memory` for explicit save; [Scope and Memory](references/scope-memory.md). |
+| Transfer or resume work / 交接、接续工作 | `handoff_current_work`; [Work Handoff](references/work-handoff.md). Ordinary transfer is temporary; durable commit needs explicit intent. |
+| Inspect candidates / 审查候选 | `list_artifact_candidates`; [Review and publication](references/review-publication.md). Inspection grants no decision authority. |
 
 The integration owns Scope selection; preserve its resolved Scope in ordinary operations.
 

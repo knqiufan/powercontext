@@ -278,7 +278,9 @@ def test_register_does_not_install_session_bound_slash_handlers(hermes_modules):
 
     assert context.provider is not None
     assert context.commands == {}
-    assert "powercontext" in context.skills
+    assert "powercontext-project-context" in context.skills
+    skill_path, _ = context.skills["powercontext-project-context"]
+    assert skill_path.read_text(encoding="utf-8").strip()
 
 
 def test_powercontext_subcommands_are_available_to_hermes_completer(hermes_modules, monkeypatch):
@@ -1319,12 +1321,12 @@ def test_guidance_references_available_provider_tools_without_a_skill(hermes_mod
     assert references <= names
     assert references
     if directory := os.environ.get("POWERCONTEXT_GUIDANCE_EXPORT"):
-        skill = HERMES_ROOT / "plugins/powercontext/skills/powercontext/SKILL.md"
+        skill = HERMES_ROOT / "plugins/powercontext/skills/powercontext-project-context/SKILL.md"
         catalog = {
             "host": "hermes",
             "guidance": guidance,
             "tools": tools,
-            "skill": {"name": "powercontext", "content": skill.read_text(encoding="utf-8")},
+            "skill": {"name": "powercontext-project-context", "content": skill.read_text(encoding="utf-8")},
         }
         (Path(directory) / "hermes.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
 

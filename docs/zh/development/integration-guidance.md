@@ -38,10 +38,10 @@ Scope 由宿主和 Server 决定。复用解析后的绑定，不猜测身份或
 | Pi | `before_agent_start` 系统提示和原生工具 | 支持 Memory、Topic Memory、结构化工作与 Handoff，以及只读产物和候选检查；不提供候选修改工具。自动召回为空或失败时仍有基础指引。 |
 | OpenClaw | Memory capability 提示和 provider 工具 | `powercontext_memory_search` / `powercontext_memory_store`；提示按当前目录说明 Memory 与结构化工作/Handoff，不推断 Memory 清单或候选 Review。 |
 | Hermes | provider 系统块和工具 schema | `powercontext_search_memory`、`powercontext_remember` 等实际工具；保留 `powercontext` Skill。 |
-| Codex、Claude Code、WorkBuddy | MCP 初始化指引和 OpenAPI 派生描述 | `search_memory`、`list_memory_entries`、`remember_memory`；各自现有 `project-context` Skill 保持一致。 |
+| Codex、Claude Code、WorkBuddy | MCP 初始化指引和 OpenAPI 派生描述 | `search_memory`、`list_memory_entries`、`remember_memory`；各自现有 `powercontext-project-context` Skill 保持一致。 |
 
 可移植 Agent Plugin 的现有 Skill 使用相同语义。框架适配器与 Bub 验证工具不在本次迁移范围；工具权限、持久化格式、
-宿主命名与分发归属均保持原有设计。E 的[分层 Skill 路由](layered-skills.md)由 #1620 跟踪，分发生成器由 #1405 / #1410 负责。
+[分层 Skill 路由](layered-skills.md)在统一的 `powercontext-project-context` 入口下提供各领域的详细流程。
 
 ## 复现验证
 

@@ -47,7 +47,7 @@ test('documented setup installs the matched plugin, diagnoses the running host a
       writeFileSync(join(process.env.POWERCONTEXT_GUIDANCE_EXPORT, 'dsh.json'), JSON.stringify({
         host: 'dsh', catalog_source: 'real SDK model request',
         guidance: system.map(message => typeof message.content === 'string' ? message.content : JSON.stringify(message.content)).join('\n'),
-        skill: skills[0], skills,
+        skill: skills.find(skill => skill.name === 'powercontext-project-context'), skills,
         host_skill_tools: request.tools.map(tool => tool.function).filter(tool => tool.name.includes('skill')),
         tools: request.tools.map(tool => tool.function).filter(tool => tool.name.startsWith('pc_')),
       }, null, 2))
@@ -249,7 +249,7 @@ test('real DSH discovers bilingual domains and loads only the requested Skill', 
     const { instance } = env.harness()
     const registered = []
     registerSkill({ get: () => ({ register(value) { registered.push(value) } }) })
-    for (const domain of registered.filter(skill => skill.name !== 'project-context')) {
+    for (const domain of registered.filter(skill => skill.name !== 'powercontext-project-context')) {
       await instance.run(`LOAD_PC_SKILL:${domain.name}`)
       const requests = env.modelRequests.filter(request => request.stream)
       const finalMessages = requests.at(-1).messages

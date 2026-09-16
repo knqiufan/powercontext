@@ -66,6 +66,78 @@ class Model:
         return next(self.responses)
 
 
+@pytest.mark.parametrize("host,case", [("codex", "skill_search"), ("dsh", "skill_search"), ("codex", "skill_handoff")])
+@pytest.mark.parametrize("reading", ["none", "router", "wrong_domain", "requested_domain"])
+def test_requested_workflow_requires_its_domain_before_the_operation(host: str, case: str, reading: str) -> None:
+    entry = "powercontext-project-context"
+    memory = "powercontext-memory" if host == "dsh" else f"{entry}/references/scope-memory.md"
+    handoff = f"{entry}/references/work-handoff.md"
+    review = "powercontext-review" if host == "dsh" else f"{entry}/references/review-publication.md"
+    expected = memory if case == "skill_search" else handoff
+    resources = {entry: "Router", memory: "Memory workflow", handoff: "Handoff workflow", review: "Review workflow"}
+    reads = {"none": [], "router": [entry], "wrong_domain": [entry, review], "requested_domain": [expected]}[reading]
+    responses = [call("read_skill_resource", {"resource": resource}) for resource in reads]
+    if case == "skill_search":
+        catalog = {"host": host, "guidance": "", "tools": [{"name": "search_memory"}]}
+        responses.append(call("search_memory", {"query": "Aurora"}))
+    else:
+        payload = handoff_payload()
+        prepared = HandoffFixture().respond("handoff_current_work", payload)["handoff"]
+        catalog = {**handoff_catalog(), "host": host}
+        responses.extend([call("handoff_current_work", payload), {"content": json.dumps(prepared)}])
+    result = asyncio.run(run_scenario(Model(responses), {**catalog, "skill_resources": resources}, case, 0, "unloaded"))
+    assert result["routing_passed"] is (reading == "requested_domain")
+    if reading != "requested_domain":
+        assert not result["acceptance_passed"]
+        assert f"host={host}, case={case}" in result["error"]
+        assert expected in result["error"]
+        for resource in reads:
+            assert resource in result["error"]
+
+
+def test_handoff_read_after_operation_does_not_qualify_requested_workflow() -> None:
+    resource = "powercontext-project-context/references/work-handoff.md"
+    payload = handoff_payload()
+    prepared = HandoffFixture().respond("handoff_current_work", payload)["handoff"]
+    model = Model([
+        call("handoff_current_work", payload),
+        call("read_skill_resource", {"resource": resource}),
+        {"content": json.dumps(prepared)},
+    ])
+    catalog = {**handoff_catalog(), "skill_resources": {resource: "Handoff workflow"}}
+    result = asyncio.run(run_scenario(model, catalog, "skill_handoff", 0, "unloaded"))
+    assert not result["routing_passed"]
+    assert resource in result["error"]
+    assert "before the data operation" in result["error"]
+
+
+@pytest.mark.parametrize("case,mode", [("search", "unloaded"), ("skill_search", "unavailable")])
+def test_search_without_required_skill_read_remains_usable(case: str, mode: str) -> None:
+    catalog = {"host": "codex", "guidance": "", "tools": [{"name": "search_memory"}], "skill_resources": {}}
+    result = asyncio.run(run_scenario(Model([call("search_memory")]), catalog, case, 0, mode))
+    assert result["routing_passed"]
+
+
+def test_failed_skill_read_keeps_specific_diagnosis_and_attempt() -> None:
+    response = call("read_skill_resource", {"resource": "missing-memory-workflow"})
+    catalog = {"host": "codex", "guidance": "", "tools": [{"name": "search_memory"}], "skill_resources": {}}
+    result = asyncio.run(run_scenario(Model([response]), catalog, "skill_search", 0, "unloaded"))
+    assert not result["routing_passed"]
+    assert "missing-memory-workflow" in result["error"]
+    assert "no such packaged or registered resource" in result["error"]
+    assert result["skill_read_attempts"][0]["calls"] == response["tool_calls"]
+
+
+def test_mixed_skill_read_and_operation_retains_the_rejected_operation() -> None:
+    response = call("read_skill_resource", {"resource": "powercontext-memory"})
+    response["tool_calls"] += call("pc_search")["tool_calls"]
+    catalog = {"host": "dsh", "guidance": "", "tools": [{"name": "pc_search"}], "skill_resources": {}}
+    result = asyncio.run(run_scenario(Model([response]), catalog, "skill_search", 0, "unloaded"))
+    assert not result["routing_passed"]
+    assert "batched with ['pc_search']" in result["error"]
+    assert result["skill_read_attempts"][0]["calls"] == response["tool_calls"]
+
+
 def test_resolves_scope_before_delivering_write_result() -> None:
     model = Model([call("resolve_scope_binding"), call("remember_memory"), {"content": "Saved."}])
     catalog = {

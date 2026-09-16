@@ -29,12 +29,13 @@ from urllib.parse import unquote, urlsplit
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+ENTRY_NAME = "powercontext-project-context"
 FILE_HOSTS = {
-    host: f"integrations/{host}/plugins/powercontext/skills/project-context"
+    host: f"integrations/{host}/plugins/powercontext/skills/powercontext-project-context"
     for host in ("codex", "claude-code", "workbuddy", "pi", "opencode")
 } | {
-    "agent-plugin": "integrations/agent-plugin/powercontext/skills/project-context",
-    "hermes": "integrations/hermes/plugins/powercontext/skills/powercontext",
+    "agent-plugin": "integrations/agent-plugin/powercontext/skills/powercontext-project-context",
+    "hermes": "integrations/hermes/plugins/powercontext/skills/powercontext-project-context",
     "minimax": "integrations/minimax/plugins/powercontext/skills/powercontext-project-context",
     "openclaw": "integrations/openclaw/plugins/memory-powercontext/skills/powercontext-project-context",
 }
@@ -84,7 +85,11 @@ def with_skill_resources(catalog: dict[str, Any]) -> dict[str, Any]:
             message = "DSH catalog lacks runtime Skills; export it from the current SDK runtime test"
             raise ValueError(message)
         resources = {skill["name"]: skill["content"] for skill in skills}
-        return {**catalog, "skill_resources": resources, "skill": skills[0]}
+        entry = next((skill for skill in skills if skill["name"] == ENTRY_NAME), None)
+        if entry is None:
+            message = f"DSH catalog lacks router Skill {ENTRY_NAME}; export it from the current SDK runtime test"
+            raise ValueError(message)
+        return {**catalog, "skill_resources": resources, "skill": entry}
     skill = file_skill(ROOT / FILE_HOSTS[catalog["host"]])
     resources = {
         skill["name"] if path == "SKILL.md" else f"{skill['name']}/{path}": content
@@ -103,14 +108,27 @@ class SkillReadingModel:
         self.loaded: dict[str, str] = {}
         self.steps: list[dict[str, Any]] = []
         self.attempts: list[dict[str, Any]] = []
+        self.reads_before_operation: list[str] | None = None
 
     def record_into(self, record: dict[str, Any], case: str) -> None:
         record["skill_reads"] = self.steps
         record["skill_read_attempts"] = self.attempts
-        if case.startswith("skill_") and self.available and not self.steps and not record.get("error"):
-            record.update(routing_passed=False, error="Requested Skill workflow was not read")
+        workflow = {"skill_search": ("memory", "scope-memory.md"), "skill_handoff": ("handoff", "work-handoff.md")}
+        if case in workflow and self.available:
+            domain, filename = workflow[case]
+            expected = f"powercontext-{domain}" if record["host"] == "dsh" else f"{ENTRY_NAME}/references/{filename}"
+            read = self.reads_before_operation if self.reads_before_operation is not None else list(self.loaded)
+            record["skill_workflow"] = {"expected": expected, "read_before_operation": read, "passed": expected in read}
+            if expected not in read:
+                record["routing_passed"] = False
+                record.setdefault(
+                    "error",
+                    f"host={record['host']}, case={case}: required {domain} workflow {expected!r} was not read "
+                    f"before the data operation; successfully read resources: {read!r}",
+                )
         if case in {"ordinary", "sufficient_context", "preview"} and self.steps:
-            record.update(routing_passed=False, error="Unnecessary Skill detour for current-context work")
+            record["routing_passed"] = False
+            record.setdefault("error", "Unnecessary Skill detour for current-context work")
 
     async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
         tool = {
@@ -138,6 +156,11 @@ class SkillReadingModel:
             calls = response.get("tool_calls") or []
             reads = [call for call in calls if call["function"]["name"] == tool["name"]]
             if not reads:
+                if self.reads_before_operation is None and any(
+                    call["function"]["name"] not in {"resolve_scope_binding", "powercontext_resolve_scope_binding"}
+                    for call in calls
+                ):
+                    self.reads_before_operation = list(self.loaded)
                 return response
             self.attempts.append({"content": response.get("content"), "calls": calls})
             if not self.available:

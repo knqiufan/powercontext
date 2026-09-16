@@ -469,7 +469,7 @@ async def evaluate(args: argparse.Namespace) -> int:
     output: list[dict[str, Any]] = []
     gate = asyncio.Semaphore(args.concurrency)
     report = {
-        "evaluation_version": "layered-skill-resources-v1"
+        "evaluation_version": "layered-skill-workflows-v2"
         if args.layered_skills
         else "native-adapter-reporting-review-v2",
         "model": model_name,

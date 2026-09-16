@@ -51,7 +51,7 @@ def test_mcp_guidance_is_visible_without_loading_a_skill() -> None:
         for host in ("codex", "claude-code", "workbuddy", "agent-plugin", "minimax"):
             plugin = root / "integrations" / host
             plugin /= "powercontext" if host == "agent-plugin" else "plugins/powercontext"
-            name = "powercontext-project-context" if host == "minimax" else "project-context"
+            name = "powercontext-project-context"
             content = (plugin / f"skills/{name}/SKILL.md").read_text(encoding="utf-8")
             catalog = {
                 "host": host,

@@ -58,10 +58,10 @@ def register(ctx) -> None:
     provider = PowerContextMemoryProvider(_load_plugin_config())
     ctx.register_memory_provider(provider)
     register_skill = getattr(ctx, "register_skill", None)
-    skill_path = Path(__file__).parent / "skills" / "powercontext" / "SKILL.md"
+    skill_path = Path(__file__).parent / "skills" / "powercontext-project-context" / "SKILL.md"
     if callable(register_skill) and skill_path.is_file():
         register_skill(
-            "powercontext",
+            "powercontext-project-context",
             skill_path,
             "Use PowerContext memory, continuity, and review operations safely.",
         )

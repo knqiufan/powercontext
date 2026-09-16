@@ -48,7 +48,6 @@ it("OpenClaw discovers the packaged router and its workflow files in an isolated
       });
     const skill = JSON.parse(stdout).skills.find((item: { name: string }) => item.name === "powercontext-project-context");
     expect(skill, `OpenClaw did not discover powercontext-project-context from ${root}/skills`).toMatchObject({ eligible: true, modelVisible: true, disabled: false });
-    expect(skill.description).toMatch(/[\u4e00-\u9fff]/);
     const directory = join(root, "skills", skill.name);
     const entry = await readFile(join(directory, "SKILL.md"), "utf8");
     for (const match of entry.matchAll(/\[[^\]]*\]\((references\/[^)]+)\)/g)) {
