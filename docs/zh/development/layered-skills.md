@@ -16,7 +16,7 @@ Skill 入口负责简短路由：什么时候搜索、盘点、保存、交接�
 | 宿主 | 可发现入口 | 详细流程 |
 | --- | --- | --- |
 | Codex、Claude Code、WorkBuddy、可移植 Agent Plugin、Pi、OpenCode | `powercontext-project-context` | 本地 `references/scope-memory.md`、`work-handoff.md`、`review-publication.md`。 |
-| Hermes | `powercontext-project-context` | 同样三个参考领域，使用 Hermes 工具名和人工 Review 命令。 |
+| Hermes | `powercontext:powercontext-project-context` | 同样三个参考领域，使用 Hermes 工具名和人工 Review 命令。 |
 | MiniMax | `powercontext-project-context` | 保留现有 Scope/Memory、Handoff、Review、HTTP 边界参考和示例。 |
 | OpenClaw | `powercontext-project-context` | 打包 Scope/Memory 和 Handoff 参考；不宣称支持盘点或候选 Review。 |
 | DSH | 运行时 `powercontext-project-context` 路由 | 独立注册 `powercontext-memory`、`powercontext-handoff`、`powercontext-review`，不依赖文件路径。 |

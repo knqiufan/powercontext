@@ -85,3 +85,22 @@ The automated result is **15/16**; the remaining DSH English Handoff exhausted t
 recorded as truncated, not qualified. All four requested-reading probes read their domain before the operation, and
 all eight ordinary/preview cases avoided Skill and data calls. Reporting remains unreviewed for all observations.
 This small, separate run does not replace failures in the earlier matrix or establish a causal benchmark improvement.
+
+## Hermes discovery qualification
+
+The earlier Hermes catalogs read `SKILL.md` directly. They did not exercise native discovery, where Python
+registration still supplied an older English-only description. Hermes observations in the initial and workflow-aware
+records therefore do **not** qualify the native discovery description or namespace. Their historical scores remain
+unchanged; they must not be presented as evidence that the host exposed the bilingual routing cues.
+
+The registration now reads the installed frontmatter with Hermes' parser. Native verification uses the public
+`load_memory_provider` entry point and `PluginManager.list_plugin_skill_metadata()` at Hermes v2026.8.18
+(CLI 0.20.4, commit `e624e9fde561e1add9388384012b295fde669ade`). It checks inactive-provider isolation, active
+provider discovery, the host-qualified name, the complete installed description, and native resource resolution.
+A second case changes bilingual frontmatter and verifies that discovery follows it without a Python registration edit.
+The old registration reproduces the stale-description failure on this host.
+
+Hermes catalog export now uses that native test. The layered evaluator preserves the exported name and description,
+including an empty description, and rejects older catalogs without native metadata. Deterministic regressions verify
+that model-visible discovery and requested domain reads use the native namespace. These checks qualify metadata
+propagation and evaluator fidelity, not universal model routing or semantic acceptance of the historical transcripts.

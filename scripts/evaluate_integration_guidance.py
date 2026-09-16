@@ -160,8 +160,8 @@ for _case in ("search", "handoff"):
 
 
 def skill_description(skill: dict[str, Any]) -> str:
-    if value := skill.get("description"):
-        return str(value)
+    if "description" in skill:
+        return str(skill["description"])
     match = re.search(r"^description: (.+)$", skill.get("content", ""), re.MULTILINE)
     return match[1] if match else "PowerContext workflow guidance."
 

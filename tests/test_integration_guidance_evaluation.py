@@ -27,6 +27,7 @@ import pytest
 from scripts.evaluate_integration_guidance import apply_reporting_review, run_scenario, validate_message
 from scripts.integration_guidance_handoff import HandoffFixture
 from scripts.integration_guidance_native import NativeHandoffSession
+from scripts.integration_guidance_skills import with_skill_resources
 
 
 def call(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -64,6 +65,32 @@ class Model:
     async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
         self.messages.append(list(messages))
         return next(self.responses)
+
+
+@pytest.mark.parametrize("description", ["Native host discovery description", ""])
+def test_hermes_evaluation_uses_native_discovery_and_qualified_resource_reads(description: str) -> None:
+    name = "powercontext:powercontext-project-context"
+    catalog = with_skill_resources({
+        "host": "hermes",
+        "guidance": "",
+        "tools": [{"name": "powercontext_search_memory"}],
+        "skill": {"name": name, "description": description},
+    })
+    model = Model([
+        call("read_skill_resource", {"resource": name}),
+        call("read_skill_resource", {"resource": f"{name}/references/scope-memory.md"}),
+        call("powercontext_search_memory"),
+        {"role": "assistant", "content": "Search complete."},
+    ])
+    result = asyncio.run(run_scenario(model, catalog, "skill_search", 0, "unloaded"))
+    prompt = model.messages[0][0]["content"]
+    assert prompt.split("Optional Skill catalog: ", 1)[1] == f"{name}: {description}"
+    assert result["routing_passed"], result.get("error")
+
+
+def test_hermes_layered_evaluation_rejects_catalog_without_native_metadata() -> None:
+    with pytest.raises(ValueError, match="Hermes catalog lacks native Skill metadata"):
+        with_skill_resources({"host": "hermes"})
 
 
 @pytest.mark.parametrize("host,case", [("codex", "skill_search"), ("dsh", "skill_search"), ("codex", "skill_handoff")])

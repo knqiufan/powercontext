@@ -91,6 +91,13 @@ def with_skill_resources(catalog: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(message)
         return {**catalog, "skill_resources": resources, "skill": entry}
     skill = file_skill(ROOT / FILE_HOSTS[catalog["host"]])
+    if catalog["host"] == "hermes":
+        native = catalog.get("skill", {})
+        if native.get("name") != f"powercontext:{ENTRY_NAME}" or not isinstance(native.get("description"), str):
+            message = "Hermes catalog lacks native Skill metadata; export it with tests/e2e/test_hermes_skills.py"
+            raise ValueError(message)
+        # Discovery must use what the host exposes, even when it is empty or stale.
+        skill.update(name=native["name"], description=native["description"])
     resources = {
         skill["name"] if path == "SKILL.md" else f"{skill['name']}/{path}": content
         for path, content in skill.pop("resources").items()
@@ -116,7 +123,8 @@ class SkillReadingModel:
         workflow = {"skill_search": ("memory", "scope-memory.md"), "skill_handoff": ("handoff", "work-handoff.md")}
         if case in workflow and self.available:
             domain, filename = workflow[case]
-            expected = f"powercontext-{domain}" if record["host"] == "dsh" else f"{ENTRY_NAME}/references/{filename}"
+            entry = f"powercontext:{ENTRY_NAME}" if record["host"] == "hermes" else ENTRY_NAME
+            expected = f"powercontext-{domain}" if record["host"] == "dsh" else f"{entry}/references/{filename}"
             read = self.reads_before_operation if self.reads_before_operation is not None else list(self.loaded)
             record["skill_workflow"] = {"expected": expected, "read_before_operation": read, "passed": expected in read}
             if expected not in read:

@@ -18,7 +18,7 @@ every response are not prerequisites. English and Chinese intent phrases live in
 | Hosts | Discoverable entry | Workflow detail |
 | --- | --- | --- |
 | Codex, Claude Code, WorkBuddy, portable Agent Plugin, Pi, OpenCode | `powercontext-project-context` | Local `references/scope-memory.md`, `work-handoff.md`, and `review-publication.md`. |
-| Hermes | `powercontext-project-context` | The same three reference domains with Hermes tool names and human Review commands. |
+| Hermes | `powercontext:powercontext-project-context` | The same three reference domains with Hermes tool names and human Review commands. |
 | MiniMax | `powercontext-project-context` | Existing Scope/Memory, Handoff, Review and HTTP boundary references plus examples. |
 | OpenClaw | `powercontext-project-context` | Packaged Scope/Memory and Handoff references; no inventory or candidate Review capability. |
 | DSH | Runtime `powercontext-project-context` router | Independently registered `powercontext-memory`, `powercontext-handoff`, `powercontext-review`; no filesystem reference dependency. |
