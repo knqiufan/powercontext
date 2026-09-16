@@ -15,6 +15,6 @@ For the lower-level Handoff flow, `pc_handoff_prepare` returns the Draft in `dat
 `pc_handoff_activate` returns it in `data.draft`. Pass only that Draft to `pc_handoff_finalize`,
 never the `{ok, data}` wrapper. Return `finalize.data` unchanged, including `schema`, `scope_id`,
 `base`, `content`, and `generation` when present. Do not return an unfinished Draft or only `content`.
-
-
-For a preview, use inspected current facts without capture, prepare, or commit. Preserve the complete returned carrier, including required nullable fields and generation receipts.
+For a preview, draft text from current inspected facts without calling any Handoff or Source tool. Do not claim that
+a prepared carrier or durable milestone exists. For an actual transfer, preserve the complete returned carrier,
+including required nullable fields and generation receipts.

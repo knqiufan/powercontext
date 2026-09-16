@@ -70,3 +70,18 @@ uv run python scripts/evaluate_integration_guidance.py \
 
 Repeat `--catalog` for the other nine hosts. Use Node 24.15+ for the OpenClaw adapter. A live run intentionally
 returns a nonzero exit code until transcript-bound reporting review qualifies every observation.
+
+## Handoff guidance consistency
+
+Source review identified a conflict between DSH system guidance (capture, prepare, finalize) and its domain Skill
+(defaulting to activation). The domain now uses prepare for ordinary transfers and reserves activation for an explicit
+boundary-trigger request. DSH and OpenCode preview instructions explicitly require text only, with no Source/Handoff
+calls or claims of an existing carrier. DSH's 265 package/E2E tests and 6 native runtime scenarios, OpenCode's 53 tests,
+and 12 resource/packaging checks passed after this clarification.
+
+A separate [16-observation follow-up](results/step37-layered-handoff-20260916.jsonl) uses freshly exported DSH and
+OpenCode catalogs with `skill_handoff`, `handoff`, `preview` and `ordinary`, both languages, and optional reads.
+The automated result is **15/16**; the remaining DSH English Handoff exhausted the 6,000-token model budget and is
+recorded as truncated, not qualified. All four requested-reading probes read their domain before the operation, and
+all eight ordinary/preview cases avoided Skill and data calls. Reporting remains unreviewed for all observations.
+This small, separate run does not replace failures in the earlier matrix or establish a causal benchmark improvement.

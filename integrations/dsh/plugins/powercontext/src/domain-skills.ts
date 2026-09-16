@@ -60,9 +60,11 @@ Use Handoff when work must move to another task, session, or model.
 1. Call \`pc_capture_source\` with a concise account of the current state and a
    unique \`source_id\`. Include the objective, verified progress, blockers, and
    next action that the receiver needs.
-2. Call \`pc_handoff_activate\` with that Source as \`boundary_source\`.
-3. When the activation status is \`generated\`, inspect its Draft. An \`ignored\`
-   status means the boundary Source has already been consumed.
+2. Call \`pc_handoff_prepare\` with the objective and
+   \`evidence: [{kind: "source", source_ref: capture.data.source}]\`.
+3. Inspect \`prepare.data\`. \`pc_handoff_activate\` is an alternative for an explicitly
+   requested boundary-trigger activation; do not call it after prepare. Its \`generated\`
+   status provides a Draft in \`data.draft\`; \`ignored\` means the Source was already consumed.
 4. Call \`pc_handoff_finalize\` with the inspected Draft.
 5. The receiving task calls \`pc_handoff_continue\` with \`selection: "prepared"\`
    and that exact value.
@@ -74,9 +76,7 @@ For the lower-level Handoff flow, \`pc_handoff_prepare\` returns the Draft in \`
 \`pc_handoff_activate\` returns it in \`data.draft\`. Pass only that Draft to \`pc_handoff_finalize\`,
 never the \`{ok, data}\` wrapper. Return \`finalize.data\` unchanged, including \`schema\`, \`scope_id\`,
 \`base\`, \`content\`, and \`generation\` when present. Do not return an unfinished Draft or only \`content\`.
-
-
-For a preview, use current inspected facts and make no capture, prepare, or finalize call. Return the complete finalized carrier; preparation does not commit a milestone or prove receiver execution.
+For a preview, draft text from current inspected facts without calling any Handoff or Source tool. Do not claim that a prepared carrier or durable milestone exists. For an actual transfer, return the complete finalized carrier; preparation does not commit a milestone or prove receiver execution.
 `,
   },
   {
