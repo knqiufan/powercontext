@@ -35,7 +35,7 @@ Scope 由宿主和 Server 决定。复用解析后的绑定，不猜测身份或
 | --- | --- | --- |
 | DSH | 系统段和原生工具 | `pc_search`、`pc_memory_list`、`pc_remember`；候选决策由人工 `/pc review` 完成。 |
 | OpenCode | 系统 transform 和原生工具 | 同类 `pc_*` 名称；候选审核变更不作为模型工具开放。 |
-| Pi | `before_agent_start` 系统提示和原生工具 | 支持 Memory、Topic Memory、结构化工作与 Handoff，以及只读产物和候选检查；不提供候选修改工具。自动召回为空或失败时仍有基础指引。 |
+| Pi | `before_agent_start` 系统提示和原生工具 | 支持 Memory、Topic Memory、结构化工作与 Handoff，以及产物/候选检查、候选审核和外部 Skill。候选批准、拒绝、修订及精确外部 Skill 导入/分叉需要显式授权和交互确认，不会安装、发布或执行产物。自动召回为空或失败时仍有基础指引。 |
 | OpenClaw | Memory capability 提示和 provider 工具 | `powercontext_memory_search` / `powercontext_memory_store`；提示按当前目录说明 Memory 与结构化工作/Handoff，不推断 Memory 清单或候选 Review。 |
 | Hermes | provider 系统块和工具 schema | `powercontext_search_memory`、`powercontext_remember` 等实际工具；使用 `powercontext:powercontext-project-context` 插件 Skill。 |
 | Codex、Claude Code、WorkBuddy | MCP 初始化指引和 OpenAPI 派生描述 | `search_memory`、`list_memory_entries`、`remember_memory`；各自现有 `powercontext-project-context` Skill 保持一致。 |
