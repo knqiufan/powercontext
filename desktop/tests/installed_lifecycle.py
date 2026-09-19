@@ -32,6 +32,13 @@ def exercise_forced_exit(client: httpx.Client, prefix: str, app: subprocess.Pope
         page.select_scope(scope)
         page.type("记忆内容", note, "textarea")
         page.button("保存记忆")
+        # The preceding workflow intentionally leaves an unknown last write. A new
+        # explicit write must still pass the product's duplicate-risk confirmation.
+        alert = client.get(prefix + "/alert/text")
+        alert.raise_for_status()
+        if alert.json()["value"] != "上次提交结果未知，再次保存可能产生重复记录。仍要提交这次输入吗？":
+            raise HarnessFailure("installed_unknown_retry_confirmation_missing")
+        page.post("/alert/accept", {})
         page.wait_text("保存成功。")
         citation = page.search_read(note, "desktoplifecyclectest")
         if app.poll() is not None:
@@ -55,6 +62,7 @@ def exercise_forced_exit(client: httpx.Client, prefix: str, app: subprocess.Pope
         return {
             "serverWheelSha256": wheel_digest,
             "applicationExitCode": app.returncode,
+            "explicitSaveAfterUnknownConfirmed": True,
             "forcedOwnedApplicationExit": True,
             "serverReadyAfterExit": True,
             "originalExactReadAfterExit": True,
