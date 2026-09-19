@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import time
+from pathlib import Path
 
 import httpx
 from installed_fixture import isolated_server
@@ -66,12 +68,54 @@ class InstalledPage:
     def observe(self, script: str, args: list[object] | None = None):
         return self.post("/execute/sync", {"script": script, "args": args or []})
 
-    def wait_text(self, text: str) -> None:
+    def wait(self, script: str, args: list[object] | None = None) -> None:
         for _ in range(100):
-            if self.observe("return document.body.innerText.includes(arguments[0]);", [text]):
+            if self.observe(script, args):
                 return
             time.sleep(0.2)
-        raise HarnessFailure("installed_text_timeout", text)
+        raise HarnessFailure("installed_observation_timeout")
+
+    def wait_text(self, text: str) -> None:
+        self.wait("return document.body.innerText.includes(arguments[0]);", [text])
+
+    def activate(self, name: str) -> None:
+        self.button("使用此连接")
+        self.element(f"//ul[@class='profile-list']/li[button[normalize-space(.)='{name}']]/span[@class='badge']")
+        self.button("首页")
+
+    def connect(self, name: str, endpoint: str) -> None:
+        self.button("连接")
+        self.type("连接名称", name)
+        self.type("Server 地址", endpoint)
+        self.click("//label[normalize-space(text())='已验证兼容配置']/select/option[@value='sqlite-63f918b7-v1']")
+        self.button("保存配置")
+        self.activate(name)
+
+    def select_scope(self, scope_id: str) -> None:
+        self.click("//summary[normalize-space(.)='精确 Scope ID']")
+        self.type("精确 Scope ID", scope_id)
+        self.button("选择范围")
+        self.wait_text("当前范围: Desktop installed CI")
+
+    def expect_empty_context(self) -> None:
+        observed = self.observe("""return {
+          reader: !!document.querySelector('.reader'),
+          hits: document.querySelectorAll('.memory-hits li').length,
+          draft: document.querySelector('.memory-workspace textarea')?.value,
+          query: [...document.querySelectorAll('label')].find(
+            label => label.textContent.trim() === '全文搜索关键词')?.querySelector('input')?.value
+        };""")
+        if observed != {"reader": False, "hits": 0, "draft": "", "query": ""}:
+            raise HarnessFailure("installed_previous_context_not_cleared")
+
+    def search_read(self, text: str, keyword: str = "desktopinstalledci") -> dict[str, object]:
+        self.type("全文搜索关键词", keyword)
+        self.button("查找")
+        self.button("阅读精确版本")
+        self.wait_text("记忆正文")
+        if self.observe("return document.querySelector('.reader > .plain-text')?.textContent;") != text:
+            raise HarnessFailure("installed_exact_body_mismatch")
+        return json.loads(self.observe("return document.querySelector('.reader pre')?.textContent;"))
 
     def paste(self) -> str:
         field = self.field("记忆内容", "textarea")
@@ -95,29 +139,18 @@ class InstalledPage:
 def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
     page = InstalledPage(client, prefix)
     with isolated_server() as (server, scope_id, wheel_digest):
-        page.button("连接")
-        page.type("连接名称", "Desktop CI synthetic")
-        page.type("Server 地址", str(server.base_url).rstrip("/"))
-        page.click("//label[normalize-space(text())='已验证兼容配置']/select/option[@value='sqlite-63f918b7-v1']")
-        page.button("保存配置")
-        page.button("使用此连接")
-        page.wait_text("当前使用")
-        page.button("首页")
-        page.click("//summary[normalize-space(.)='精确 Scope ID']")
-        page.type("精确 Scope ID", scope_id)
-        page.button("选择范围")
-        page.wait_text("当前范围: Desktop installed CI")
+        page.connect("Desktop CI synthetic", str(server.base_url).rstrip("/"))
+        page.select_scope(scope_id)
         page.type("记忆内容", NOTE, "textarea")
+        before_submit = server.post(
+            "/v1/memory/search", json={"scope_id": scope_id, "query": "desktopinstalledci", "mode": "fts", "limit": 10}
+        )
+        before_submit.raise_for_status()
+        if before_submit.json()["hits"]:
+            raise HarnessFailure("installed_enter_submitted_without_button")
         page.button("保存记忆")
         page.wait_text("保存成功。")
-        page.type("全文搜索关键词", "desktopinstalledci")
-        page.button("查找")
-        page.button("阅读精确版本")
-        page.wait_text("记忆正文")
-        text = page.observe("return document.querySelector('.reader > .plain-text')?.textContent;")
-        if text != NOTE:
-            raise HarnessFailure("installed_exact_body_mismatch")
-        citation = json.loads(page.observe("return document.querySelector('.reader pre')?.textContent;"))
+        citation = page.search_read(NOTE)
         response = server.post("/v1/memory/entries/get", json={"scope_id": scope_id, "citation": citation})
         response.raise_for_status()
         if response.json()["text"] != NOTE or response.json()["citation"] != citation:
@@ -131,6 +164,8 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         if json.loads(page.paste()) != citation:
             raise HarnessFailure("installed_citation_clipboard_mismatch")
         page.clear_note()
+        exercise_connection_isolation(page, server, scope_id, citation)
+        exercise_unknown_write(page)
         return {
             "serverWheelSha256": wheel_digest,
             "mode": "anonymous loopback SQLite, no model",
@@ -138,4 +173,84 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
             "saveSearchExactRead": True,
             "independentServerExactRead": True,
             "bodyAndCitationClipboardPaste": True,
+            "twoServerConnectionIsolation": True,
+            "disconnectReconnectClearsContent": True,
+            "inactiveProfileRemovalPreservesServerData": True,
+            "enterDoesNotSubmit": True,
+            "committedLostResponseUnknownWithoutReplay": True,
         }
+
+
+def exercise_connection_isolation(
+    page: InstalledPage,
+    server_a: httpx.Client,
+    scope_a: str,
+    citation_a: dict[str, object],
+) -> None:
+    text_b = "desktopinstalledci B 独立服务中的另一条记忆"
+    with isolated_server() as (server_b, scope_b, _):
+        seeded = server_b.post("/v1/memory/remember", json={"scope_id": scope_b, "kind": "note", "text": text_b})
+        seeded.raise_for_status()
+        citation_b = seeded.json()["entry"]["citation"]
+        page.connect("Desktop CI B", str(server_b.base_url).rstrip("/"))
+        page.expect_empty_context()
+        page.select_scope(scope_b)
+        if page.search_read(text_b) != citation_b:
+            raise HarnessFailure("installed_second_server_citation_mismatch")
+        page.button("断开桌面连接")
+        page.wait_text("尚未连接")
+        page.expect_empty_context()
+        page.button("连接")
+        page.button("Desktop CI synthetic")
+        page.activate("Desktop CI synthetic")
+        page.expect_empty_context()
+        page.select_scope(scope_a)
+        if page.search_read(NOTE) != citation_a:
+            raise HarnessFailure("installed_reconnected_citation_mismatch")
+        page.button("连接")
+        page.button("Desktop CI B")
+        page.button("移除连接")
+        page.post("/alert/accept", {})
+        page.wait("""return ![...document.querySelectorAll('.profile-list button')].some(
+          button => button.textContent.trim() === 'Desktop CI B');""")
+        for server, scope, citation, expected in (
+            (server_a, scope_a, citation_a, NOTE),
+            (server_b, scope_b, citation_b, text_b),
+        ):
+            response = server.post("/v1/memory/entries/get", json={"scope_id": scope, "citation": citation})
+            response.raise_for_status()
+            if response.json()["text"] != expected:
+                raise HarnessFailure("installed_profile_operation_changed_server_data")
+        page.button("首页")
+        if page.search_read(NOTE) != citation_a:
+            raise HarnessFailure("installed_inactive_profile_removal_changed_active_connection")
+
+
+def exercise_unknown_write(page: InstalledPage) -> None:
+    note = "desktoplostuici 已提交但响应丢失的中文记忆"
+    with tempfile.TemporaryDirectory(prefix="desktop-ui-response-loss-") as directory:
+        counter = Path(directory) / "remember-count"
+        counter.write_text("0", encoding="utf-8")
+        with isolated_server(response_loss_counter=counter) as (server, scope, _):
+            page.connect("Desktop CI response loss", str(server.base_url).rstrip("/"))
+            page.select_scope(scope)
+            page.type("记忆内容", note, "textarea")
+            page.button("保存记忆")
+            page.wait_text("提交结果未知。")
+            if page.observe("return document.querySelector('.memory-workspace textarea')?.value;") != note:
+                raise HarnessFailure("installed_unknown_write_lost_draft")
+            citation = page.search_read(note, "desktoplostuici")
+            matches = server.post(
+                "/v1/memory/search",
+                json={
+                    "scope_id": scope,
+                    "query": "desktoplostuici",
+                    "mode": "fts",
+                    "limit": 10,
+                },
+            )
+            matches.raise_for_status()
+            hits = matches.json()["hits"]
+            if len(hits) != 1 or hits[0]["citation"] != citation or counter.read_text(encoding="utf-8") != "1":
+                raise HarnessFailure("installed_unknown_write_replayed_or_missing")
+            page.clear_note()
