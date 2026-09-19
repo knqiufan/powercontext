@@ -42,7 +42,7 @@ pub fn foundation_info<R: tauri::Runtime>(
     authorize_window(window.label())?;
     Ok(FoundationInfo {
         version: env!("CARGO_PKG_VERSION").into(),
-        phase: "S2".into(),
+        phase: "S3".into(),
         credential_backend: if cfg!(windows) {
             "windows_credential_manager"
         } else {

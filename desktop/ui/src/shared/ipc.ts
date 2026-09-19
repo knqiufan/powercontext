@@ -17,6 +17,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   FoundationInfo,
+  WriteOutcome,
+  MemoryCitation,
+  MemoryEntry,
+  SearchMemoryResponse,
   DiagnosticKind,
   DiagnosticReport,
   DesktopState,
@@ -30,6 +34,14 @@ export async function getFoundationInfo(): Promise<FoundationInfo | null> {
 }
 
 export const desktopApi = {
+  remember: (generation: number, text: string) =>
+    invoke<WriteOutcome>("remember_memory", { generation, text }),
+  search: (generation: number, query: string) =>
+    invoke<SearchMemoryResponse>("search_memory", { generation, query }),
+  entry: (generation: number, citation: MemoryCitation) =>
+    invoke<MemoryEntry>("memory_entry", { generation, citation }),
+  cancelMemory: (generation: number) =>
+    invoke<void>("cancel_memory_reads", { generation }),
   diagnostics: (kind: DiagnosticKind) =>
     invoke<DiagnosticReport>("local_diagnostics", { kind }),
   state: () => invoke<DesktopState>("desktop_state"),

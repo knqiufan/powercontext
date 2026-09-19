@@ -47,6 +47,7 @@ function state(p = profile): DesktopState {
     active: null,
     compatibilityProfiles: [],
     pendingCredentialCleanup: 0,
+    lastWrite: null,
   };
 }
 function show(p = profile) {

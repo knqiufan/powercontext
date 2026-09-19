@@ -34,6 +34,7 @@ const state: DesktopState = {
   reports: [],
   compatibilityProfiles: [],
   pendingCredentialCleanup: 0,
+  lastWrite: null,
   active: {
     connectionId: "test",
     generation: 1,

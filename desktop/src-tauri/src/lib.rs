@@ -31,6 +31,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ipc::foundation_info,
             commands::local_diagnostics,
+            commands::remember_memory,
+            commands::search_memory,
+            commands::memory_entry,
+            commands::cancel_memory_reads,
             commands::desktop_state,
             commands::save_profile,
             commands::remove_profile,

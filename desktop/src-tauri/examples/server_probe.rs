@@ -16,7 +16,11 @@
 
 //! Only invoked by the isolated real-Server harness; never registered as an IPC command.
 use powercontext_desktop::{
-    credentials::Secret,
+    connections::{
+        profiles::ProfileRepository,
+        session::{ConnectionManager, WriteStatus},
+    },
+    credentials::{Secret, WindowsVault},
     error::SafeError,
     transport::{Endpoint, ServerApi},
 };
@@ -107,6 +111,54 @@ async fn main() {
     );
     let exact = api.entry(&fixture.scope_id, &entry.citation).await.unwrap();
     assert_eq!(exact.text, text);
+    // Exercise the same native context owner used by product IPC, not only bare HTTP adapters.
+    let temporary = tempfile::tempdir().unwrap();
+    let manager = ConnectionManager::new(
+        ProfileRepository::open(
+            temporary.path().join("profiles.json"),
+            std::sync::Arc::new(WindowsVault),
+        )
+        .unwrap(),
+    );
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
+    let compatibility = manager.state().unwrap().compatibility_profiles[0]
+        .id
+        .clone();
+    let credential = raw["token"]
+        .as_str()
+        .map(|value| serde_json::json!({"secret":value,"storage":"session_only"}));
+    let profile = manager.save_profile(serde_json::from_value(serde_json::json!({
+        "id":null,"revision":null,"name":"Synthetic integration", "endpoint":fixture.endpoint,
+        "authentication":if has_token { "bearer" } else { "unauthenticated_loopback" },
+        "caPem":fixture.ca_pem,"compatibility":compatibility,"keepCredential":false,"credential":credential
+    })).unwrap()).unwrap().profiles[0].id.clone();
+    let generation = manager.check(&profile, true).await.unwrap().generation;
+    let generation = manager
+        .select_scope(generation, &fixture.scope_id)
+        .await
+        .unwrap()
+        .generation;
+    let keyword = format!("context{}", uuid::Uuid::new_v4().simple());
+    let submitted = format!("  {keyword} 中文 café\nSecond line.  ");
+    let expected = format!("{keyword} 中文 café\nSecond line.");
+    let saved = manager.remember(generation, &submitted).await.unwrap();
+    assert_eq!(saved.record.status, WriteStatus::Succeeded);
+    let entry = saved.result.unwrap().entry.unwrap();
+    assert_eq!(entry.text, expected);
+    let matches = manager.search_memory(generation, &keyword).await.unwrap();
+    assert!(
+        matches
+            .hits
+            .iter()
+            .any(|hit| hit.citation == entry.citation)
+    );
+    let exact = manager
+        .memory_entry(generation, &entry.citation)
+        .await
+        .unwrap();
+    assert_eq!(exact.text, expected);
+    manager.disconnect().unwrap();
+    api.live().await.unwrap();
     if has_token {
         let bad = ServerApi::new(
             endpoint,

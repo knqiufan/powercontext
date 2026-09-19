@@ -144,3 +144,66 @@ fn diagnostic_command_is_narrow_and_requires_the_trusted_window() {
         );
     }
 }
+
+#[test]
+fn memory_commands_reject_untrusted_callers_before_accessing_the_connection() {
+    use powercontext_desktop::{commands, error::SafeError};
+    use tauri::Manager;
+    let app = mock_builder()
+        .manage(commands::HostState {
+            manager: Err(SafeError::NotConnected),
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::remember_memory,
+            commands::search_memory,
+            commands::memory_entry,
+            commands::cancel_memory_reads
+        ])
+        .build(tauri::generate_context!())
+        .unwrap();
+    let args = serde_json::json!({
+        "generation": 0,
+        "text": "synthetic permission test",
+        "query": "synthetic",
+        "citation": {
+            "memory_ref": {"family":"memory", "artifact_id":"test", "revision":1},
+            "entry_id":"test", "entry_version_id":"v1"
+        }
+    });
+    for command in [
+        "remember_memory",
+        "search_memory",
+        "memory_entry",
+        "cancel_memory_reads",
+    ] {
+        for (label, origin) in [
+            ("main", "http://tauri.localhost"),
+            ("other", "http://tauri.localhost"),
+            ("main", "https://evil.example"),
+        ] {
+            let window = app.get_webview_window(label).unwrap_or_else(|| {
+                tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                    .build()
+                    .unwrap()
+            });
+            let error = get_ipc_response(
+                &window,
+                InvokeRequest {
+                    cmd: command.into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: origin.parse().unwrap(),
+                    body: InvokeBody::Json(args.clone()),
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.into(),
+                },
+            )
+            .expect_err("no connection or forbidden caller");
+            assert_eq!(
+                error.get("code").and_then(serde_json::Value::as_str) == Some("not_connected"),
+                label == "main" && origin == "http://tauri.localhost",
+                "{command} {label} {origin}: {error}"
+            );
+        }
+    }
+}

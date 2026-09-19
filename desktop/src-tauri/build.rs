@@ -26,6 +26,10 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "foundation_info",
             "local_diagnostics",
+            "remember_memory",
+            "search_memory",
+            "memory_entry",
+            "cancel_memory_reads",
             "desktop_state",
             "save_profile",
             "remove_profile",

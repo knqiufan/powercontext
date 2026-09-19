@@ -17,7 +17,10 @@
 use powercontext_desktop::{
     connections::{
         profiles::{Authentication, CredentialState, ProfileInput, ProfileView},
-        session::{ActiveView, CheckReport, CompatibilityProfile, DesktopState, Fact},
+        session::{
+            ActiveView, CheckReport, CompatibilityProfile, DesktopState, Fact, MemoryContext,
+            WriteOutcome, WriteRecord, WriteStatus,
+        },
     },
     credentials::{CredentialWriteReceipt, CredentialWriteRequest, StorageChoice},
     diagnostics::{DiagnosticItem, DiagnosticKind, DiagnosticReport, HostDiagnostic},
@@ -56,6 +59,10 @@ fn main() {
         CheckReport::decl(&config),
         CompatibilityProfile::decl(&config),
         ActiveView::decl(&config),
+        MemoryContext::decl(&config),
+        WriteStatus::decl(&config),
+        WriteRecord::decl(&config),
+        WriteOutcome::decl(&config),
         DesktopState::decl(&config),
         ApiFailure::decl(&config),
     ]

@@ -1,6 +1,6 @@
 # PowerContext Desktop preview
 
-Internal Windows preview for [#1654](https://github.com/oceanbase/powercontext/issues/1654), following RFC #1455. It provides a packaged Tauri 2 shell with Home, Connections, My memories, Chinese/English settings, semantic light/dark/system themes and honest disconnected states. Connection profiles, explicit activation, identity/readiness checks, exact Scope selection and local diagnostics are implemented. Memory forms remain unavailable until S3.
+Internal Windows preview for [#1654](https://github.com/oceanbase/powercontext/issues/1654), following RFC #1455. It provides a packaged Tauri 2 shell with Home, Connections, My memories, Chinese/English settings, semantic light/dark/system themes and honest disconnected states. Connection profiles, explicit activation, identity/readiness checks, exact Scope selection and local diagnostics are implemented. Shared note saving, bounded FTS search and exact-version reading are implemented; native workflow qualification remains open.
 
 See [中文说明](README.zh.md), [security boundary](SECURITY.md), and [qualification evidence](evidence/S1.md). This is not a supported or signed release, and does not close #1654 or #1428.
 
@@ -45,11 +45,19 @@ The unsigned installer is for internal verification. If WebView2 is absent, its 
 
 Profiles persist under the app data directory; credentials never appear in profile JSON. Active authorization, session-only credentials, Scope selection and query/results are not restored as an authenticated offline session. Remove a profile to remove its Desktop configuration and owned credential reference; it does not stop the Server or remove business data.
 
+## Save, find and read a note
+
+After explicitly activating a qualified connection and choosing a Scope, use Home's note form or **My memories → Add note**. The target connection and exact Scope are shown before submission. Enter inserts a newline; only the save button submits. The input is plain text, limited conservatively to 8192 raw UTF-8 bytes without truncation. The Server owns normalization and the returned text is authoritative.
+
+Search uses FTS in the selected Scope and returns at most 10 matches. This is not a full directory or history, and ten matches do not establish a total count. **Read exact version** sends the complete returned citation; it never substitutes the latest version. Copy buttons explicitly copy either the full plain text or citation JSON.
+
+A successful save without an entry is reported as an operation success without inventing a citation. A timeout or interrupted dispatched write is **unknown**, not a safe invitation to retry: inspect the original Server/Scope before deciding whether to submit again. Identical text alone cannot identify that operation. Desktop does not automatically replay writes or keep an offline queue. Switching context hides old results while retaining minimal original-operation metadata for this session. See [S3 evidence](evidence/S3.md) for tested behavior and qualification gaps.
+
 ## Contracts and resources
 
 `pnpm --dir desktop generate` derives TypeScript schemas and the reviewed ten-operation manifest from `openapi/powercontext.yaml`; `generate:check` detects drift, including a normalized contract SHA-256. Typed Rust adapters consume that generated manifest and generated wire schemas. No public route is independently handwritten in the application. The manifest is not an IPC permission grant.
 
-`cargo run --locked --manifest-path desktop/src-tauri/Cargo.toml --example export_ipc` derives the TypeScript IPC request/receipt/error types from Rust. `ipc:check` verifies them. IPC exposes typed connection, Scope and diagnostic operations to the main window only; no generic fetch, shell, file, database or secret-read command is granted.
+`cargo run --locked --manifest-path desktop/src-tauri/Cargo.toml --example export_ipc` derives the TypeScript IPC request/receipt/error types from Rust. `ipc:check` verifies them. IPC exposes typed connection, Scope, memory and diagnostic operations to the main window only; no generic fetch, shell, file, database or secret-read command is granted.
 
 The canonical brand source is `website/assets/powercontext-color.png`, which is read directly without running the website. `pnpm --dir desktop icons` extracts its square mark and uses the pinned Tauri CLI to derive the Windows icon; `icons:check` verifies all three generated assets against the canonical source. UI SVGs originate from the repository's Desktop design assets and are promoted into `ui/src/assets/` for reproducible builds. They are project resources under the repository Apache-2.0 license.
 

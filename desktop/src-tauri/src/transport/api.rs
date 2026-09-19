@@ -252,15 +252,26 @@ impl ServerApi {
     ) -> Result<MemoryMutationResponse, ApiFailure> {
         validate_scope(scope)?;
         validate_text(text)?;
-        self.execute(
-            "remember_memory",
-            None,
-            &[],
-            Some(serde_json::json!({"scope_id":scope,"kind":"note","text":text})),
-            false,
-        )
-        .await
+        let result: MemoryMutationResponse = self
+            .execute(
+                "remember_memory",
+                None,
+                &[],
+                Some(serde_json::json!({"scope_id":scope,"kind":"note","text":text})),
+                false,
+            )
+            .await?;
+        if !valid_reference(&result.memory)
+            || result.memory.family != "memory"
+            || result.entry.as_ref().is_some_and(|entry| {
+                !valid_entry(entry) || entry.citation.memory_ref != result.memory
+            })
+        {
+            return Err(invalid_received());
+        }
+        Ok(result)
     }
+
     pub async fn search(
         &self,
         scope: &str,
@@ -277,7 +288,16 @@ impl ServerApi {
                 false,
             )
             .await?;
-        if result.hits.len() > 10 {
+        if result.hits.len() > 10
+            || result
+                .hits
+                .iter()
+                .any(|hit| validate_citation(&hit.citation).is_err())
+            || result
+                .mode
+                .as_ref()
+                .is_some_and(|mode| *mode != MemoryUsedSearchMode::Fts)
+        {
             return Err(SafeError::InvalidResponse.into());
         }
         Ok(result)
@@ -298,7 +318,7 @@ impl ServerApi {
                 false,
             )
             .await?;
-        if result.citation != *citation {
+        if result.citation != *citation || !valid_entry(&result) {
             return Err(SafeError::InvalidResponse.into());
         }
         Ok(result)
@@ -319,7 +339,7 @@ pub fn validate_text(text: &str) -> Result<(), SafeError> {
 }
 fn validate_citation(c: &MemoryCitation) -> Result<(), SafeError> {
     if c.memory_ref.family != "memory"
-        || c.memory_ref.revision < 1
+        || !valid_reference(&c.memory_ref)
         || [&c.memory_ref.artifact_id, &c.entry_id, &c.entry_version_id]
             .iter()
             .any(|v| v.is_empty() || v.len() > 128 || !v.bytes().all(|b| b.is_ascii_graphic()))
@@ -327,6 +347,27 @@ fn validate_citation(c: &MemoryCitation) -> Result<(), SafeError> {
         return Err(SafeError::InvalidInput);
     }
     Ok(())
+}
+
+fn valid_reference(reference: &ArtifactReference) -> bool {
+    (1..=9_007_199_254_740_991).contains(&reference.revision)
+        && !reference.family.is_empty()
+        && reference.family.len() <= 128
+        && !reference.artifact_id.is_empty()
+        && reference.artifact_id.len() <= 128
+        && reference.artifact_id.bytes().all(|b| b.is_ascii_graphic())
+}
+fn valid_entry(entry: &MemoryEntry) -> bool {
+    validate_citation(&entry.citation).is_ok()
+        && (1..=9_007_199_254_740_991).contains(&entry.version)
+        && entry.artifact_refs.iter().all(valid_reference)
+}
+fn invalid_received() -> ApiFailure {
+    ApiFailure {
+        code: SafeError::InvalidResponse,
+        request_id: None,
+        dispatched: true,
+    }
 }
 
 async fn server_error_code(response: &mut reqwest::Response) -> SafeError {

@@ -23,6 +23,7 @@ import homeIcon from "../assets/overview.svg";
 import connectionsIcon from "../assets/connections.svg";
 import memoryIcon from "../assets/memory.svg";
 
+import { MemoryWorkspace } from "./MemoryWorkspace";
 import { Diagnostics } from "./Diagnostics";
 import { Connections } from "./Connections";
 import { Scopes } from "./Scopes";
@@ -167,63 +168,23 @@ export function App() {
         )}
         {(page === "home" || page === "memories") && (
           <Scopes
+            key={`scopes-${desktop?.active?.generation ?? "none"}`}
             state={desktop}
             language={language}
             onState={receiveState}
             confirmSwitch={confirmSwitch}
           />
         )}
-        {page === "home" && (
-          <>
-            <div className="home-grid">
-              <section className="card">
-                <h2>{t.quick}</h2>
-                <p>{t.noteHint}</p>
-                <label className="sr-only" htmlFor="note">
-                  {t.note}
-                </label>
-                <textarea
-                  id="note"
-                  disabled
-                  aria-describedby="connection-hint"
-                  placeholder={t.connectHint}
-                  rows={7}
-                />
-                <div className="form-footer">
-                  <span>{t.scope}</span>
-                  <button className="primary" disabled>
-                    {t.save}
-                  </button>
-                </div>
-              </section>
-              <div className="stack">
-                <section className="card">
-                  <h2>{t.current}</h2>
-                  <p className="status">
-                    <span className="dot" aria-hidden="true" />
-                    {activeProfile?.name ?? t.disconnected}
-                  </p>
-                  <p id="connection-hint">{t.connectHint}</p>
-                  {connectButton}
-                </section>
-                <section className="card tip">
-                  <h2>{t.tip}</h2>
-                  <p>{t.tipBody}</p>
-                </section>
-              </div>
-            </div>
-            <section className="card search-card">
-              <h2>{t.find}</h2>
-              <p>{t.findHint}</p>
-              <div className="search-row">
-                <label className="sr-only" htmlFor="home-search">
-                  {t.query}
-                </label>
-                <input id="home-search" disabled placeholder={t.query} />
-                <button disabled>{t.search}</button>
-              </div>
-            </section>
-          </>
+        {page === "home" && !desktop?.active && connectButton}
+        {(page === "home" || page === "memories") && (
+          <MemoryWorkspace
+            key={`memory-${desktop?.active?.generation ?? "none"}`}
+            state={desktop}
+            language={language}
+            home={page === "home"}
+            onState={receiveState}
+            onDirty={setDirty}
+          />
         )}
         {page === "connections" && (
           <Connections
@@ -232,26 +193,6 @@ export function App() {
             onState={receiveState}
             onDirty={setDirty}
           />
-        )}
-        {page === "memories" && (
-          <section className="card">
-            <div className="search-row">
-              <label className="sr-only" htmlFor="memory-search">
-                {t.query}
-              </label>
-              <input id="memory-search" disabled placeholder={t.query} />
-              <button disabled>{t.search}</button>
-            </div>
-            <p className="small">{t.searchLimit}</p>
-            <div className="empty">
-              <span className="empty-icon" aria-hidden="true">
-                ▤
-              </span>
-              <h2>{t.empty}</h2>
-              <p>{t.emptyHint}</p>
-              {connectButton}
-            </div>
-          </section>
         )}
         {page === "settings" && (
           <div className="stack settings">

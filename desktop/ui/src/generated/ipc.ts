@@ -32,7 +32,11 @@ export type Fact<T> = { value: T | null, error: ApiFailure | null, };
 export type CheckReport = { connectionId: string, revision: number, checkedAt: number, liveness: Fact<HealthResponse>, readiness: Fact<ReadinessResponse>, identity: Fact<AccessMeResponse>, capabilities: Fact<Capabilities>, compatibilityVerified: boolean, anonymousAccess: boolean, supportedOperations: Array<string>, };
 export type CompatibilityProfile = { id: string, serverCommit: string, contractSha256: string, artifactSha256: string, operations: Array<string>, evidence: string, };
 export type ActiveView = { connectionId: string, generation: number, report: CheckReport, scope: ScopeDescriptor | null, };
-export type DesktopState = { generation: number, profiles: Array<ProfileView>, reports: Array<CheckReport>, active: ActiveView | null, compatibilityProfiles: Array<CompatibilityProfile>, pendingCredentialCleanup: number, };
+export type MemoryContext = { connectionId: string, endpoint: string, principal: AccessPrincipal | null, generation: number, scopeId: string, };
+export type WriteStatus = "pending" | "succeeded" | "failed" | "unknown";
+export type WriteRecord = { operationId: string, context: MemoryContext, status: WriteStatus, citation: MemoryCitation | null, error: ApiFailure | null, };
+export type WriteOutcome = { record: WriteRecord, result: MemoryMutationResponse | null, };
+export type DesktopState = { generation: number, profiles: Array<ProfileView>, reports: Array<CheckReport>, active: ActiveView | null, compatibilityProfiles: Array<CompatibilityProfile>, pendingCredentialCleanup: number, lastWrite: WriteRecord | null, };
 export type ApiFailure = { code: SafeError, requestId: string | null,
 /**
  * Conservatively true once handed to the HTTP client, even if delivery is uncertain.

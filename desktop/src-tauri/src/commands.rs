@@ -164,3 +164,45 @@ pub async fn local_diagnostics<R: tauri::Runtime>(
         Err(SafeError::NotFound)
     }
 }
+
+#[tauri::command]
+pub async fn remember_memory<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, HostState>,
+    generation: u32,
+    text: String,
+) -> Result<crate::connections::session::WriteOutcome, ApiFailure> {
+    manager(&window, &state)?.remember(generation, &text).await
+}
+#[tauri::command]
+pub async fn search_memory<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, HostState>,
+    generation: u32,
+    query: String,
+) -> Result<crate::transport::wire::SearchMemoryResponse, ApiFailure> {
+    manager(&window, &state)?
+        .search_memory(generation, &query)
+        .await
+}
+#[tauri::command]
+pub async fn memory_entry<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, HostState>,
+    generation: u32,
+    citation: crate::transport::wire::MemoryCitation,
+) -> Result<crate::transport::wire::MemoryEntry, ApiFailure> {
+    manager(&window, &state)?
+        .memory_entry(generation, &citation)
+        .await
+}
+#[tauri::command]
+pub fn cancel_memory_reads<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, HostState>,
+    generation: u32,
+) -> Result<(), ApiFailure> {
+    manager(&window, &state)?
+        .cancel_memory_reads(generation)
+        .map_err(Into::into)
+}

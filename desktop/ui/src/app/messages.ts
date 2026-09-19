@@ -32,7 +32,7 @@ export const messages = {
     connect: "连接已有服务",
     connectHint: "连接已有的 PowerContext Server 后，选择范围即可保存和查找。",
     foundation: "工程预览",
-    foundationHint: "当前正在开发连接预览；记忆表单将在完成验证后开放。",
+    foundationHint: "连接服务并选择范围后，即可保存、全文搜索和阅读记忆。",
     find: "查找记忆",
     query: "搜索关键词",
     search: "查找",
@@ -86,7 +86,7 @@ export const messages = {
       "Connect to an existing PowerContext Server, then select a scope to save and search.",
     foundation: "Foundation preview",
     foundationHint:
-      "Connection preview development is in progress. Memory forms will open after verification.",
+      "Connect a Server and select a Scope to save, search and read memories.",
     find: "Find memories",
     query: "Search keywords",
     search: "Search",

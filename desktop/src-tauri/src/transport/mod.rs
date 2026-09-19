@@ -16,7 +16,7 @@
 
 mod api;
 pub mod wire;
-pub use api::{ApiFailure, ServerApi};
+pub use api::{ApiFailure, ServerApi, validate_text};
 
 // Only native adapters use this transport; it is not an IPC fetch primitive.
 use crate::{credentials::Secret, error::SafeError};

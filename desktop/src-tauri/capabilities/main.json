@@ -8,6 +8,10 @@
   "permissions": [
     "allow-foundation-info",
     "allow-local-diagnostics",
+    "allow-remember-memory",
+    "allow-search-memory",
+    "allow-memory-entry",
+    "allow-cancel-memory-reads",
     "allow-desktop-state",
     "allow-save-profile",
     "allow-remove-profile",

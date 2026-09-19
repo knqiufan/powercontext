@@ -455,3 +455,20 @@ code {
   border-inline-start: 3px solid var(--accent);
   padding-inline-start: 12px;
 }
+
+.plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.memory-hits {
+  padding-inline-start: 1.5rem;
+}
+.memory-hits li {
+  padding-block: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.reader pre {
+  max-width: 100%;
+  font-size: 0.85rem;
+}

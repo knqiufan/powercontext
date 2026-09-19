@@ -89,6 +89,53 @@ pub struct DesktopState {
     pub active: Option<ActiveView>,
     pub compatibility_profiles: Vec<CompatibilityProfile>,
     pub pending_credential_cleanup: usize,
+    pub last_write: Option<WriteRecord>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryContext {
+    pub connection_id: String,
+    pub endpoint: String,
+    pub principal: Option<AccessPrincipal>,
+    pub generation: u32,
+    pub scope_id: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteStatus {
+    Pending,
+    Succeeded,
+    Failed,
+    Unknown,
+}
+#[derive(Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteRecord {
+    pub operation_id: String,
+    pub context: MemoryContext,
+    pub status: WriteStatus,
+    pub citation: Option<MemoryCitation>,
+    pub error: Option<ApiFailure>,
+}
+#[derive(Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteOutcome {
+    pub record: WriteRecord,
+    pub result: Option<MemoryMutationResponse>,
+}
+struct WriteGuard<'a> {
+    manager: &'a ConnectionManager,
+    armed: bool,
+}
+impl Drop for WriteGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed
+            && let Ok(mut inner) = self.manager.lock()
+            && let Some(record) = &mut inner.last_write
+        {
+            record.status = WriteStatus::Unknown;
+        }
+    }
 }
 struct ReadSnapshot {
     api: Arc<ServerApi>,
@@ -104,6 +151,7 @@ struct Inner {
     reports: BTreeMap<String, CheckReport>,
     active: Option<Active>,
     generation: u32,
+    last_write: Option<WriteRecord>,
 }
 pub struct ConnectionManager {
     inner: Mutex<Inner>,
@@ -111,6 +159,8 @@ pub struct ConnectionManager {
     scope_reads: watch::Sender<u32>,
     compatibility: Vec<CompatibilityProfile>,
     probes: tokio::sync::Semaphore,
+    writes: tokio::sync::Semaphore,
+    memory_reads: watch::Sender<u32>,
 }
 impl ConnectionManager {
     pub fn new(profiles: ProfileRepository) -> Self {
@@ -124,11 +174,14 @@ impl ConnectionManager {
                 reports: BTreeMap::new(),
                 active: None,
                 generation: 0,
+                last_write: None,
             }),
             changed,
             scope_reads: watch::channel(0).0,
             compatibility,
             probes: tokio::sync::Semaphore::new(1),
+            writes: tokio::sync::Semaphore::new(1),
+            memory_reads: watch::channel(0).0,
         }
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>, SafeError> {
@@ -151,6 +204,7 @@ impl ConnectionManager {
             active: inner.active.as_ref().map(|a| a.view.clone()),
             compatibility_profiles: self.compatibility.clone(),
             pending_credential_cleanup: inner.profiles.pending_cleanup(),
+            last_write: inner.last_write.clone(),
         })
     }
     pub fn save_profile(&self, input: ProfileInput) -> Result<DesktopState, SafeError> {
@@ -443,6 +497,176 @@ impl ConnectionManager {
             .scope = Some(scope);
         drop(inner);
         self.state().map_err(Into::into)
+    }
+    fn memory_snapshot(
+        &self,
+        generation: u32,
+        operation: &str,
+    ) -> Result<(ReadSnapshot, MemoryContext), SafeError> {
+        let snapshot = self.snapshot(generation, operation)?;
+        let inner = self.lock()?;
+        if inner.generation != generation {
+            return Err(SafeError::StaleContext);
+        }
+        let active = inner.active.as_ref().ok_or(SafeError::NotConnected)?;
+        let scope = active.view.scope.as_ref().ok_or(SafeError::ScopeRequired)?;
+        let endpoint = inner
+            .profiles
+            .views()
+            .into_iter()
+            .find(|profile| profile.id == active.view.connection_id)
+            .ok_or(SafeError::NotConnected)?
+            .endpoint;
+        let principal = snapshot
+            .identity
+            .as_ref()
+            .map(|value| value.principal.clone());
+        Ok((
+            snapshot,
+            MemoryContext {
+                endpoint,
+                principal,
+                connection_id: active.view.connection_id.clone(),
+                generation,
+                scope_id: scope.scope_id.clone(),
+            },
+        ))
+    }
+    fn begin_memory_read(&self, generation: u32) -> Result<watch::Receiver<u32>, SafeError> {
+        let inner = self.lock()?;
+        if inner.generation != generation {
+            return Err(SafeError::StaleContext);
+        }
+        let next = self
+            .memory_reads
+            .borrow()
+            .checked_add(1)
+            .ok_or(SafeError::Storage)?;
+        self.memory_reads.send_replace(next);
+        Ok(self.memory_reads.subscribe())
+    }
+    pub fn cancel_memory_reads(&self, generation: u32) -> Result<(), SafeError> {
+        self.begin_memory_read(generation).map(|_| ())
+    }
+    pub async fn search_memory(
+        &self,
+        generation: u32,
+        query: &str,
+    ) -> Result<SearchMemoryResponse, ApiFailure> {
+        let (
+            ReadSnapshot {
+                api,
+                identity,
+                mut cancelled,
+            },
+            context,
+        ) = self.memory_snapshot(generation, "search_memory")?;
+        let mut query_cancelled = self.begin_memory_read(generation)?;
+        Self::cancellable(
+            &mut cancelled,
+            Self::cancellable(&mut query_cancelled, async {
+                self.identity_unchanged(&api, &identity, generation).await?;
+                api.search(&context.scope_id, query).await
+            }),
+        )
+        .await
+    }
+    pub async fn memory_entry(
+        &self,
+        generation: u32,
+        citation: &MemoryCitation,
+    ) -> Result<MemoryEntry, ApiFailure> {
+        let (
+            ReadSnapshot {
+                api,
+                identity,
+                mut cancelled,
+            },
+            context,
+        ) = self.memory_snapshot(generation, "get_memory_entry")?;
+        let mut query_cancelled = self.begin_memory_read(generation)?;
+        Self::cancellable(
+            &mut cancelled,
+            Self::cancellable(&mut query_cancelled, async {
+                self.identity_unchanged(&api, &identity, generation).await?;
+                api.entry(&context.scope_id, citation).await
+            }),
+        )
+        .await
+    }
+    pub async fn remember(&self, generation: u32, text: &str) -> Result<WriteOutcome, ApiFailure> {
+        let _permit = self.writes.try_acquire().map_err(|_| SafeError::Busy)?;
+        crate::transport::validate_text(text)?;
+        let (
+            ReadSnapshot {
+                api,
+                identity,
+                mut cancelled,
+            },
+            context,
+        ) = self.memory_snapshot(generation, "remember_memory")?;
+        Self::cancellable(
+            &mut cancelled,
+            self.identity_unchanged(&api, &identity, generation),
+        )
+        .await?;
+        let mut record = WriteRecord {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            context,
+            status: WriteStatus::Pending,
+            citation: None,
+            error: None,
+        };
+        {
+            let mut inner = self.lock()?;
+            if inner.generation != generation {
+                return Err(SafeError::StaleContext.into());
+            }
+            inner.last_write = Some(record.clone());
+        }
+        // No context cancellation after this point: the immutable API and Scope own the dispatched write.
+        let mut guard = WriteGuard {
+            manager: self,
+            armed: true,
+        };
+        let response = api.remember(&record.context.scope_id, text).await;
+        let result = match response {
+            Ok(value) => {
+                record.status = WriteStatus::Succeeded;
+                record.citation = value.entry.as_ref().map(|e| e.citation.clone());
+                Some(value)
+            }
+            Err(error) => {
+                record.status = if error.dispatched
+                    && !matches!(
+                        error.code,
+                        SafeError::Unauthorized
+                            | SafeError::Forbidden
+                            | SafeError::InvalidInput
+                            | SafeError::NotFound
+                            | SafeError::Conflict
+                            | SafeError::AuthenticationUnavailable
+                            | SafeError::RuntimeNotReady
+                            | SafeError::Redirect
+                    ) {
+                    WriteStatus::Unknown
+                } else {
+                    WriteStatus::Failed
+                };
+                record.error = Some(error);
+                None
+            }
+        };
+        let mut inner = self.lock()?;
+        inner.last_write = Some(record.clone());
+        guard.armed = false;
+        // A late response may report its original target, but may not disclose old body text in a new context.
+        let result = if inner.generation == generation {
+            result
+        } else {
+            None
+        };
+        Ok(WriteOutcome { record, result })
     }
     async fn cancellable<T>(
         cancelled: &mut watch::Receiver<u32>,

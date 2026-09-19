@@ -51,7 +51,7 @@ test("navigation, bilingual settings and theme remain usable without the native 
   expect(document.documentElement.lang).toBe("en");
   await user.click(screen.getByRole("button", { name: /My memories/ }));
   expect(
-    screen.getByRole("heading", { name: "No memories to display" }),
+    screen.getByText("Enter keywords to find existing memories."),
   ).toBeTruthy();
   expect(screen.queryByRole("list")).toBeNull();
 });

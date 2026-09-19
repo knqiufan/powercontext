@@ -166,3 +166,16 @@ fn encoded_base_paths_reject_escape_aliases_and_support_unicode() {
         "http://localhost/%E4%B8%AD%E6%96%87/"
     );
 }
+
+#[tokio::test]
+async fn invalid_successful_write_response_keeps_dispatch_uncertainty() {
+    let (api, request) = fixture(200, r#"{"memory":{"family":"memory","artifact_id":"m","revision":9007199254740992},"entry":null}"#).await;
+    let error = api
+        .remember("scope-a", "synthetic note")
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code, SafeError::InvalidResponse);
+    assert!(error.dispatched);
+    request.await.unwrap();
+}
