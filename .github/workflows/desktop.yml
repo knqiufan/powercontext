@@ -74,8 +74,22 @@ jobs:
         run: uv run --no-sync python desktop/tests/real_cli.py
       - name: Build unsigned internal Windows installer
         run: pnpm desktop:build
+      - name: Prepare matching WebView2 driver
+        run: |
+          $runtimeRoot = "${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application"
+          $runtime = Get-ChildItem -LiteralPath $runtimeRoot -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+          if (-not $runtime) { throw 'WebView2 runtime not found.' }
+          $driverRoot = Join-Path $env:RUNNER_TEMP 'desktop-webdriver'
+          New-Item -ItemType Directory -Path $driverRoot -Force | Out-Null
+          $archive = Join-Path $driverRoot 'driver.zip'
+          Invoke-WebRequest "https://msedgedriver.microsoft.com/$($runtime.Name)/edgedriver_win64.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $driverRoot
+          $driver = Join-Path $driverRoot 'msedgedriver.exe'
+          $signature = Get-AuthenticodeSignature -LiteralPath $driver
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Microsoft Corporation*') { throw 'WebDriver publisher verification failed.' }
+          "DESKTOP_EDGE_DRIVER=$driver" >> $env:GITHUB_ENV
       - name: Smoke test installed package
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: ./scripts/windows-smoke.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
@@ -86,4 +100,7 @@ jobs:
             desktop/.artifacts/windows-smoke.json
             desktop/.artifacts/real-server.json
             desktop/.artifacts/real-cli.json
+            desktop/.artifacts/installed-ui.json
+            desktop/.artifacts/installed-ui.png
+            desktop/.artifacts/installed-ui-driver.log
           if-no-files-found: error

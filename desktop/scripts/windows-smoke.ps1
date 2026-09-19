@@ -55,8 +55,13 @@ try {
     $installed = Get-Item -LiteralPath (Join-Path $installDir 'powercontext-desktop.exe')
     $report.installedExecutableSha256 = (Get-FileHash -LiteralPath $installed.FullName).Hash
     $report.installedExecutableBytes = $installed.Length
+    uv run --no-sync python "$desktopRoot/tests/installed_ui.py" $installed.FullName
+    if ($LASTEXITCODE -ne 0) { throw 'Installed native UI check failed.' }
 } finally {
     try {
+        # Only the exact task-owned installed program may be cleaned up after a failed UI run.
+        $ownedExecutable = Join-Path $installDir 'powercontext-desktop.exe'
+        Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $ownedExecutable } | ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
         $uninstaller = Join-Path $installDir 'uninstall.exe'
         if (Test-Path -LiteralPath $uninstaller) {
             $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installDir" -PassThru -Wait -WindowStyle Hidden
