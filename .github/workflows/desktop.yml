@@ -28,6 +28,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify Server version baseline tag
+        run: |
+          git fetch --no-tags https://github.com/oceanbase/powercontext.git refs/tags/powercontext-v1.0.0:refs/tags/powercontext-v1.0.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((git rev-parse refs/tags/powercontext-v1.0.0) -ne 'ec97efba5f26fc972e9d8bf5027d8233acab3ca1') {
+            throw 'Unexpected Server version baseline tag'
+          }
       - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           working_directory: desktop
