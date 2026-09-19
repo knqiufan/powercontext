@@ -111,4 +111,5 @@ jobs:
             desktop/.artifacts/installed-ui.json
             desktop/.artifacts/installed-ui.png
             desktop/.artifacts/installed-ui-driver.log
+            desktop/.artifacts/installed-ui-app.log
           if-no-files-found: error
