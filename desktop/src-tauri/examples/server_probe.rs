@@ -60,13 +60,13 @@ async fn main() {
         std::fs::write(dir.join("server-key.pem"), key.serialize_pem()).unwrap();
         return;
     }
-    let fixture: Fixture = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
+    let mut fixture: Fixture = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
     let has_token = fixture.token.is_some();
     let endpoint = Endpoint::parse(&fixture.endpoint).unwrap();
     let api = ServerApi::new(
         endpoint.clone(),
         fixture.ca_pem.as_deref().map(str::as_bytes),
-        fixture.token,
+        fixture.token.take(),
     )
     .unwrap();
     api.live().await.unwrap();
@@ -193,6 +193,9 @@ async fn main() {
         exact_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         assert_eq!(exact.text, expected);
     }
+    if let Some(reader_token) = raw["reader_token"].as_str() {
+        verify_revocation(&fixture, &raw, reader_token, &entry.citation, &expected).await;
+    }
     if let Some(path) = fixture.identity_change_path {
         // Test-only out-of-band provider control, not a product endpoint or IPC command.
         std::fs::write(path, b"change").unwrap();
@@ -248,4 +251,69 @@ fn distribution(mut values: Vec<f64>) -> serde_json::Value {
     values.sort_by(f64::total_cmp);
     let percentile = |p: f64| values[(values.len() as f64 * p).ceil() as usize - 1];
     serde_json::json!({"samplesMs":values, "count":values.len(), "p50Ms":percentile(0.5), "p95Ms":percentile(0.95)})
+}
+
+async fn verify_revocation(
+    fixture: &Fixture,
+    raw: &serde_json::Value,
+    reader_token: &str,
+    citation: &powercontext_desktop::transport::wire::MemoryCitation,
+    expected: &str,
+) {
+    // Only the isolated test administrator mutates fixture policy; never exposed to Desktop IPC.
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let admin = raw["token"].as_str().unwrap();
+    let binding: serde_json::Value = client
+        .post(format!("{}/v1/access/bindings/create", fixture.endpoint))
+        .bearer_auth(admin)
+        .json(&serde_json::json!({
+            "subject":{"type":"user","id":"desktop-fixture-reader"},
+            "resource":{"type":"scope","scope_id":fixture.scope_id},
+            "role":"scope.viewer","idempotency_key":"desktop-reader-grant"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let reader = ServerApi::new(
+        Endpoint::parse(&fixture.endpoint).unwrap(),
+        None,
+        Some(Secret::new(reader_token.into()).unwrap()),
+    )
+    .unwrap();
+    let principal = reader.principal().await.unwrap();
+    assert_eq!(
+        reader
+            .entry(&fixture.scope_id, citation)
+            .await
+            .unwrap()
+            .text,
+        expected
+    );
+    client
+        .post(format!("{}/v1/access/bindings/revoke", fixture.endpoint))
+        .bearer_auth(admin)
+        .json(&serde_json::json!({
+            "binding_id":binding["binding_id"],"expected_version":binding["version"],
+            "idempotency_key":"desktop-reader-revoke"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    assert_eq!(reader.principal().await.unwrap(), principal);
+    assert_eq!(
+        reader
+            .entry(&fixture.scope_id, citation)
+            .await
+            .err()
+            .unwrap()
+            .code,
+        SafeError::Forbidden
+    );
 }

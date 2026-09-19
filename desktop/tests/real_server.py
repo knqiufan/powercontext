@@ -51,6 +51,36 @@ def probe_measurement(output: str) -> dict[str, object]:
     return measurement["performance"]
 
 
+def fixture_provider(config, admin):
+    from powercontext.server.authentication import (
+        AuthenticationRejectedError,
+        AuthenticationResult,
+        ProviderReadiness,
+    )
+    from powercontext.server.authz import PrincipalRef
+
+    class FixtureProvider:
+        async def authenticate(self, request):
+            if request.headers.get("authorization") == f"Bearer {config['reader_token']}":
+                return AuthenticationResult(
+                    subject=PrincipalRef(type="user", id="desktop-fixture-reader"),
+                    credential_id="desktop-test-reader",
+                )
+            if request.headers.get("authorization") != f"Bearer {config['token']}":
+                raise AuthenticationRejectedError
+            subject = (
+                PrincipalRef(type="user", id="desktop-fixture-changed")
+                if await asyncio.to_thread(Path(config["identity_change_path"]).exists)
+                else admin
+            )
+            return AuthenticationResult(subject=subject, credential_id="desktop-test-provider")
+
+        async def readiness(self):
+            return ProviderReadiness(ready=True)
+
+    return FixtureProvider()
+
+
 def serve(config_path: Path) -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     sys.path.insert(0, config["wheel_root"])
@@ -111,30 +141,11 @@ def serve(config_path: Path) -> None:
         if not config.get("provider"):
             await server.serve()
             return
-        from powercontext.server.authentication import (
-            AuthenticationRejectedError,
-            AuthenticationResult,
-            ProviderReadiness,
-        )
         from powercontext.server.authz import PrincipalRef
         from powercontext.server.authz.composition import open_builtin_access_control
         from powercontext.server.settings import AccessControlConfig
 
         admin = PrincipalRef(type="service", id="desktop-fixture-admin")
-
-        class FixtureProvider:
-            async def authenticate(self, request):
-                if request.headers.get("authorization") != f"Bearer {config['token']}":
-                    raise AuthenticationRejectedError
-                subject = (
-                    PrincipalRef(type="user", id="desktop-fixture-changed")
-                    if await asyncio.to_thread(Path(config["identity_change_path"]).exists)
-                    else admin
-                )
-                return AuthenticationResult(subject=subject, credential_id="desktop-test-provider")
-
-            async def readiness(self):
-                return ProviderReadiness(ready=True)
 
         async with open_builtin_access_control(
             settings.database, bootstrap_administrators=(admin,), deployment_id="desktop-fixture"
@@ -143,7 +154,7 @@ def serve(config_path: Path) -> None:
                 settings=settings.model_copy(
                     update={"access": AccessControlConfig(mode="enforced", deployment_id="desktop-fixture")}
                 ),
-                authentication_provider=FixtureProvider(),
+                authentication_provider=fixture_provider(config, admin),
                 access_control=access,
             )
             await server.serve()
@@ -190,6 +201,7 @@ def main() -> None:
             prefix = "/proxy" if tls else ""
             endpoint = f"{'https' if tls else 'http'}://127.0.0.1:{port}{prefix}"
             config = {
+                "reader_token": secrets.token_urlsafe(32),
                 "provider": mode == "loopback-provider",
                 "identity_change_path": str(case / "identity-changed"),
                 "wheel_root": str(wheel_root),
@@ -254,6 +266,7 @@ def main() -> None:
                         result.raise_for_status()
                         scope_id = result.json()["scope_id"]
                         fixture = {
+                            "reader_token": config["reader_token"] if config["provider"] else None,
                             "identity_change_path": config["identity_change_path"] if config["provider"] else None,
                             "endpoint": endpoint,
                             "scope_id": scope_id,
@@ -277,6 +290,7 @@ def main() -> None:
                             "result": "passed",
                             "serverAliveAfterClientExit": True,
                             "providerIdentityChangeInvalidatesContext": bool(config["provider"]),
+                            "sameIdentityRevocationDeniesHistoricalCitation": bool(config["provider"]),
                             "performance": probe_measurement(probe.stdout),
                         })
                 finally:
