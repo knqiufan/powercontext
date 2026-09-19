@@ -99,3 +99,9 @@ The native adapter checks the absolute executable path, pinned digest and fixed 
 Version verification has a 15-second deadline, service status 20 seconds, and integration diagnostics 60 seconds. Each invocation limits combined stdout/stderr to 256 KiB. Helpers run hidden in an owned Windows Job; completion, timeout and cancellation clean up their descendants. Only allowlisted status fields reach the UI. Valid unhealthy JSON remains useful even with exit code 1. Isolated real-CLI checks pass; installed-application qualification remains open in [S2 evidence](evidence/S2.md).
 
 [Complete qualification matrix](evidence/S4.md) distinguishes passing checks from outstanding platform and product gates.
+
+## Remote installed-package acceptance
+
+Windows GitHub Actions builds an unsigned installer, installs into a temporary Chinese path, and uses a matching Microsoft-signed WebDriver to operate the actual installed WebView2 page. An independent SQLite Server with synthetic data supports explicit connection activation, exact Scope selection, multiline Chinese note save, FTS search, exact reading, and paste-back verification of copied text and citation. The fixture Server and its temporary workspace are cleaned up afterward.
+
+Reports, a screenshot and driver logs accompany the installer in the `desktop-windows-internal-unsigned` artifact. Failed or pending steps are not acceptance passes. The UI script permits only GitHub Windows runners and does not operate your local desktop. Hosted runners do not establish clean standard-user Windows 11, actual IME, screen-reader or Agent-host qualification.

@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 import httpx
+from installed_workflow import exercise_memory
 
 
 def stop_driver(process: subprocess.Popen[bytes]) -> None:
@@ -110,6 +111,7 @@ def main() -> None:
                 if not page["url"].startswith("http://tauri.localhost"):
                     raise RuntimeError("Installed UI did not use packaged resources")  # noqa: TRY003
                 report["packagedUrl"] = page["url"]
+                report["workflow"] = exercise_memory(client, prefix)
                 screenshot = client.get(prefix + "/screenshot")
                 screenshot.raise_for_status()
                 (artifacts / "installed-ui.png").write_bytes(base64.b64decode(screenshot.json()["value"]))
