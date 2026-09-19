@@ -33,7 +33,8 @@ $details = @($allProcesses | Where-Object { $owned.Contains([int]$_.ProcessId) }
         windowHandle = $process.MainWindowHandle.ToInt64()
     }
 })
-[ordered]@{ runnerSessionId = (Get-Process -Id $PID).SessionId; processes = $details } |
+$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+[ordered]@{ runnerSessionId = (Get-Process -Id $PID).SessionId; runnerElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); processes = $details } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ArtifactDirectory 'installed-ui-processes.json') -Encoding utf8
 $app = Get-Process -Id $ApplicationPid -ErrorAction SilentlyContinue
 if (-not $app -or $app.MainWindowHandle -eq [IntPtr]::Zero) { exit 0 }

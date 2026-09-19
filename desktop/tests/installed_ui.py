@@ -130,18 +130,42 @@ def capture_process(process: subprocess.Popen[bytes], artifacts: Path) -> bool:
         return result.returncode == 0
 
 
+@contextmanager
+def debug_policy(arguments: str) -> Iterator[None]:
+    if os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true":
+        raise HarnessFailure("disposable_windows_github_runner_required")
+    import winreg
+
+    path = r"SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+    name = "powercontext-desktop.exe"
+    with winreg.CreateKeyEx(
+        winreg.HKEY_LOCAL_MACHINE, path, access=winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE
+    ) as key:
+        try:
+            previous = winreg.QueryValueEx(key, name)
+        except FileNotFoundError:
+            previous = None
+        # Elevated WebView2 hosts ignore user environment overrides. Limit this temporary
+        # machine override to the exact CI app; never alter the wildcard/default policy.
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, arguments)
+        try:
+            yield
+        finally:
+            if previous is None:
+                winreg.DeleteValue(key, name)
+            else:
+                winreg.SetValueEx(key, name, 0, previous[1], previous[0])
+
+
 def run_ui(executable: Path, driver: Path, artifacts: Path, report: dict[str, object]) -> None:
     debug_address = f"127.0.0.1:{free_port()}"
     driver_port = free_port()
     environment = dict(os.environ, TAURI_WEBVIEW_AUTOMATION="true")
-    app_environment = dict(
-        environment,
-        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=(
-            f"--remote-debugging-port={debug_address.rsplit(':', 1)[1]} --remote-debugging-address=127.0.0.1"
-        ),
-    )
+    debug_arguments = f"--remote-debugging-port={debug_address.rsplit(':', 1)[1]} --remote-debugging-address=127.0.0.1"
+    environment.pop("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", None)
     with (
-        owned_process([str(executable)], app_environment, artifacts / "installed-ui-app.log") as app,
+        debug_policy(debug_arguments),
+        owned_process([str(executable)], environment, artifacts / "installed-ui-app.log") as app,
         httpx.Client(base_url=f"http://{debug_address}", trust_env=False) as debug,
     ):
         report["stage"] = "application_start"
@@ -200,6 +224,7 @@ def main() -> None:
     report: dict[str, object] = {
         "commit": os.environ.get("GITHUB_SHA"),
         "sourceInstallerCommit": os.environ.get("DESKTOP_INSTALLER_COMMIT", os.environ.get("GITHUB_SHA")),
+        "debugConfiguration": "Temporary machine WebView2 policy for powercontext-desktop.exe on disposable runner; restored on exit",
         "installedExecutableSha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "driverSha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "scope": "Hosted Windows runner, actual installed WebView2 with automation enabled; not clean Windows 11 qualification",
