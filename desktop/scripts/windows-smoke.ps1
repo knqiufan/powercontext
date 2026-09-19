@@ -31,6 +31,7 @@ $report = [ordered]@{
     scope = 'Hosted runner; not standard-user, absent-WebView2 or visual UI qualification'
     runnerImage = $env:ImageVersion
     commit = $env:GITHUB_SHA
+    sourceInstallerCommit = $(if ($env:DESKTOP_INSTALLER_COMMIT) { $env:DESKTOP_INSTALLER_COMMIT } else { $env:GITHUB_SHA })
     measuredAtUtc = [DateTime]::UtcNow.ToString('o')
     os = "$($os.Caption) $($os.Version) $($os.OSArchitecture)"
     buildProfile = 'release'

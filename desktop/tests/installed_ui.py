@@ -104,6 +104,32 @@ def screenshot(client: httpx.Client, prefix: str, artifacts: Path) -> bool:
         return True
 
 
+def capture_process(process: subprocess.Popen[bytes], artifacts: Path) -> bool:
+    script = Path(__file__).resolve().parents[1] / "scripts/capture-installed-process.ps1"
+    shell = Path(os.environ["PROGRAMFILES"]) / "PowerShell/7/pwsh.exe"
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed diagnostic script, own CI app PID
+            [
+                str(shell),
+                "-NoProfile",
+                "-File",
+                str(script),
+                "-ApplicationPid",
+                str(process.pid),
+                "-ArtifactDirectory",
+                str(artifacts),
+            ],
+            capture_output=True,
+            timeout=20,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    else:
+        return result.returncode == 0
+
+
 def run_ui(executable: Path, driver: Path, artifacts: Path, report: dict[str, object]) -> None:
     debug_address = f"127.0.0.1:{free_port()}"
     driver_port = free_port()
@@ -119,7 +145,11 @@ def run_ui(executable: Path, driver: Path, artifacts: Path, report: dict[str, ob
         httpx.Client(base_url=f"http://{debug_address}", trust_env=False) as debug,
     ):
         report["stage"] = "application_start"
-        wait_endpoint(debug, "/json/version", app, "installed_webview")
+        try:
+            wait_endpoint(debug, "/json/version", app, "installed_webview")
+        except Exception:
+            report["processSnapshotCaptured"] = capture_process(app, artifacts)
+            raise
         report["webviewDebugEndpointReady"] = True
         with (
             owned_process(
@@ -169,6 +199,7 @@ def main() -> None:
     artifacts = Path(__file__).resolve().parents[1] / ".artifacts"
     report: dict[str, object] = {
         "commit": os.environ.get("GITHUB_SHA"),
+        "sourceInstallerCommit": os.environ.get("DESKTOP_INSTALLER_COMMIT", os.environ.get("GITHUB_SHA")),
         "installedExecutableSha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "driverSha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
         "scope": "Hosted Windows runner, actual installed WebView2 with automation enabled; not clean Windows 11 qualification",

@@ -7,16 +7,23 @@ on:
     branches: [master, codex/desktop-preview]
     paths: ['desktop/**', 'src/powercontext/**', 'pyproject.toml', 'uv.lock', 'openapi/powercontext.yaml', 'tests/fixtures/transport_loopback_vectors.json', 'website/assets/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
+    inputs:
+      installer_run:
+        description: 'Optional run ID from this repository to diagnose its exact existing installer'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  group: desktop-${{ github.event.pull_request.number || github.ref }}-${{ inputs.installer_run || 'build' }}
   cancel-in-progress: true
 
 jobs:
   windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.installer_run == '' }}
     runs-on: windows-2025
     timeout-minutes: 40
     defaults:
@@ -85,19 +92,7 @@ jobs:
       - name: Build unsigned internal Windows installer
         run: pnpm desktop:build
       - name: Prepare matching WebView2 driver
-        run: |
-          $runtimeRoot = "${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application"
-          $runtime = Get-ChildItem -LiteralPath $runtimeRoot -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-          if (-not $runtime) { throw 'WebView2 runtime not found.' }
-          $driverRoot = Join-Path $env:RUNNER_TEMP 'desktop-webdriver'
-          New-Item -ItemType Directory -Path $driverRoot -Force | Out-Null
-          $archive = Join-Path $driverRoot 'driver.zip'
-          Invoke-WebRequest "https://msedgedriver.microsoft.com/$($runtime.Name)/edgedriver_win64.zip" -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $driverRoot
-          $driver = Join-Path $driverRoot 'msedgedriver.exe'
-          $signature = Get-AuthenticodeSignature -LiteralPath $driver
-          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Microsoft Corporation*') { throw 'WebDriver publisher verification failed.' }
-          "DESKTOP_EDGE_DRIVER=$driver" >> $env:GITHUB_ENV
+        run: ./scripts/prepare-webdriver.ps1
       - name: Smoke test installed package
         timeout-minutes: 8
         run: ./scripts/windows-smoke.ps1
@@ -114,4 +109,68 @@ jobs:
             desktop/.artifacts/installed-ui.png
             desktop/.artifacts/installed-ui-driver.log
             desktop/.artifacts/installed-ui-app.log
+            desktop/.artifacts/installed-ui-processes.json
+            desktop/.artifacts/installed-ui-window.png
           if-no-files-found: error
+
+  installed-package:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.installer_run != '' }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify Server version baseline tag
+        run: |
+          git fetch --no-tags https://github.com/oceanbase/powercontext.git refs/tags/powercontext-v1.0.0:refs/tags/powercontext-v1.0.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((git rev-parse refs/tags/powercontext-v1.0.0) -ne 'ec97efba5f26fc972e9d8bf5027d8233acab3ca1') { throw 'Unexpected Server version baseline tag' }
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          version: "0.10.12"
+      - name: Prepare isolated Server fixture
+        run: |
+          uv sync --locked --python 3.12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv build --wheel --out-dir desktop/.artifacts/server-wheel
+      - name: Retrieve and verify exact installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_RUN: ${{ inputs.installer_run }}
+        run: |
+          if ($env:INSTALLER_RUN -notmatch '^\d+$') { throw 'Expected numeric workflow run ID.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:INSTALLER_RUN" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($run.path -ne '.github/workflows/desktop.yml' -or $run.head_branch -ne 'codex/desktop-preview') { throw 'Expected Desktop preview workflow artifact.' }
+          gh run download $env:INSTALLER_RUN --repo $env:GITHUB_REPOSITORY --name desktop-windows-internal-unsigned --dir desktop/.artifacts/source-installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @(Get-ChildItem desktop/.artifacts/source-installer -Recurse -Filter '*-setup.exe')
+          $reports = @(Get-ChildItem desktop/.artifacts/source-installer -Recurse -Filter windows-smoke.json)
+          if ($packages.Count -ne 1 -or $reports.Count -ne 1) { throw 'Expected exactly one package and package report.' }
+          $report = Get-Content -LiteralPath $reports[0].FullName -Raw | ConvertFrom-Json
+          if ($report.commit -ne $run.head_sha -or (Get-FileHash -LiteralPath $packages[0].FullName).Hash -ne $report.installerSha256 -or $packages[0].Length -ne $report.installerBytes) { throw 'Installer identity mismatch.' }
+          $bundle = 'desktop/src-tauri/target/release/bundle/nsis'
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          Copy-Item -LiteralPath $packages[0].FullName -Destination $bundle
+          "DESKTOP_INSTALLER_COMMIT=$($run.head_sha)" >> $env:GITHUB_ENV
+      - name: Prepare matching WebView2 driver
+        run: ./desktop/scripts/prepare-webdriver.ps1
+      - name: Exercise existing installed package
+        timeout-minutes: 8
+        run: ./desktop/scripts/windows-smoke.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: desktop-installed-diagnostics
+          path: |
+            desktop/.artifacts/windows-smoke.json
+            desktop/.artifacts/installed-ui*
+          if-no-files-found: warn

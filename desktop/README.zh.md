@@ -87,3 +87,5 @@ Desktop 在每次诊断前检查固定路径、摘要，并用固定的 `--versi
 Windows GitHub Actions 会构建未签名安装包，安装到临时中文路径，并通过匹配且验证 Microsoft 签名的 WebDriver 操作实际安装的 WebView2 页面。测试使用独立 SQLite Server，覆盖启用连接、精确范围选择、中文多行笔记保存、全文查找、精确阅读，以及正文和引用复制后的粘贴核对。Server 使用合成数据，测试结束后清理。
 
 运行结果、界面截图和驱动日志与安装包一起保存在 `desktop-windows-internal-unsigned` 工件中；失败或尚未执行的步骤不计为验收通过。该脚本仅允许在 GitHub Windows runner 执行，不需要操作你的电脑。托管 runner 不等同于干净的 Windows 11 普通用户环境，也不能代替真实输入法、读屏软件和 Agent 宿主验收。
+
+调试安装后测试时，可以手动运行 `Desktop validation`，将 `installer_run` 填为已有 Desktop CI 的运行 ID。流水线会核对原安装包的提交、摘要和大小，再复用该包测试；报告分别记录测试脚本和安装包的提交。这种诊断不代替最终完整构建验收。
