@@ -80,7 +80,15 @@ export function Scopes({
         setCursor(result.next_cursor ?? null);
       }
     } catch (e) {
-      if (ticket === sequence.current) setError(e);
+      if (ticket === sequence.current) {
+        setError(e);
+        try {
+          const next = await desktopApi.state();
+          if (ticket === sequence.current) onState(next);
+        } catch {
+          /* Keep the operation error if state refresh is unavailable. */
+        }
+      }
     } finally {
       if (ticket === sequence.current) setBusy(false);
     }

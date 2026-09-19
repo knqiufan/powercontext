@@ -21,7 +21,12 @@ import { Scopes } from "../src/app/Scopes";
 import { desktopApi } from "../src/shared/ipc";
 import type { DesktopState, ScopePage } from "../src/generated/ipc";
 vi.mock("../src/shared/ipc", () => ({
-  desktopApi: { scopes: vi.fn(), cancelScopes: vi.fn() },
+  desktopApi: {
+    scopes: vi.fn(),
+    cancelScopes: vi.fn(),
+    state: vi.fn(),
+    selectScope: vi.fn(),
+  },
 }));
 afterEach(() => {
   cleanup();
@@ -99,4 +104,72 @@ test("editing a query cancels the native read and hides a late response", async 
   await user.click(screen.getByRole("button", { name: "Find scopes" }));
   expect(desktopApi.scopes).toHaveBeenLastCalledWith(1, "new", null);
   expect(screen.getByText("No accessible scopes on this page.")).toBeTruthy();
+});
+
+test("failed scope identity verification propagates the disconnected native state", async () => {
+  const user = userEvent.setup();
+  const onState = vi.fn();
+  const disconnected = { ...state, generation: 2, active: null };
+  vi.mocked(desktopApi.scopes).mockRejectedValueOnce({ code: "unauthorized" });
+  vi.mocked(desktopApi.state).mockResolvedValue(disconnected);
+  render(
+    <Scopes
+      state={state}
+      language="en"
+      onState={onState}
+      confirmSwitch={() => true}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Find scopes" }));
+  expect(screen.getByRole("alert").textContent).toContain("valid credential");
+  expect(onState).toHaveBeenCalledWith(disconnected);
+});
+
+test("expired scope cursor discards the old page and restarts explicitly", async () => {
+  const user = userEvent.setup();
+  vi.mocked(desktopApi.cancelScopes).mockResolvedValue();
+  vi.mocked(desktopApi.state).mockResolvedValue(state);
+  vi.mocked(desktopApi.scopes)
+    .mockResolvedValueOnce({ items: [], next_cursor: "opaque-page" })
+    .mockRejectedValueOnce({ code: "cursor_expired" })
+    .mockResolvedValueOnce({ items: [], next_cursor: null });
+  render(
+    <Scopes
+      state={state}
+      language="en"
+      onState={vi.fn()}
+      confirmSwitch={() => true}
+    />,
+  );
+  await user.type(screen.getByLabelText("Find scopes by title"), "team");
+  await user.click(screen.getByRole("button", { name: "Find scopes" }));
+  await user.click(screen.getByRole("button", { name: "Next page" }));
+  expect(desktopApi.scopes).toHaveBeenLastCalledWith(1, "team", "opaque-page");
+  expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+  expect(screen.getByRole("alert").textContent).toContain("first page");
+  await user.click(screen.getByRole("button", { name: "Find scopes" }));
+  expect(desktopApi.scopes).toHaveBeenLastCalledWith(1, "team", null);
+});
+
+test("directory denial does not prevent explicitly authorized exact scope selection", async () => {
+  const user = userEvent.setup();
+  const onState = vi.fn();
+  vi.mocked(desktopApi.scopes).mockRejectedValueOnce({ code: "forbidden" });
+  vi.mocked(desktopApi.state).mockResolvedValue(state);
+  vi.mocked(desktopApi.selectScope).mockResolvedValue(state);
+  render(
+    <Scopes
+      state={state}
+      language="en"
+      onState={onState}
+      confirmSwitch={() => true}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Find scopes" }));
+  expect(screen.getByRole("alert").textContent).toContain("cannot perform");
+  await user.click(screen.getByText("Exact Scope ID", { selector: "summary" }));
+  await user.type(screen.getByLabelText("Exact Scope ID"), "explicit-scope-b");
+  await user.click(screen.getByRole("button", { name: "Select scope" }));
+  expect(desktopApi.selectScope).toHaveBeenCalledWith(1, "explicit-scope-b");
+  expect(desktopApi.scopes).toHaveBeenCalledTimes(1);
 });
