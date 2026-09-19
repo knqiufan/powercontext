@@ -4,6 +4,14 @@
 
 已实现连接配置、显式激活、身份与就绪检查、精确范围选择和本地诊断。已实现共享笔记表单、FTS 搜索和精确版本阅读；原生交互闭环仍待完整验收。当前不是已签名的正式发行版。
 
+## 直接运行安装版
+
+在本分支的 GitHub Actions「Desktop validation」成功运行中，下载 `desktop-windows-internal-unsigned` 产物并解压，找到 `src-tauri/target/release/bundle/nsis/` 中的安装程序。对应 `.artifacts/windows-smoke.json` 记录提交、安装包 SHA-256 和签名状态，可用 `Get-FileHash -Algorithm SHA256 <安装包路径>` 核对下载文件。当前产物未签名，供内部验证。
+
+运行安装程序后，从开始菜单打开「PowerContext Desktop Preview」。不需要先启动 Vite、Python 或本地 Server；首次打开没有活动连接，按下一节连接已有 Server 后才能保存和搜索。没有可用 Server 时仍可查看界面与设置。开发模式请使用下方命令。
+
+在 Windows「已安装的应用」中卸载 Desktop。卸载不负责删除 Server、业务数据库或 Agent 配置；不要把清理 Server 数据作为卸载桌面的步骤。
+
 ## 开发与构建
 
 Windows 11 x64 上需要 Node 24.14.1、pnpm 11.13.1、Rust 1.95.0 MSVC、Visual Studio C++ Build Tools、Windows SDK 和 WebView2。安装后的用户程序不依赖 Node、Rust、Python 或本地 Server。

@@ -27,6 +27,7 @@ use powercontext_desktop::{
 use serde::Deserialize;
 #[derive(Deserialize)]
 struct Fixture {
+    response_loss_path: Option<String>,
     identity_change_path: Option<String>,
     endpoint: String,
     scope_id: String,
@@ -192,6 +193,22 @@ async fn main() {
             .unwrap();
         exact_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         assert_eq!(exact.text, expected);
+    }
+    if let Some(path) = &fixture.response_loss_path {
+        std::fs::write(path, b"0").unwrap();
+        let keyword = format!("lostresponse{}", uuid::Uuid::new_v4().simple());
+        let text = format!("{keyword} committed synthetic note");
+        let outcome = manager.remember(generation, &text).await.unwrap();
+        assert_eq!(outcome.record.status, WriteStatus::Unknown);
+        assert!(outcome.result.is_none());
+        let results = manager.search_memory(generation, &keyword).await.unwrap();
+        assert_eq!(results.hits.len(), 1);
+        let committed = manager
+            .memory_entry(generation, &results.hits[0].citation)
+            .await
+            .unwrap();
+        assert_eq!(committed.text, text);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "1");
     }
     if let Some(reader_token) = raw["reader_token"].as_str() {
         verify_revocation(&fixture, &raw, reader_token, &entry.citation, &expected).await;

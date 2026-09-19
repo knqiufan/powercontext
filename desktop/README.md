@@ -4,6 +4,14 @@ Internal Windows preview for [#1654](https://github.com/oceanbase/powercontext/i
 
 See [中文说明](README.zh.md), [security boundary](SECURITY.md), and [qualification evidence](evidence/S1.md). This is not a supported or signed release, and does not close #1654 or #1428.
 
+## Run the installed preview
+
+Download and extract `desktop-windows-internal-unsigned` from a successful **Desktop validation** Actions run on this branch. The installer is under `src-tauri/target/release/bundle/nsis/`. Its accompanying `.artifacts/windows-smoke.json` records the commit, SHA-256 and signature status; compare the downloaded installer with `Get-FileHash -Algorithm SHA256 <installer-path>`. The current package is unsigned and intended for internal validation.
+
+Install it, then open **PowerContext Desktop Preview** from the Windows Start menu. Vite, Python and a local Server are not prerequisites for launching the installed UI. No connection is active at startup; explicitly connect to an existing Server and select a Scope before saving or searching. Without a Server, the shell and settings remain available. Use the commands below for development mode.
+
+Uninstall Desktop through Windows **Installed apps**. Uninstallation does not manage the independent Server, business database or Agent configuration; removing Server data is not part of removing Desktop.
+
 ## Build on Windows
 
 Use Windows 11 x64, Visual Studio C++ Build Tools with a Windows SDK, Node **24.14.1**, pnpm **11.13.1**, Rust **1.95.0 MSVC**, and WebView2. `desktop/.mise.toml`, `rust-toolchain.toml`, `pnpm-lock.yaml` and `src-tauri/Cargo.lock` pin the tools and dependencies independently of Python and the website.

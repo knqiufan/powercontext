@@ -81,6 +81,35 @@ def fixture_provider(config, admin):
     return FixtureProvider()
 
 
+async def forward_with_response_loss(app, scope, receive, send, control_path):
+    """Commit the real request, then deliberately truncate its response on the wire."""
+    control = Path(control_path) if control_path else None
+    if (
+        scope["type"] != "http"
+        or scope["path"] != "/v1/memory/remember"
+        or control is None
+        or not await asyncio.to_thread(control.exists)
+    ):
+        await app(scope, receive, send)
+        return
+    count = int(await asyncio.to_thread(control.read_text, encoding="utf-8"))
+    await asyncio.to_thread(control.write_text, str(count + 1), encoding="utf-8")
+    messages = []
+
+    async def capture(message):
+        messages.append(message)
+
+    await app(scope, receive, capture)
+    start = messages[0]
+    if start["status"] != 200:
+        for message in messages:
+            await send(message)
+        return
+    await send(start)
+    await send({"type": "http.response.body", "body": b"{", "more_body": True})
+    raise ConnectionResetError
+
+
 def serve(config_path: Path) -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     sys.path.insert(0, config["wheel_root"])
@@ -116,7 +145,7 @@ def serve(config_path: Path) -> None:
             scope["path"] = scope["path"][len(prefix) :]
             scope["raw_path"] = scope["path"].encode()
             scope["root_path"] = prefix
-        await app(scope, receive, send)
+        await forward_with_response_loss(app, scope, receive, send, config.get("response_loss_path"))
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -201,6 +230,7 @@ def main() -> None:
             prefix = "/proxy" if tls else ""
             endpoint = f"{'https' if tls else 'http'}://127.0.0.1:{port}{prefix}"
             config = {
+                "response_loss_path": str(case / "response-loss-count"),
                 "reader_token": secrets.token_urlsafe(32),
                 "provider": mode == "loopback-provider",
                 "identity_change_path": str(case / "identity-changed"),
@@ -266,6 +296,7 @@ def main() -> None:
                         result.raise_for_status()
                         scope_id = result.json()["scope_id"]
                         fixture = {
+                            "response_loss_path": config["response_loss_path"],
                             "reader_token": config["reader_token"] if config["provider"] else None,
                             "identity_change_path": config["identity_change_path"] if config["provider"] else None,
                             "endpoint": endpoint,
@@ -289,6 +320,7 @@ def main() -> None:
                             "mode": mode,
                             "result": "passed",
                             "serverAliveAfterClientExit": True,
+                            "committedWriteWithLostResponseUnknownWithoutReplay": True,
                             "providerIdentityChangeInvalidatesContext": bool(config["provider"]),
                             "sameIdentityRevocationDeniesHistoricalCitation": bool(config["provider"]),
                             "performance": probe_measurement(probe.stdout),
