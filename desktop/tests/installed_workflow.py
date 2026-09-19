@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import httpx
+from installed_boundaries import exercise_note_budget, exercise_search_limit
 from installed_fixture import isolated_server
 from real_server import HarnessFailure
 
@@ -141,6 +142,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
     with isolated_server() as (server, scope_id, wheel_digest):
         page.connect("Desktop CI synthetic", str(server.base_url).rstrip("/"))
         page.select_scope(scope_id)
+        exercise_note_budget(page, server, scope_id)
         page.type("记忆内容", NOTE, "textarea")
         before_submit = server.post(
             "/v1/memory/search", json={"scope_id": scope_id, "query": "desktopinstalledci", "mode": "fts", "limit": 10}
@@ -164,6 +166,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         if json.loads(page.paste()) != citation:
             raise HarnessFailure("installed_citation_clipboard_mismatch")
         page.clear_note()
+        exercise_search_limit(page, server, scope_id)
         exercise_connection_isolation(page, server, scope_id, citation)
         exercise_unknown_write(page)
         return {
@@ -175,8 +178,11 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
             "bodyAndCitationClipboardPaste": True,
             "twoServerConnectionIsolation": True,
             "disconnectReconnectClearsContent": True,
+            "unsavedDraftCancelAndDiscard": True,
             "inactiveProfileRemovalPreservesServerData": True,
             "enterDoesNotSubmit": True,
+            "rawUtf8BudgetBoundary": True,
+            "emptyAndCappedSearchPresentation": True,
             "committedLostResponseUnknownWithoutReplay": True,
         }
 
@@ -197,7 +203,20 @@ def exercise_connection_isolation(
         page.select_scope(scope_b)
         if page.search_read(text_b) != citation_b:
             raise HarnessFailure("installed_second_server_citation_mismatch")
+        draft = "desktopunsavedci 不应写入的草稿"
+        page.type("记忆内容", draft, "textarea")
         page.button("断开桌面连接")
+        alert = page.client.get(page.prefix + "/alert/text")
+        alert.raise_for_status()
+        if alert.json()["value"] != "丢弃尚未保存的输入？":  # noqa: RUF001 - exact localized UI
+            raise HarnessFailure("installed_disconnect_discard_confirmation_missing")
+        page.post("/alert/dismiss", {})
+        if page.observe("return document.querySelector('.memory-workspace textarea')?.value;") != draft:
+            raise HarnessFailure("installed_cancel_disconnect_lost_draft")
+        if page.observe("return document.querySelector('.reader > .plain-text')?.textContent;") != text_b:
+            raise HarnessFailure("installed_cancel_disconnect_changed_reader")
+        page.button("断开桌面连接")
+        page.post("/alert/accept", {})
         page.wait_text("尚未连接")
         page.expect_empty_context()
         page.button("连接")

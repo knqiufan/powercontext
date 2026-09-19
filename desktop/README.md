@@ -111,3 +111,5 @@ To diagnose installed UI tests, manually dispatch `Desktop validation` with `ins
 Installed UI acceptance also checks content isolation between two independent connections, disconnect/reconnect, Server data preservation after removing an inactive profile, and the unknown outcome without replay after a real committed write loses its response. Credit each scenario only when its matching run report passes.
 
 The CI-only lifecycle scenario forcibly ends its own installed Desktop process after saving a synthetic note, then checks that the independent Server still serves the original exact entry and accepts a new readable write. Consult the matching lifecycle report for its result; it does not simulate normal window closure or uninstall preservation.
+
+Installed boundary checks exercise an 8192-byte Unicode note, reject over-budget input, display zero and capped-ten search results, and verify cancel/confirm behavior when disconnecting with an unsaved draft. Each result requires its matching remote report.
