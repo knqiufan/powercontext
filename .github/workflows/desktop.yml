@@ -72,6 +72,8 @@ jobs:
           uv run --no-sync ruff format --check desktop/tests/installed_ui.py desktop/tests/installed_fixture.py desktop/tests/installed_workflow.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run --no-sync ty check desktop/tests/installed_ui.py desktop/tests/installed_fixture.py desktop/tests/installed_workflow.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --no-sync ty check --python-platform linux desktop/tests/installed_ui.py desktop/tests/installed_fixture.py desktop/tests/installed_workflow.py
       - name: Build native API acceptance client
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --example server_probe --example diagnostic_cli_probe
       - name: Test native adapter with real SQLite Server

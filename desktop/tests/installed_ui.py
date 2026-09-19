@@ -47,7 +47,7 @@ def owned_process(command: list[str], environment: dict[str, str], log_path: Pat
             stdout=log,
             stderr=log,
             env=environment,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         try:
             yield process
