@@ -29,6 +29,15 @@ from pathlib import Path
 import httpx
 
 
+def stop_driver(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
 def main() -> None:
     if os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("Disposable Windows GitHub Actions runner required")  # noqa: TRY003
@@ -111,12 +120,7 @@ def main() -> None:
                         client.delete(f"/session/{session}").raise_for_status()
                 finally:
                     try:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=15)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait(timeout=10)
+                        stop_driver(process)
                     finally:
                         # Publish safe facts, never session paths or raw renderer output.
                         capabilities = report.pop("capabilities", {})
