@@ -21,6 +21,7 @@ No product command starts a Server. This explicit test harness owns its disposab
 # ruff: noqa: S603, S607
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -104,7 +105,50 @@ def serve(config_path: Path) -> None:
         server.should_exit = True
 
     threading.Thread(target=shutdown_on_input, daemon=True).start()
-    server.run()
+
+    async def run():
+        nonlocal app
+        if not config.get("provider"):
+            await server.serve()
+            return
+        from powercontext.server.authentication import (
+            AuthenticationRejectedError,
+            AuthenticationResult,
+            ProviderReadiness,
+        )
+        from powercontext.server.authz import PrincipalRef
+        from powercontext.server.authz.composition import open_builtin_access_control
+        from powercontext.server.settings import AccessControlConfig
+
+        admin = PrincipalRef(type="service", id="desktop-fixture-admin")
+
+        class FixtureProvider:
+            async def authenticate(self, request):
+                if request.headers.get("authorization") != f"Bearer {config['token']}":
+                    raise AuthenticationRejectedError
+                subject = (
+                    PrincipalRef(type="user", id="desktop-fixture-changed")
+                    if await asyncio.to_thread(Path(config["identity_change_path"]).exists)
+                    else admin
+                )
+                return AuthenticationResult(subject=subject, credential_id="desktop-test-provider")
+
+            async def readiness(self):
+                return ProviderReadiness(ready=True)
+
+        async with open_builtin_access_control(
+            settings.database, bootstrap_administrators=(admin,), deployment_id="desktop-fixture"
+        ) as access:
+            app = create_server_app(
+                settings=settings.model_copy(
+                    update={"access": AccessControlConfig(mode="enforced", deployment_id="desktop-fixture")}
+                ),
+                authentication_provider=FixtureProvider(),
+                access_control=access,
+            )
+            await server.serve()
+
+    asyncio.run(run())
 
 
 def control_pipe(process: subprocess.Popen[bytes]) -> IO[bytes]:
@@ -135,7 +179,7 @@ def main() -> None:
         with zipfile.ZipFile(wheel) as archive:
             archive.extractall(wheel_root)
         subprocess.run([str(executable), "certificates", str(temp)], check=True, capture_output=True)
-        for mode in ("loopback-anonymous", "loopback-bearer", "https-bearer-base-path"):
+        for mode in ("loopback-anonymous", "loopback-bearer", "https-bearer-base-path", "loopback-provider"):
             case = temp / mode
             case.mkdir()
             with socket.socket() as reservation:
@@ -146,6 +190,8 @@ def main() -> None:
             prefix = "/proxy" if tls else ""
             endpoint = f"{'https' if tls else 'http'}://127.0.0.1:{port}{prefix}"
             config = {
+                "provider": mode == "loopback-provider",
+                "identity_change_path": str(case / "identity-changed"),
                 "wheel_root": str(wheel_root),
                 "workspace": str(case),
                 "database": f"sqlite+aiosqlite:///{case / 'data.db'}",
@@ -208,6 +254,7 @@ def main() -> None:
                         result.raise_for_status()
                         scope_id = result.json()["scope_id"]
                         fixture = {
+                            "identity_change_path": config["identity_change_path"] if config["provider"] else None,
                             "endpoint": endpoint,
                             "scope_id": scope_id,
                             "token": token,
@@ -229,6 +276,7 @@ def main() -> None:
                             "mode": mode,
                             "result": "passed",
                             "serverAliveAfterClientExit": True,
+                            "providerIdentityChangeInvalidatesContext": bool(config["provider"]),
                             "performance": probe_measurement(probe.stdout),
                         })
                 finally:

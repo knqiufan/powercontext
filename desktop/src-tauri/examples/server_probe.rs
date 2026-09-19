@@ -27,6 +27,7 @@ use powercontext_desktop::{
 use serde::Deserialize;
 #[derive(Deserialize)]
 struct Fixture {
+    identity_change_path: Option<String>,
     endpoint: String,
     scope_id: String,
     token: Option<Secret>,
@@ -191,6 +192,30 @@ async fn main() {
             .unwrap();
         exact_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         assert_eq!(exact.text, expected);
+    }
+    if let Some(path) = fixture.identity_change_path {
+        // Test-only out-of-band provider control, not a product endpoint or IPC command.
+        std::fs::write(path, b"change").unwrap();
+        assert_eq!(
+            manager
+                .memory_entry(generation, &entry.citation)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            SafeError::StaleContext
+        );
+        let state = manager.state().unwrap();
+        assert!(state.active.is_none());
+        assert!(state.generation > generation);
+        assert_eq!(
+            api.entry(&fixture.scope_id, &entry.citation)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            SafeError::Forbidden
+        );
     }
     manager.disconnect().unwrap();
     api.live().await.unwrap();
