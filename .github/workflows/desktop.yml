@@ -100,6 +100,7 @@ jobs:
         if: always()
         with:
           name: desktop-windows-internal-unsigned
+          include-hidden-files: true
           path: |
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
             desktop/.artifacts/windows-smoke.json
@@ -170,6 +171,7 @@ jobs:
         if: always()
         with:
           name: desktop-installed-diagnostics
+          include-hidden-files: true
           path: |
             desktop/.artifacts/windows-smoke.json
             desktop/.artifacts/installed-ui*
