@@ -1,0 +1,59 @@
+name: Desktop foundation
+
+on:
+  pull_request:
+    paths: ['desktop/**', 'openapi/powercontext.yaml', 'tests/fixtures/transport_loopback_vectors.json', 'website/assets/**', '.github/workflows/desktop.yml']
+  push:
+    branches: [master, codex/desktop-preview]
+    paths: ['desktop/**', 'openapi/powercontext.yaml', 'tests/fixtures/transport_loopback_vectors.json', 'website/assets/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+        with:
+          working_directory: desktop
+      - name: Install pinned Windows Rust toolchain
+        run: rustup toolchain install 1.95.0-x86_64-pc-windows-msvc --profile minimal --component rustfmt --component clippy
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: pnpm ipc:check
+      - name: Verify Windows vault across processes
+        run: cargo run --locked --manifest-path src-tauri/Cargo.toml --example credential_probe
+      - name: Build unsigned internal Windows installer
+        run: pnpm desktop:build
+      - name: Smoke test installed package
+        timeout-minutes: 5
+        run: ./scripts/windows-smoke.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: desktop-windows-internal-unsigned
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop/.artifacts/windows-smoke.json
+          if-no-files-found: error

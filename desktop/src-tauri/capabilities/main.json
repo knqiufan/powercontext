@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Only the packaged main window can read the safe foundation status.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-foundation-info"
+  ]
+}
