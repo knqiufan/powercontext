@@ -243,3 +243,59 @@ test("changing query discards a late response instead of showing old matches", a
   expect(screen.queryByText("old secret")).toBeNull();
   expect(desktopApi.cancelMemory).toHaveBeenCalledWith(1);
 });
+
+test.each(["forbidden", "not_found", "network"])(
+  "a %s detail failure clears private results and never reads latest",
+  async (code) => {
+    const user = userEvent.setup();
+    vi.mocked(desktopApi.state).mockResolvedValue(state);
+    vi.mocked(desktopApi.search).mockResolvedValue({
+      hits: [
+        {
+          citation,
+          text: "private search excerpt",
+          score: 1,
+          matched_by: ["fts"],
+        },
+      ],
+    });
+    vi.mocked(desktopApi.entry)
+      .mockResolvedValueOnce({
+        citation,
+        version: 7,
+        kind: "note",
+        text: "private exact body",
+        state: "active",
+        source_refs: [],
+        artifact_refs: [],
+      })
+      .mockRejectedValueOnce({ code });
+    render(
+      <MemoryWorkspace
+        state={state}
+        language="en"
+        home={false}
+        onState={vi.fn()}
+        onDirty={vi.fn()}
+      />,
+    );
+    await user.type(
+      screen.getByLabelText("Full-text search keywords"),
+      "private",
+    );
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(
+      screen.getByRole("button", { name: "Read exact version" }),
+    );
+    expect(screen.getByText("private exact body")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Read exact version" }),
+    );
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.queryByText("private exact body")).toBeNull();
+    expect(screen.queryByText("private search excerpt")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy text" })).toBeNull();
+    expect(desktopApi.entry).toHaveBeenCalledTimes(2);
+    expect(desktopApi.entry).toHaveBeenLastCalledWith(1, citation);
+  },
+);

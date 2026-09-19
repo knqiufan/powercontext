@@ -24,7 +24,7 @@ use powercontext_desktop::{
 };
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicU16, Ordering},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -38,7 +38,7 @@ struct Fixture {
     started: Arc<Notify>,
     release: Arc<Notify>,
     requests: Arc<Mutex<Vec<serde_json::Value>>>,
-    fail: Arc<AtomicBool>,
+    fail: Arc<AtomicU16>,
     task: tokio::task::JoinHandle<()>,
     _dir: tempfile::TempDir,
 }
@@ -53,7 +53,7 @@ async fn setup() -> Fixture {
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let started = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
-    let fail = Arc::new(AtomicBool::new(false));
+    let fail = Arc::new(AtomicU16::new(200));
     let requests = Arc::new(Mutex::new(vec![]));
     let (start, finish, bodies, failure) = (
         started.clone(),
@@ -117,8 +117,13 @@ async fn setup() -> Fixture {
                             .push(serde_json::from_slice(&bytes[end + 4..]).unwrap());
                         start.notify_one();
                         finish.notified().await;
-                        if failure.load(Ordering::Relaxed) {
-                            (500, serde_json::json!({"detail":"must not leak"}))
+                        let status = failure.load(Ordering::Relaxed);
+                        if status == 0 {
+                            // The fixture accepted the write but the response connection is lost.
+                            return;
+                        }
+                        if status != 200 {
+                            (status, serde_json::json!({"detail":"must not leak"}))
                         } else {
                             (
                                 200,
@@ -215,7 +220,7 @@ async fn dispatched_write_keeps_its_original_target_and_rejects_duplicate_clicks
 #[tokio::test]
 async fn dispatched_server_failure_is_unknown_and_is_never_replayed() {
     let fixture = setup().await;
-    fixture.fail.store(true, Ordering::Relaxed);
+    fixture.fail.store(500, Ordering::Relaxed);
     fixture.release.notify_one();
     let outcome = fixture
         .manager
@@ -291,4 +296,45 @@ async fn absent_scope_never_uses_the_server_default_for_writing() {
         SafeError::ScopeRequired
     );
     assert!(fixture.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_write_rejections_are_failures_without_replay() {
+    for (status, code) in [(409, SafeError::Conflict), (422, SafeError::InvalidInput)] {
+        let fixture = setup().await;
+        fixture.fail.store(status, Ordering::Relaxed);
+        fixture.release.notify_one();
+        let result = fixture
+            .manager
+            .remember(
+                fixture.manager.state().unwrap().generation,
+                "synthetic rejected",
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.record.status, WriteStatus::Failed);
+        assert_eq!(result.record.error.unwrap().code, code);
+        assert!(result.result.is_none());
+        assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn accepted_write_with_lost_response_remains_unknown_without_replay() {
+    let fixture = setup().await;
+    fixture.fail.store(0, Ordering::Relaxed);
+    fixture.release.notify_one();
+    let result = fixture
+        .manager
+        .remember(
+            fixture.manager.state().unwrap().generation,
+            "synthetic accepted",
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.record.status, WriteStatus::Unknown);
+    assert!(result.result.is_none());
+    let accepted = fixture.requests.lock().unwrap();
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0]["text"], "synthetic accepted");
 }

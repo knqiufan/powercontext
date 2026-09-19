@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import secrets
 import socket
 import ssl
@@ -40,6 +41,13 @@ from typing import IO
 class HarnessFailure(RuntimeError):
     def __init__(self, code: str, detail: str = "") -> None:
         super().__init__(f"Desktop isolated fixture failed ({code}): {detail}")
+
+
+def probe_measurement(output: str) -> dict[str, object]:
+    measurement = json.loads(output)
+    if measurement.get("result") != "passed":
+        raise HarnessFailure("native_probe_result")
+    return measurement["performance"]
 
 
 def serve(config_path: Path) -> None:
@@ -217,7 +225,12 @@ def main() -> None:
                         if probe.returncode:
                             raise HarnessFailure(mode, probe.stderr[-2000:])
                         client.get("/health/live").raise_for_status()
-                        reports.append({"mode": mode, "result": "passed", "serverAliveAfterClientExit": True})
+                        reports.append({
+                            "mode": mode,
+                            "result": "passed",
+                            "serverAliveAfterClientExit": True,
+                            "performance": probe_measurement(probe.stdout),
+                        })
                 finally:
                     if process.poll() is None:
                         control.write(b"stop\n")
@@ -229,6 +242,14 @@ def main() -> None:
                             process.wait(timeout=10)
                     control.close()
     report = {
+        "environment": {
+            "os": platform.platform(),
+            "architecture": platform.machine(),
+            "python": platform.python_version(),
+            "clientBuildProfile": "debug",
+            "percentileMethod": "nearest rank",
+            "budget": "No approved numerical budget; observation only",
+        },
         "serverWheel": wheel.name,
         "serverWheelSha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
         "contractSha256": hashlib.sha256(

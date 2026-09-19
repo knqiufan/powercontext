@@ -157,6 +157,41 @@ async fn main() {
         .await
         .unwrap();
     assert_eq!(exact.text, expected);
+    assert_eq!(matches.hits.len(), 1);
+    assert!(
+        manager
+            .search_memory(generation, "absentuniquefixtureword")
+            .await
+            .unwrap()
+            .hits
+            .is_empty()
+    );
+    let batch = format!("batch{}", uuid::Uuid::new_v4().simple());
+    let mut save_ms = vec![];
+    for index in 0..11 {
+        let start = std::time::Instant::now();
+        let result = manager
+            .remember(generation, &format!("{batch} synthetic note {index}"))
+            .await
+            .unwrap();
+        save_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+        assert_eq!(result.record.status, WriteStatus::Succeeded);
+    }
+    let mut search_ms = vec![];
+    let mut exact_ms = vec![];
+    for _ in 0..20 {
+        let start = std::time::Instant::now();
+        let matches = manager.search_memory(generation, &batch).await.unwrap();
+        search_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+        assert_eq!(matches.hits.len(), 10);
+        let start = std::time::Instant::now();
+        let exact = manager
+            .memory_entry(generation, &entry.citation)
+            .await
+            .unwrap();
+        exact_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+        assert_eq!(exact.text, expected);
+    }
     manager.disconnect().unwrap();
     api.live().await.unwrap();
     if has_token {
@@ -172,6 +207,20 @@ async fn main() {
         );
     }
     println!(
-        "PASS: real Server identity, bounded Scope list, save, fts, exact citation and auth boundary"
+        "{}",
+        serde_json::json!({
+            "result":"passed",
+            "performance": {
+                "scope":"Native ConnectionManager round trips, including identity recheck; local fixture; no UI latency or approved budget",
+                "noteCount":13,
+                "save": distribution(save_ms), "search": distribution(search_ms), "exactRead": distribution(exact_ms)
+            }
+        })
     );
+}
+
+fn distribution(mut values: Vec<f64>) -> serde_json::Value {
+    values.sort_by(f64::total_cmp);
+    let percentile = |p: f64| values[(values.len() as f64 * p).ceil() as usize - 1];
+    serde_json::json!({"samplesMs":values, "count":values.len(), "p50Ms":percentile(0.5), "p95Ms":percentile(0.95)})
 }

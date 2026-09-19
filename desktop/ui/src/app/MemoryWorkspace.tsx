@@ -228,6 +228,7 @@ export function MemoryWorkspace(props: Props) {
     } catch (e) {
       if (ticket === sequence.current) {
         setError(e);
+        setHits(null);
         setEntry(null);
         try {
           onState(await desktopApi.state());
@@ -314,7 +315,7 @@ export function MemoryWorkspace(props: Props) {
         {error != null && (
           <p role="alert">{connectionError(error, language)}</p>
         )}
-        {hits === null && !busy && <p>{t.start}</p>}
+        {hits === null && !busy && error == null && <p>{t.start}</p>}
         {hits?.length === 0 && <p>{t.none}</p>}
         {hits?.length === 10 && <p>{t.limit}</p>}
         {hits && (
