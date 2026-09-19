@@ -36,7 +36,8 @@ def exercise_forced_exit(client: httpx.Client, prefix: str, app: subprocess.Pope
         # explicit write must still pass the product's duplicate-risk confirmation.
         alert = client.get(prefix + "/alert/text")
         alert.raise_for_status()
-        if alert.json()["value"] != "上次提交结果未知，再次保存可能产生重复记录。仍要提交这次输入吗？":
+        expected_prompt = "上次提交结果未知，再次保存可能产生重复记录。仍要提交这次输入吗？"  # noqa: RUF001 - exact localized UI
+        if alert.json()["value"] != expected_prompt:
             raise HarnessFailure("installed_unknown_retry_confirmation_missing")
         page.post("/alert/accept", {})
         page.wait_text("保存成功。")
