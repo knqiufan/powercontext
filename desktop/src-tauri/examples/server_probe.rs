@@ -212,6 +212,7 @@ async fn main() {
     }
     if let Some(reader_token) = raw["reader_token"].as_str() {
         verify_revocation(&fixture, &raw, reader_token, &entry.citation, &expected).await;
+        verify_scope_pages(&fixture, &raw, &manager, generation).await;
     }
     if let Some(path) = fixture.identity_change_path {
         // Test-only out-of-band provider control, not a product endpoint or IPC command.
@@ -332,5 +333,71 @@ async fn verify_revocation(
             .unwrap()
             .code,
         SafeError::Forbidden
+    );
+}
+
+async fn verify_scope_pages(
+    fixture: &Fixture,
+    raw: &serde_json::Value,
+    manager: &ConnectionManager,
+    generation: u32,
+) {
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let title = format!("paging{}", uuid::Uuid::new_v4().simple());
+    let mut created = std::collections::BTreeSet::new();
+    for index in 0..51 {
+        let scope: serde_json::Value = client
+            .post(format!("{}/v1/scopes", fixture.endpoint))
+            .bearer_auth(raw["token"].as_str().unwrap())
+            .json(&serde_json::json!({
+                "title":title,"summary":"Synthetic same-title pagination fixture",
+                "idempotency_key":format!("{title}-{index}")
+            }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(created.insert(scope["scope_id"].as_str().unwrap().to_owned()));
+    }
+    let first = manager.scopes(generation, &title, None).await.unwrap();
+    assert_eq!(first.items.len(), 50);
+    let second = manager
+        .scopes(generation, &title, first.next_cursor.as_deref())
+        .await
+        .unwrap();
+    assert!(first.next_cursor.is_some());
+    assert_eq!(second.items.len(), 1);
+    assert!(second.next_cursor.is_none());
+    let found: std::collections::BTreeSet<_> = first
+        .items
+        .iter()
+        .chain(second.items.iter())
+        .map(|scope| scope.scope_id.clone())
+        .collect();
+    assert_eq!(found, created);
+    // Exact lookups distinguish the same display name without modifying the active memory Scope.
+    let api = ServerApi::new(
+        Endpoint::parse(&fixture.endpoint).unwrap(),
+        None,
+        Some(Secret::new(raw["token"].as_str().unwrap().into()).unwrap()),
+    )
+    .unwrap();
+    for id in [created.first().unwrap(), created.last().unwrap()] {
+        assert_eq!(&api.scope(id).await.unwrap().scope_id, id);
+    }
+    assert_eq!(
+        manager
+            .state()
+            .unwrap()
+            .active
+            .unwrap()
+            .scope
+            .unwrap()
+            .scope_id,
+        fixture.scope_id
     );
 }
