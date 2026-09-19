@@ -15,20 +15,26 @@
  */
 
 use powercontext_desktop::{
+    connections::{
+        profiles::{Authentication, CredentialState, ProfileInput, ProfileView},
+        session::{ActiveView, CheckReport, CompatibilityProfile, DesktopState, Fact},
+    },
     credentials::{CredentialWriteReceipt, CredentialWriteRequest, StorageChoice},
+    diagnostics::{DiagnosticItem, DiagnosticKind, DiagnosticReport, HostDiagnostic},
     error::SafeError,
     ipc::FoundationInfo,
+    transport::{ApiFailure, wire},
 };
 use ts_rs::TS;
 fn main() {
-    let config = ts_rs::Config::default();
+    let config = ts_rs::Config::default().with_large_int("number");
     let license = include_str!("export_ipc.rs")
         .split(" */")
         .next()
         .unwrap()
         .to_owned()
         + " */\n\n";
-    let output = license
+    let mut output = license
         + &format!(
             "// Generated from Rust IPC types. Do not edit.\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             SafeError::decl(&config),
@@ -37,6 +43,33 @@ fn main() {
             CredentialWriteRequest::decl(&config),
             CredentialWriteReceipt::decl(&config)
         );
+    for declaration in [
+        DiagnosticKind::decl(&config),
+        DiagnosticItem::decl(&config),
+        HostDiagnostic::decl(&config),
+        DiagnosticReport::decl(&config),
+        Authentication::decl(&config),
+        ProfileView::decl(&config),
+        ProfileInput::decl(&config),
+        CredentialState::decl(&config),
+        Fact::<String>::decl(&config),
+        CheckReport::decl(&config),
+        CompatibilityProfile::decl(&config),
+        ActiveView::decl(&config),
+        DesktopState::decl(&config),
+        ApiFailure::decl(&config),
+    ]
+    .into_iter()
+    .chain(wire::declarations(&config))
+    {
+        output.push_str(&format!("export {declaration}\n"));
+    }
+    let output = output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/src/generated/ipc.ts");
     if std::env::args().any(|arg| arg == "--check") {
         assert_eq!(

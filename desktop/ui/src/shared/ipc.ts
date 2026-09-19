@@ -15,8 +15,39 @@
  */
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { FoundationInfo } from "../generated/ipc";
+import type {
+  FoundationInfo,
+  DiagnosticKind,
+  DiagnosticReport,
+  DesktopState,
+  ProfileInput,
+  ScopePage,
+  ScopeDescriptor,
+} from "../generated/ipc";
 export async function getFoundationInfo(): Promise<FoundationInfo | null> {
   if (!isTauri()) return null;
   return invoke<FoundationInfo>("foundation_info");
 }
+
+export const desktopApi = {
+  diagnostics: (kind: DiagnosticKind) =>
+    invoke<DiagnosticReport>("local_diagnostics", { kind }),
+  state: () => invoke<DesktopState>("desktop_state"),
+  save: (input: ProfileInput) =>
+    invoke<DesktopState>("save_profile", { input }),
+  remove: (id: string, revision: number) =>
+    invoke<DesktopState>("remove_profile", { id, revision }),
+  check: (id: string, activate: boolean) =>
+    invoke<DesktopState>("check_connection", { id, activate }),
+  disconnect: () => invoke<DesktopState>("disconnect"),
+  invalidate: (id: string) =>
+    invoke<DesktopState>("invalidate_profile", { id }),
+  scopes: (generation: number, query: string, cursor: string | null) =>
+    invoke<ScopePage>("list_scopes", { generation, query, cursor }),
+  cancelScopes: (generation: number) =>
+    invoke<void>("cancel_scope_reads", { generation }),
+  defaultScope: (generation: number) =>
+    invoke<ScopeDescriptor>("default_scope", { generation }),
+  selectScope: (generation: number, id: string) =>
+    invoke<DesktopState>("select_scope", { generation, id }),
+};

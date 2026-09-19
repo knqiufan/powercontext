@@ -16,12 +16,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { messages, type Language } from "./messages";
-import { getFoundationInfo } from "../shared/ipc";
-import type { FoundationInfo } from "../generated/ipc";
+import { getFoundationInfo, desktopApi } from "../shared/ipc";
+import type { FoundationInfo, DesktopState } from "../generated/ipc";
 import logo from "../../../src-tauri/icons/brand.png";
 import homeIcon from "../assets/overview.svg";
 import connectionsIcon from "../assets/connections.svg";
 import memoryIcon from "../assets/memory.svg";
+
+import { Diagnostics } from "./Diagnostics";
+import { Connections } from "./Connections";
+import { Scopes } from "./Scopes";
+import { connectionMessages, connectionError } from "./connection-messages";
 
 type Page = "home" | "connections" | "memories" | "settings";
 type Theme = "light" | "dark" | "system";
@@ -31,9 +36,24 @@ export function App() {
   const [page, setPage] = useState<Page>("home");
   const [menu, setMenu] = useState(false);
   const [host, setHost] = useState<FoundationInfo | null>(null);
+  const [desktop, setDesktop] = useState<DesktopState | null>(null);
+  const [nativeError, setNativeError] = useState<unknown>(null);
+  const [dirty, setDirty] = useState(false);
+  function receiveState(next: DesktopState) {
+    setDesktop((current) =>
+      !current || next.generation >= current.generation ? next : current,
+    );
+  }
+  function confirmSwitch() {
+    return !dirty || window.confirm(connectionMessages[language].discard);
+  }
+  const activeProfile = desktop?.profiles.find(
+    (p) => p.id === desktop.active?.connectionId,
+  );
   const heading = useRef<HTMLHeadingElement>(null);
   const t = messages[language];
   useEffect(() => {
+    desktopApi.state().then(receiveState).catch(setNativeError);
     getFoundationInfo()
       .then(setHost)
       .catch(() => setHost(null));
@@ -45,6 +65,8 @@ export function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
   function navigate(next: Page) {
+    if (next === page || !confirmSwitch()) return;
+    setDirty(false);
     setPage(next);
     setMenu(false);
     requestAnimationFrame(() => heading.current?.focus());
@@ -94,7 +116,7 @@ export function App() {
         <div className="sidebar-bottom">
           <p className="status">
             <span aria-hidden="true" className="dot" />
-            {t.disconnected}
+            {activeProfile?.name ?? t.disconnected}
           </p>
           <button
             aria-current={page === "settings" ? "page" : undefined}
@@ -122,6 +144,35 @@ export function App() {
           </div>
           <span className="badge">{t.foundation}</span>
         </div>
+        {nativeError != null && (
+          <p role="alert">{connectionError(nativeError, language)}</p>
+        )}
+        {desktop?.active && (
+          <div className="active-context">
+            <span>
+              {activeProfile?.name} · {activeProfile?.endpoint}
+            </span>
+            <button
+              onClick={() => {
+                if (confirmSwitch())
+                  void desktopApi
+                    .disconnect()
+                    .then(receiveState)
+                    .catch(setNativeError);
+              }}
+            >
+              {connectionMessages[language].disconnect}
+            </button>
+          </div>
+        )}
+        {(page === "home" || page === "memories") && (
+          <Scopes
+            state={desktop}
+            language={language}
+            onState={receiveState}
+            confirmSwitch={confirmSwitch}
+          />
+        )}
         {page === "home" && (
           <>
             <div className="home-grid">
@@ -150,7 +201,7 @@ export function App() {
                   <h2>{t.current}</h2>
                   <p className="status">
                     <span className="dot" aria-hidden="true" />
-                    {t.disconnected}
+                    {activeProfile?.name ?? t.disconnected}
                   </p>
                   <p id="connection-hint">{t.connectHint}</p>
                   {connectButton}
@@ -175,31 +226,12 @@ export function App() {
           </>
         )}
         {page === "connections" && (
-          <div className="connection-grid">
-            <section className="card">
-              <h2>{t.noConnections}</h2>
-              <p>{t.foundationHint}</p>
-            </section>
-            <section className="card">
-              <h2>{t.connect}</h2>
-              <p>{t.connectHint}</p>
-              <div className="notice">{t.foundationHint}</div>
-              <details>
-                <summary>{t.details}</summary>
-                <dl>
-                  {[t.identity, t.readiness, t.compatibility, t.tls].map(
-                    (label) => (
-                      <div key={label}>
-                        <dt>{label}</dt>
-                        <dd>{t.unverified}</dd>
-                      </div>
-                    ),
-                  )}
-                </dl>
-              </details>
-              <p>{t.boundary}</p>
-            </section>
-          </div>
+          <Connections
+            state={desktop}
+            language={language}
+            onState={receiveState}
+            onDirty={setDirty}
+          />
         )}
         {page === "memories" && (
           <section className="card">
@@ -248,9 +280,9 @@ export function App() {
                 </select>
               </div>
             </section>
+            <Diagnostics language={language} />
             <section className="card">
-              <h2>{t.diagnostics}</h2>
-              <p>{t.diagnosticsHint}</p>
+              <h2>{t.version}</h2>
               <dl>
                 <div>
                   <dt>{t.version}</dt>

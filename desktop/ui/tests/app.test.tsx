@@ -31,10 +31,12 @@ test("disconnected shell prevents writes and search and explains the boundary", 
       .disabled,
   ).toBe(true);
   await user.click(screen.getByRole("button", { name: /连接已有服务/ }));
-  expect(screen.getByText("尚未添加连接")).toBeTruthy();
-  await user.click(screen.getByText("连接状态详情"));
-  expect(screen.getAllByText("未验证")).toHaveLength(4);
-  expect(screen.getByText(/关闭窗口将退出桌面/)).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "添加连接" })).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "保存配置" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(screen.getByText(/正文和搜索结果只在内存中使用/)).toBeTruthy();
 });
 test("navigation, bilingual settings and theme remain usable without the native host", async () => {
   const user = userEvent.setup();

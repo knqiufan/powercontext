@@ -14,15 +14,50 @@
  * limitations under the License.
  */
 
+pub mod commands;
+pub mod connections;
 pub mod credentials;
+#[cfg(windows)]
+mod diagnostic_process;
+pub mod diagnostics;
 pub mod error;
 pub mod ipc;
 pub mod transport;
 
+use tauri::Manager;
+
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![ipc::foundation_info])
+        .invoke_handler(tauri::generate_handler![
+            ipc::foundation_info,
+            commands::local_diagnostics,
+            commands::desktop_state,
+            commands::save_profile,
+            commands::remove_profile,
+            commands::check_connection,
+            commands::disconnect,
+            commands::invalidate_profile,
+            commands::list_scopes,
+            commands::cancel_scope_reads,
+            commands::default_scope,
+            commands::select_scope
+        ])
         .setup(|app| {
+            let manager = app
+                .path()
+                .app_data_dir()
+                .map_err(|_| error::SafeError::Storage)
+                .and_then(|dir| {
+                    connections::profiles::ProfileRepository::open(
+                        dir.join("profiles.json"),
+                        std::sync::Arc::new(credentials::WindowsVault),
+                    )
+                })
+                .map(connections::session::ConnectionManager::new);
+            app.manage(commands::HostState { manager });
+            app.manage(diagnostics::DiagnosticHost::new(
+                app.path().app_data_dir().ok(),
+            ));
             let config = &app.config().app.windows[0];
             tauri::WebviewWindowBuilder::from_config(app, config)?
                 .on_navigation(ipc::allowed_navigation)

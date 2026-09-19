@@ -22,9 +22,21 @@ fn main() {
             "cargo:rustc-link-arg-tests=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
         );
     }
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["foundation_info"])),
-    )
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "foundation_info",
+            "local_diagnostics",
+            "desktop_state",
+            "save_profile",
+            "remove_profile",
+            "check_connection",
+            "disconnect",
+            "invalidate_profile",
+            "list_scopes",
+            "cancel_scope_reads",
+            "default_scope",
+            "select_scope",
+        ]),
+    ))
     .expect("desktop build configuration is invalid");
 }

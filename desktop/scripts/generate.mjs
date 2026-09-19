@@ -55,7 +55,86 @@ const license =
   " */\n\n";
 const header =
   license + "// Generated from openapi/powercontext.yaml. Do not edit.\n";
+// Rust wire models share the same reachable OpenAPI schema graph as the reviewed operations.
+const schemaNames = new Set();
+function collectSchemas(value) {
+  if (!value || typeof value !== "object") return;
+  if (value.$ref?.startsWith("#/components/schemas/")) {
+    const name = value.$ref.split("/").at(-1);
+    if (!schemaNames.has(name)) {
+      schemaNames.add(name);
+      collectSchemas(contract.components.schemas[name]);
+    }
+  }
+  for (const child of Object.values(value)) collectSchemas(child);
+}
+for (const item of Object.values(contract.paths))
+  for (const op of Object.values(item))
+    if (wanted.includes(op?.operationId)) collectSchemas(op);
+function rustType(schema) {
+  if (schema.$ref) return schema.$ref.split("/").at(-1);
+  switch (schema.type) {
+    case "string":
+      return "String";
+    case "integer":
+      return "i64";
+    case "number":
+      return "f64";
+    case "boolean":
+      return "bool";
+    case "array":
+      return `Vec<${rustType(schema.items)}>`;
+    case "object":
+      if (
+        schema.additionalProperties &&
+        typeof schema.additionalProperties === "object"
+      )
+        return `std::collections::BTreeMap<String, ${rustType(schema.additionalProperties)}>`;
+      throw new Error("Unsupported inline object in Desktop wire model");
+    default:
+      throw new Error(`Unsupported wire schema ${JSON.stringify(schema)}`);
+  }
+}
+const rustModels = [...schemaNames]
+  .sort()
+  .map((name) => {
+    const schema = contract.components.schemas[name];
+    const derive =
+      "#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, ts_rs::TS)]";
+    if (schema.enum) {
+      const values = schema.enum.filter((v) => v !== null);
+      const members = values.map(
+        (value) =>
+          `    #[serde(rename = ${JSON.stringify(value)})]\n    ${value
+            .split(/[^a-zA-Z0-9]+/)
+            .map((part) => part[0].toUpperCase() + part.slice(1))
+            .join("")},`,
+      );
+      return `${derive}\npub enum ${name} {\n${members.join("\n")}\n}\n`;
+    }
+    if (schema.type !== "object")
+      return `pub type ${name} = ${rustType(schema)};\n`;
+    const fields = Object.entries(schema.properties).map(([field, value]) => {
+      let type = rustType(value);
+      if (value.nullable || !schema.required?.includes(field))
+        type = `Option<${type}>`;
+      return `${!schema.required?.includes(field) ? '    #[serde(skip_serializing_if = "Option::is_none")]\n    #[ts(optional = nullable)]\n' : ""}    pub r#${field}: ${type},`;
+    });
+    return `${derive}\n#[serde(deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
+  })
+  .join("\n");
+const rustDeclarations = `\n#[rustfmt::skip]\npub fn declarations(config: &ts_rs::Config) -> Vec<String> {\n    vec![\n${[
+  ...schemaNames,
+]
+  .sort()
+  .map((name) => `        <${name} as ts_rs::TS>::decl(config),`)
+  .join("\n")}\n    ]\n}\n`;
 const outputs = {
+  "src-tauri/src/transport/wire.rs":
+    header +
+    "// rustfmt uses this generated layout verbatim.\n" +
+    rustModels +
+    rustDeclarations,
   "ui/src/generated/api.d.ts": header + astToString(await openapiTS(contract)),
   "ui/src/generated/operations.ts":
     header +

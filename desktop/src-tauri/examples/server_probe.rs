@@ -1,0 +1,125 @@
+/*
+ * Copyright (c) 2026 OceanBase.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+//! Only invoked by the isolated real-Server harness; never registered as an IPC command.
+use powercontext_desktop::{
+    credentials::Secret,
+    error::SafeError,
+    transport::{Endpoint, ServerApi},
+};
+use serde::Deserialize;
+#[derive(Deserialize)]
+struct Fixture {
+    endpoint: String,
+    scope_id: String,
+    token: Option<Secret>,
+    ca_pem: Option<String>,
+}
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a == "certificates") {
+        use rcgen::{
+            BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+            KeyUsagePurpose,
+        };
+        let dir = std::path::Path::new(&args[2]);
+        let mut ca = CertificateParams::new(vec![]).unwrap();
+        ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca.distinguished_name
+            .push(rcgen::DnType::CommonName, "Desktop test CA");
+        ca.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca.self_signed(&ca_key).unwrap();
+        let issuer = Issuer::new(ca, ca_key);
+        let mut leaf =
+            CertificateParams::new(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+        leaf.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let key = KeyPair::generate().unwrap();
+        let cert = leaf.signed_by(&key, &issuer).unwrap();
+        std::fs::write(dir.join("ca.pem"), ca_cert.pem()).unwrap();
+        std::fs::write(dir.join("server.pem"), cert.pem()).unwrap();
+        std::fs::write(dir.join("server-key.pem"), key.serialize_pem()).unwrap();
+        return;
+    }
+    let fixture: Fixture = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
+    let has_token = fixture.token.is_some();
+    let endpoint = Endpoint::parse(&fixture.endpoint).unwrap();
+    let api = ServerApi::new(
+        endpoint.clone(),
+        fixture.ca_pem.as_deref().map(str::as_bytes),
+        fixture.token,
+    )
+    .unwrap();
+    api.live().await.unwrap();
+    api.readiness().await.unwrap();
+    if has_token {
+        api.principal().await.unwrap();
+    } else {
+        assert_eq!(
+            api.principal().await.err().unwrap().code,
+            SafeError::RuntimeNotReady
+        );
+        assert_eq!(
+            api.readiness()
+                .await
+                .unwrap()
+                .checks
+                .get("access_mode")
+                .map(String::as_str),
+            Some("disabled")
+        );
+    }
+    let capabilities = api.capabilities().await.unwrap();
+    assert!(capabilities.artifact_families.iter().any(|v| v == "memory"));
+    api.default_scope().await.unwrap();
+    let scopes = api.scopes("", None).await.unwrap();
+    assert!(!scopes.items.is_empty());
+    assert_eq!(
+        api.scope(&fixture.scope_id).await.unwrap().scope_id,
+        fixture.scope_id
+    );
+    let keyword = format!("desktop{}", uuid::Uuid::new_v4().simple());
+    let text = format!("{keyword} 中文记录 café\nSecond line.");
+    let saved = api.remember(&fixture.scope_id, &text).await.unwrap();
+    let entry = saved
+        .entry
+        .expect("unique synthetic note must produce an exact entry");
+    let results = api.search(&fixture.scope_id, &keyword).await.unwrap();
+    assert!(
+        results
+            .hits
+            .iter()
+            .any(|hit| hit.citation == entry.citation)
+    );
+    let exact = api.entry(&fixture.scope_id, &entry.citation).await.unwrap();
+    assert_eq!(exact.text, text);
+    if has_token {
+        let bad = ServerApi::new(
+            endpoint,
+            fixture.ca_pem.as_deref().map(str::as_bytes),
+            Some(Secret::new("wrong-synthetic-token".into()).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            bad.principal().await.err().unwrap().code,
+            SafeError::Unauthorized
+        );
+    }
+    println!(
+        "PASS: real Server identity, bounded Scope list, save, fts, exact citation and auth boundary"
+    );
+}

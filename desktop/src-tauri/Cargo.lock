@@ -2609,12 +2609,16 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
  "tokio-rustls",
  "ts-rs",
  "url",
+ "uuid",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

@@ -396,3 +396,62 @@ footer {
     background: CanvasText;
   }
 }
+
+.profile-form,
+.scope-picker fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.profile-form label,
+.scope-picker label {
+  display: grid;
+  gap: 8px;
+}
+.profile-form .inline {
+  display: flex;
+  align-items: center;
+}
+.profile-form input[type="checkbox"] {
+  width: auto;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-list,
+.scope-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.profile-list li,
+.scope-list li {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+code {
+  overflow-wrap: anywhere;
+}
+.active-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
+}
+.scope-picker {
+  margin-bottom: 24px;
+}
+[role="alert"] {
+  color: var(--text);
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 12px;
+}

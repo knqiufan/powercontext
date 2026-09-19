@@ -45,6 +45,9 @@ impl<'de> Deserialize<'de> for Secret {
 /// IDs must be native-generated opaque identifiers, never endpoints or account names.
 pub struct CredentialId(String);
 impl CredentialId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
     pub fn new(id: String) -> Result<Self, SafeError> {
         if id.is_empty()
             || id.len() > 80
@@ -56,7 +59,7 @@ impl CredentialId {
     }
 }
 
-pub trait Vault {
+pub trait Vault: Send + Sync {
     fn put(&self, id: &CredentialId, secret: &Secret) -> Result<(), SafeError>;
     fn read(&self, id: &CredentialId) -> Result<Secret, SafeError>;
     fn delete(&self, id: &CredentialId) -> Result<(), SafeError>;
@@ -103,7 +106,7 @@ impl Vault for WindowsVault {
     }
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageChoice {
     Persistent,
@@ -126,9 +129,12 @@ pub struct CredentialWriteReceipt {
 }
 
 impl CredentialWriteRequest {
+    pub fn storage_choice(&self) -> StorageChoice {
+        self.storage
+    }
     pub fn store(
         self,
-        vault: &impl Vault,
+        vault: &(impl Vault + ?Sized),
         native_id: CredentialId,
     ) -> Result<(Credential, CredentialWriteReceipt), SafeError> {
         let credential = Credential::store(vault, native_id, self.secret, self.storage)?;
@@ -148,7 +154,7 @@ pub enum Credential {
 impl Credential {
     /// Failure is returned to the caller; session storage requires a separate explicit choice.
     pub fn store(
-        vault: &impl Vault,
+        vault: &(impl Vault + ?Sized),
         id: CredentialId,
         secret: Secret,
         choice: StorageChoice,
@@ -161,7 +167,7 @@ impl Credential {
             StorageChoice::SessionOnly => Ok(Self::SessionOnly(secret)),
         }
     }
-    pub fn load(&self, vault: &impl Vault) -> Result<Secret, SafeError> {
+    pub fn load(&self, vault: &(impl Vault + ?Sized)) -> Result<Secret, SafeError> {
         match self {
             Self::Persistent(id) => vault.read(id),
             Self::SessionOnly(secret) => Secret::new(secret.expose().to_owned()),

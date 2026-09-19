@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-//! Only native adapters use this transport; it is not an IPC fetch primitive.
+mod api;
+pub mod wire;
+pub use api::{ApiFailure, ServerApi};
+
+// Only native adapters use this transport; it is not an IPC fetch primitive.
 use crate::{credentials::Secret, error::SafeError};
 use reqwest::{
     Certificate, Client,
@@ -48,19 +52,35 @@ impl Endpoint {
             return Err(SafeError::InvalidEndpoint);
         }
         let raw_path = tail.find('/').map(|i| &tail[i..]).unwrap_or("");
-        if raw_path.split('/').any(|s| s == "." || s == "..") || raw_path.contains('%') {
+        if raw_path.split('/').any(|s| !safe_segment(s)) {
             return Err(SafeError::InvalidEndpoint);
         }
         let mut url = Url::parse(raw).map_err(|_| SafeError::InvalidEndpoint)?;
         if !url.username().is_empty() || url.password().is_some() || url.host().is_none() {
             return Err(SafeError::InvalidEndpoint);
         }
-        let loopback = match url.host() {
-            Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
-            Some(Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(Host::Ipv6(ip)) => ip.is_loopback(),
-            _ => false,
+        // HTTP trust is based on the literal host, not WHATWG aliases such as 127.1 or integer IPv4.
+        let authority = tail.split('/').next().unwrap_or("");
+        let literal_host = if authority.starts_with('[') {
+            authority
+                .split(']')
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('[')
+        } else {
+            authority.split(':').next().unwrap_or("")
         };
+        let literal_loopback = literal_host.eq_ignore_ascii_case("localhost")
+            || literal_host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+        let loopback = literal_loopback
+            && match url.host() {
+                Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+                Some(Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(Host::Ipv6(ip)) => ip.is_loopback(),
+                _ => false,
+            };
         match url.scheme() {
             "https" => (),
             "http" if loopback => (),
@@ -70,6 +90,14 @@ impl Endpoint {
         let path = format!("{}/", url.path().trim_end_matches('/'));
         url.set_path(&path);
         Ok(Self(url))
+    }
+    pub fn is_loopback(&self) -> bool {
+        match self.0.host() {
+            Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            Some(Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(Host::Ipv6(ip)) => ip.is_loopback(),
+            _ => false,
+        }
     }
     pub fn as_str(&self) -> &str {
         self.0.as_str()
@@ -95,12 +123,13 @@ impl Transport {
     pub fn new(ca_pem: Option<&[u8]>) -> Result<Self, SafeError> {
         let mut builder = Client::builder()
             .no_proxy()
+            .retry(reqwest::retry::never())
             .redirect(Policy::none())
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .referer(false);
         if let Some(pem) = ca_pem {
-            if pem.len() > 64 * 1024 {
+            if pem.len() > 64 * 1024 || String::from_utf8_lossy(pem).contains("PRIVATE KEY") {
                 return Err(SafeError::InvalidCertificate);
             }
             let cert = Certificate::from_pem(pem).map_err(|_| SafeError::InvalidCertificate)?;
@@ -168,4 +197,34 @@ fn safe_network_error(error: reqwest::Error) -> SafeError {
         source = cause.source();
     }
     SafeError::Network
+}
+
+fn safe_segment(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return false;
+            }
+            let Some(hi) = (bytes[i + 1] as char).to_digit(16) else {
+                return false;
+            };
+            let Some(lo) = (bytes[i + 2] as char).to_digit(16) else {
+                return false;
+            };
+            decoded.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    std::str::from_utf8(&decoded).is_ok()
+        && decoded != b"."
+        && decoded != b".."
+        && !decoded
+            .iter()
+            .any(|b| b.is_ascii_control() || matches!(b, b'/' | b'\\' | b'%'))
 }
