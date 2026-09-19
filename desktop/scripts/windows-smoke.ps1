@@ -25,12 +25,21 @@ $sentinel = Join-Path $testRoot 'external-data.txt'
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 Set-Content -LiteralPath $sentinel -Value 'Synthetic external data; not a Server database.' -Encoding utf8
 $sentinelHash = (Get-FileHash -LiteralPath $sentinel).Hash
+$signature = Get-AuthenticodeSignature -LiteralPath $package.FullName
+$os = Get-CimInstance Win32_OperatingSystem
 $report = [ordered]@{
     scope = 'Hosted runner; not standard-user, absent-WebView2 or visual UI qualification'
     runnerImage = $env:ImageVersion
     commit = $env:GITHUB_SHA
+    measuredAtUtc = [DateTime]::UtcNow.ToString('o')
+    os = "$($os.Caption) $($os.Version) $($os.OSArchitecture)"
+    buildProfile = 'release'
+    installerBytes = $package.Length
     installerSha256 = (Get-FileHash -LiteralPath $package.FullName).Hash
-    signature = (Get-AuthenticodeSignature -LiteralPath $package.FullName).Status.ToString()
+    signature = $signature.Status.ToString()
+    signerSubject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null }
+    installedExecutableSha256 = $null
+    installedExecutableBytes = $null
     installExit = $null
     uninstallExit = $null
     externalSentinelPreserved = $false
@@ -43,6 +52,9 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $installDir 'powercontext-desktop.exe'))) {
         throw 'Installed executable missing.'
     }
+    $installed = Get-Item -LiteralPath (Join-Path $installDir 'powercontext-desktop.exe')
+    $report.installedExecutableSha256 = (Get-FileHash -LiteralPath $installed.FullName).Hash
+    $report.installedExecutableBytes = $installed.Length
 } finally {
     try {
         $uninstaller = Join-Path $installDir 'uninstall.exe'
