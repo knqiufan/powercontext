@@ -109,3 +109,5 @@ Reports, a screenshot and driver logs accompany the installer in the `desktop-wi
 To diagnose installed UI tests, manually dispatch `Desktop validation` with `installer_run` set to an existing Desktop CI run ID. It verifies the original package commit, digest and size before reusing that exact installer, and reports harness and installer commits separately. This diagnostic run does not replace final full-build acceptance.
 
 Installed UI acceptance also checks content isolation between two independent connections, disconnect/reconnect, Server data preservation after removing an inactive profile, and the unknown outcome without replay after a real committed write loses its response. Credit each scenario only when its matching run report passes.
+
+The CI-only lifecycle scenario forcibly ends its own installed Desktop process after saving a synthetic note, then checks that the independent Server still serves the original exact entry and accepts a new readable write. Consult the matching lifecycle report for its result; it does not simulate normal window closure or uninstall preservation.

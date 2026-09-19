@@ -29,6 +29,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
+from installed_lifecycle import exercise_forced_exit
 from installed_workflow import exercise_memory
 from real_server import HarnessFailure
 
@@ -208,9 +209,13 @@ def run_ui(executable: Path, driver: Path, artifacts: Path, report: dict[str, ob
                 report["packagedUrl"] = wait_packaged_page(client, prefix)
                 report["stage"] = "memory_workflow"
                 report["workflow"] = exercise_memory(client, prefix)
-            finally:
                 report["screenshotCaptured"] = screenshot(client, prefix, artifacts)
-                client.delete(prefix).raise_for_status()
+                report["stage"] = "forced_exit"
+                report["lifecycle"] = exercise_forced_exit(client, prefix, app)
+            finally:
+                if app.poll() is None:
+                    report["screenshotCaptured"] = screenshot(client, prefix, artifacts)
+                    client.delete(prefix).raise_for_status()
     report["stage"] = "complete"
     report["result"] = "passed"
 
