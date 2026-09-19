@@ -187,12 +187,30 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         }
 
 
+def current_unchanged_entry(server: httpx.Client, scope: str, original: dict[str, object]) -> dict[str, object]:
+    current = server.post(
+        "/v1/memory/search",
+        json={"scope_id": scope, "query": "desktopinstalledci", "mode": "fts", "limit": 10},
+    )
+    current.raise_for_status()
+    current_hits = current.json()["hits"]
+    if len(current_hits) != 1:
+        raise HarnessFailure("installed_original_server_search_ambiguous")
+    current_citation_a = current_hits[0]["citation"]
+    # New independent notes advance the artifact revision, while this entry's
+    # version remains unchanged. Preserve the original citation for exact reads.
+    if any(current_citation_a[key] != original[key] for key in ("entry_id", "entry_version_id")):
+        raise HarnessFailure("installed_original_entry_version_changed")
+    return current_citation_a
+
+
 def exercise_connection_isolation(
     page: InstalledPage,
     server_a: httpx.Client,
     scope_a: str,
     citation_a: dict[str, object],
 ) -> None:
+    current_citation_a = current_unchanged_entry(server_a, scope_a, citation_a)
     text_b = "desktopinstalledci B 独立服务中的另一条记忆"
     with isolated_server() as (server_b, scope_b, _):
         seeded = server_b.post("/v1/memory/remember", json={"scope_id": scope_b, "kind": "note", "text": text_b})
@@ -224,7 +242,7 @@ def exercise_connection_isolation(
         page.activate("Desktop CI synthetic")
         page.expect_empty_context()
         page.select_scope(scope_a)
-        if page.search_read(NOTE) != citation_a:
+        if page.search_read(NOTE) != current_citation_a:
             raise HarnessFailure("installed_reconnected_citation_mismatch")
         page.button("连接")
         page.button("Desktop CI B")
@@ -241,7 +259,7 @@ def exercise_connection_isolation(
             if response.json()["text"] != expected:
                 raise HarnessFailure("installed_profile_operation_changed_server_data")
         page.button("首页")
-        if page.search_read(NOTE) != citation_a:
+        if page.search_read(NOTE) != current_citation_a:
             raise HarnessFailure("installed_inactive_profile_removal_changed_active_connection")
 
 
