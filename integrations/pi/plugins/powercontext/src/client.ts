@@ -19,19 +19,22 @@ import {
   MAX_RESPONSE_BYTES,
   PLUGIN_USER_AGENT,
   REQUEST_ID_HEADER,
+  RequestTimeoutError,
   ServerResponseError,
   UnavailableError,
   UnknownOperationError,
 } from './errors.ts'
 import { OPERATIONS, type OperationId, type OperationSpec } from './operations.generated.ts'
+import { normalizeServerUrl } from './transport.ts'
 
 export type JsonObject = Record<string, unknown>
 export type FetchFn = (input: string, init: RequestInit) => Promise<Response>
 
-export type ClientSuccess = { kind: 'json'; value: unknown; status: number; requestId: string | undefined }
+export type ClientSuccess = { kind: 'json'; value: unknown; status: number; requestId: string | undefined; etag?: string }
 
 export interface ClientOptions {
   baseUrl: string
+  allowInsecureHttp?: boolean
   authorization?: string
   requestTimeoutMs: number
   fetch?: FetchFn
@@ -115,7 +118,8 @@ function decodeError(bytes: Uint8Array): { code?: string; message?: string } {
 function queryString(payload: JsonObject | undefined): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(payload ?? {})) {
-    if (value !== undefined && value !== null) params.set(key, String(value))
+    if (value === undefined || value === null) continue
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, String(item))
   }
   const encoded = params.toString()
   return encoded ? `?${encoded}` : ''
@@ -188,19 +192,22 @@ export class PowerContextClient {
   private readonly fetchImpl: FetchFn
 
   constructor(options: ClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '')
+    this.baseUrl = normalizeServerUrl(options.baseUrl, options.allowInsecureHttp)
     this.authorization = options.authorization
     this.requestTimeoutMs = options.requestTimeoutMs
     this.fetchImpl = options.fetch ?? fetch
   }
 
-  async request(id: string, payload?: JsonObject, signal?: AbortSignal): Promise<ClientSuccess> {
+  async request(id: string, payload?: JsonObject, signal?: AbortSignal, timeoutMs = this.requestTimeoutMs): Promise<ClientSuccess> {
     if (!(id in OPERATIONS)) throw new UnknownOperationError(id)
     const spec = OPERATIONS[id as OperationId]
     const prepared = prepareRequest(spec, payload)
     const url = this.buildUrl(prepared)
+    const timeoutSignal = createTimeoutSignal(timeoutMs)
+    const signals = [timeoutSignal]
+    if (signal) signals.push(signal)
     try {
-      const response = await this.fetchImpl(url, this.buildInit(spec, prepared, signal))
+      const response = await this.fetchImpl(url, this.buildInit(spec, prepared, combineSignals(signals)))
       return await this.parseResponse(spec, response)
     } catch (error) {
       if (
@@ -210,6 +217,7 @@ export class PowerContextClient {
       ) {
         throw error
       }
+      if (timeoutSignal.aborted) throw new RequestTimeoutError(prepared.path, error)
       throw new UnavailableError(prepared.path, error)
     }
   }
@@ -225,13 +233,11 @@ export class PowerContextClient {
       ...request.headers,
     }
     if (this.authorization) headers.Authorization = this.authorization
-    const signals = [createTimeoutSignal(this.requestTimeoutMs)]
-    if (signal) signals.push(signal)
     const init: RequestInit = {
       method: spec.method,
       headers,
       redirect: 'manual',
-      signal: combineSignals(signals),
+      signal,
     }
     if (spec.location === 'body') {
       headers['Content-Type'] = 'application/json'
@@ -254,10 +260,10 @@ export class PowerContextClient {
     }
     if (hasStatus(spec.emptyStatuses as readonly number[], response.status)) {
       if (bytes.byteLength !== 0) throw new InvalidResponseError(spec.path, requestId)
-      return { kind: 'json', value: null, status: response.status, requestId }
+      return { kind: 'json', value: null, status: response.status, requestId, etag: response.headers.get('ETag') ?? undefined }
     }
     try {
-      return { kind: 'json', value: JSON.parse(Buffer.from(bytes).toString('utf8')), status: response.status, requestId }
+      return { kind: 'json', value: JSON.parse(Buffer.from(bytes).toString('utf8')), status: response.status, requestId, etag: response.headers.get('ETag') ?? undefined }
     } catch {
       throw new InvalidResponseError(spec.path, requestId)
     }

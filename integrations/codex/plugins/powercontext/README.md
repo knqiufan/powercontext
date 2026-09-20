@@ -7,10 +7,25 @@ The integration uses each public surface for the job it fits:
 
 - the `UserPromptSubmit` hook first calls `POST /v1/context/prepare`, then
   independently captures the current prompt with `POST /v1/sources/content`;
-- Streamable HTTP MCP at `http://127.0.0.1:8000/mcp` gives Codex the curated
+- Streamable HTTP MCP at `http://127.0.0.1:8000/mcp/` gives Codex the curated
   Memory and work-continuity tools.
 
-The `project-context` skill uses four high-level work operations instead of
+Codex does not expose a plugin-defined status-line item. Its `tui.status_line`
+setting accepts only Codex's built-in identifiers, so this plugin does not write
+an invalid PowerContext identifier. Instead, a ten-second-bounded `Stop` Hook shows
+the current scope's estimated token reduction after each completed turn, for
+example `PowerContext · saved 1.2k today · saved 12k in 30d`. When the Server is
+unavailable it prints one deduplicated, content-free diagnostic instead of the
+savings line, and it never asks Codex to continue the turn.
+The message is an interactive TUI warning rather than a persistent footer item;
+non-interactive `codex exec` confirms Hook completion but does not render the
+Hook message in its text output.
+
+The numbers come from the recall-token estimator and are a per-call compression
+proxy, not provider-verified or billable savings. Positive reductions use
+`saved`; negative reductions use `cost`.
+
+The `powercontext-project-context` skill uses four high-level work operations instead of
 assembling the low-level Handoff lifecycle manually: `create_work_contract`,
 `handoff_current_work`, `acknowledge_handoff`, and `record_task_outcome`.
 When the user says `交接`, `交接当前工作`, `handoff this work`, or an equivalent
@@ -65,8 +80,28 @@ request to one known Scope.
 the hook: the hook validates its PowerContext MCP URL and derives the HTTP API
 base by removing the final `/mcp` path segment. Change that file before
 installing the plugin when the loopback default is not appropriate. MCP URLs
-cannot contain credentials, query strings, or fragments; plain HTTP is accepted
-only for loopback hosts.
+cannot contain credentials, query strings, or fragments. Plain HTTP is accepted
+for loopback hosts by default. To configure a non-loopback HTTP server explicitly:
+
+```bash
+powercontext setup codex --server-url http://memory.example:8000 --allow-insecure-http
+```
+
+Setup saves nonsecret client settings under `hosts.codex` in
+`~/.config/powercontext/clients.json` (`POWERCONTEXT_CLIENT_CONFIG_FILE` overrides
+the path) and configures the installed MCP endpoint. Saved HTTP consent applies
+only to that endpoint, ignoring trailing slashes and the `/mcp` suffix.
+`POWERCONTEXT_CODEX_ALLOW_INSECURE_HTTP` overrides
+`POWERCONTEXT_CLIENT_ALLOW_INSECURE_HTTP`, including an explicit `false`; both
+override saved consent. Invalid boolean values are rejected. A direct
+`CodexPluginSettings(allow_insecure_http=...)` argument has highest priority.
+The MCP file remains authoritative for the URL; a URL environment variable
+does not redirect the hook independently of MCP.
+
+This setting governs PowerContext's hook HTTP requests. Codex owns the native
+MCP transport and its policy. HTTP sends request content and any authorization
+header without encryption; this opt-in does not disable HTTPS certificate
+verification.
 
 The hook strictly validates `powercontext.prepared-context.v1`, rejects redirects,
 caps response bodies at 1 MiB, and applies both per-request and shared wall-clock
@@ -74,10 +109,13 @@ deadlines. The Runtime owns final selection, rendering, exact citations, and the
 8000-byte output budget; the hook injects validated content unchanged.
 
 Optional local bearer authentication uses `POWERCONTEXT_CODEX_AUTHORIZATION`,
-whose value must be a complete `Bearer <token>` header. `.mcp.json` exposes it to
-Codex through an optional environment-backed header, and the hook reads the same
-value. Missing or empty values preserve the default unauthenticated flow. Never
-put the token in `.mcp.json`, the Server URL, or a static MCP header.
+whose value must be a complete `Bearer <token>` header. `powercontext setup
+codex` saves a URL-bound credential under
+`~/.codex/powercontext/credentials.json`; on Windows it also writes the matching
+value to the current user's environment so a restarted Codex Desktop can resolve
+the native MCP header. The hook reads the saved record, while an explicit process
+value overrides it. Missing credentials preserve the default unauthenticated
+flow. Never put the token in `.mcp.json`, the Server URL, or a static MCP header.
 
 Prompt capture is enabled by default. Set `POWERCONTEXT_CODEX_CAPTURE_PROMPTS=false`
 when prompts must not be persisted. Captured Sources are normally processed by

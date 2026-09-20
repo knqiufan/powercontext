@@ -28,7 +28,7 @@ from powercontext.client import PowerContextClient
 from powercontext.http import ResolveScopeBindingRequest
 
 from .scope import PowerContextScope
-from .settings import PowerContextLangChainSettings
+from .settings import ContextAssembly, PowerContextLangChainSettings
 
 _SHARED_HTTP_CLIENT: ContextVar[tuple[httpx.AsyncClient, bool] | None] = ContextVar(
     "powercontext_langchain_http_client", default=None
@@ -44,6 +44,8 @@ class ResolvedConfig:
     token: str | None = field(repr=False)
     timeout: float
     max_bytes: int
+    context_assembly: ContextAssembly | None = None
+    allow_insecure_http: bool = False
 
 
 def resolve_config(
@@ -56,12 +58,17 @@ def resolve_config(
     resolved_settings = settings or PowerContextLangChainSettings()
     resolved_scope = scope or PowerContextScope()
     token = resolved_scope.token if resolved_scope.token is not None else _secret_value(resolved_settings.token)
+    base_url, allow_insecure_http = resolved_settings.resolve_transport(
+        server_url=resolved_scope.base_url, allow_insecure_http=resolved_scope.allow_insecure_http
+    )
     return ResolvedConfig(
-        base_url=(resolved_scope.base_url or resolved_settings.base_url).strip(),
+        base_url=base_url,
         scope_id=_explicit_scope_id(resolved_scope.scope_id or resolved_settings.scope_id),
         token=token,
         timeout=resolved_scope.timeout if resolved_scope.timeout is not None else resolved_settings.timeout,
         max_bytes=resolved_settings.max_bytes,
+        context_assembly=resolved_settings.context_assembly,
+        allow_insecure_http=allow_insecure_http,
     )
 
 
@@ -100,8 +107,11 @@ def open_client(config: ResolvedConfig) -> PowerContextClient:
             token=config.token,
             http_client=client,
             trust_transport_security=trust_transport_security,
+            allow_insecure_http=config.allow_insecure_http,
         )
-    return PowerContextClient(config.base_url, token=config.token, timeout=config.timeout)
+    return PowerContextClient(
+        config.base_url, token=config.token, timeout=config.timeout, allow_insecure_http=config.allow_insecure_http
+    )
 
 
 @contextmanager

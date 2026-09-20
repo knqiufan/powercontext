@@ -4,9 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm generate && next dev",
-    "build": "pnpm generate && next build && pnpm verify:export",
+    "build": "pnpm test && pnpm check:links && next build && tsx scripts/redirect-docs.ts && pnpm verify:export",
+    "check:links": "pnpm test:links && pnpm generate && tsx scripts/validate-links.ts",
+    "test:links": "tsx --test tests/link-validation.test.ts",
     "generate": "tsx scripts/generate-content.ts",
     "preview": "serve out",
+    "test": "node --import tsx --test tests/*.test.ts",
     "types:check": "next typegen && tsc --noEmit",
     "verify:export": "tsx scripts/verify-static-export.ts",
     "lint": "oxlint"
@@ -29,6 +32,7 @@
     "@types/node": "26.3.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
+    "next-validate-link": "1.6.7",
     "oxlint": "1.80.0",
     "postcss": "8.5.23",
     "serve": "14.2.6",

@@ -21,7 +21,9 @@ import { runRecallPreStep, type RecallInput } from '../src/recall.ts'
 import type { ResolvedConfig } from '../src/config.ts'
 
 const config: ResolvedConfig = {
+  sources: { baseUrl: 'plugin', authorization: 'default', scopeId: 'plugin' },
   baseUrl: 'http://127.0.0.1:8000',
+  allowInsecureHttp: false,
   authorization: undefined,
   scopeId: 'project:demo',
   timeoutMs: 4000,
@@ -416,4 +418,22 @@ describe('runRecallPreStep fail-open', () => {
     })
     expect(log).toHaveBeenCalledWith({ event: 'capture_content_source', outcome: 'ok', status: 202 })
   })
+})
+
+
+it('forwards explicit assembly and delivers standard text intact', async () => {
+  const content = '\n# PowerContext historical context\n>     原始文本\n'
+  const assembly = { sections: [{ family: 'memory', limit: 3 }], show: ['recall_rank'] }
+  const request = vi.fn(async () => ({
+    kind: 'json' as const, status: 200, requestId: undefined,
+    value: { schema: 'powercontext.prepared-context.v1', status: 'ready', content, content_bytes: Buffer.byteLength(content, 'utf8') },
+  }))
+  const wrapContent = vi.fn((text: string) => ({ role: 'user', content: [{ type: 'text', text }] }))
+  await runRecallPreStep(input({
+    client: { request } as never,
+    config: { ...config, contextAssembly: assembly, capturePrompts: false },
+    wrapContent,
+  }))
+  expect(request).toHaveBeenCalledWith('prepare_context', expect.objectContaining({ assembly }), undefined)
+  expect(wrapContent.mock.calls[0][0].endsWith(content)).toBe(true)
 })

@@ -16,100 +16,221 @@
 
 import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parse } from 'yaml';
+import { absoluteSiteUrl, basePath, withBasePath } from '../src/lib/urls';
 
 const websiteDirectory = path.resolve('.');
 const repositoryDirectory = path.resolve(websiteDirectory, '..');
 const outputDirectory = path.join(websiteDirectory, 'out');
-const prerenderManifestPath = path.join(websiteDirectory, '.next', 'prerender-manifest.json');
-const pythonDirectory = path.join(websiteDirectory, '.generated', 'python');
+const docsDirectory = path.join(repositoryDirectory, 'docs');
 const locales = ['en', 'zh'] as const;
-const httpMethods = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options', 'trace'] as const;
 
-type PythonModule = {
-  path?: string;
-  modules?: Record<string, PythonModule>;
-  classes?: Record<string, { path?: string }>;
-};
+async function collectHtmlFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map((entry) => {
+      const entryPath = path.join(directory, entry.name);
+      return entry.isDirectory() ? collectHtmlFiles(entryPath) : [entryPath];
+    }),
+  );
 
-function outputPage(route: string) {
-  const segments = route.split('/').filter(Boolean);
-  return path.join(outputDirectory, ...segments, 'index.html');
+  return files.flat().filter((file) => file.endsWith('.html'));
 }
 
-function collectPythonPaths(module: PythonModule, paths: Set<string>) {
-  if (module.path) paths.add(module.path.replaceAll('.', '/'));
-
-  for (const classDefinition of Object.values(module.classes ?? {})) {
-    if (classDefinition.path) paths.add(classDefinition.path.replaceAll('.', '/'));
-  }
-
-  for (const childModule of Object.values(module.modules ?? {})) {
-    collectPythonPaths(childModule, paths);
-  }
+function routeFromOutputFile(file: string) {
+  const relativePath = path.relative(outputDirectory, file).split(path.sep).join('/');
+  const routeDirectory = path.posix.dirname(relativePath);
+  return routeDirectory === '.' ? '/' : `/${routeDirectory}`;
 }
 
-const openapi = parse(
-  await readFile(path.join(repositoryDirectory, 'openapi', 'powercontext.yaml'), 'utf8'),
-) as {
-  paths?: Record<string, Record<string, { operationId?: string }>>;
-};
-
-const httpRoutes = new Set<string>(['/api']);
-for (const pathItem of Object.values(openapi.paths ?? {})) {
-  for (const method of httpMethods) {
-    const operationId = pathItem[method]?.operationId;
-    if (!operationId) continue;
-    httpRoutes.add(`/api/${operationId}`);
-  }
+function normalizeRoute(pathname: string) {
+  if (pathname === '/') return pathname;
+  return pathname.replace(/\/$/, '');
 }
 
-const pythonPaths = new Set<string>();
-const pythonFiles = (await readdir(pythonDirectory)).filter((file) => file.endsWith('.json'));
-for (const file of pythonFiles) {
-  const module = JSON.parse(await readFile(path.join(pythonDirectory, file), 'utf8')) as PythonModule;
-  collectPythonPaths(module, pythonPaths);
+function renderedMarkup(document: string) {
+  return document.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 }
 
-const pythonRoutes = new Set<string>();
+const rfcRoutes = new Set<string>();
+const developmentRoutes = new Set<string>();
 for (const locale of locales) {
-  pythonRoutes.add(`/${locale}/modules`);
-  for (const pythonPath of pythonPaths) {
-    pythonRoutes.add(`/${locale}/modules/${pythonPath}`);
+  const rfcDirectory = path.join(docsDirectory, locale, 'rfcs');
+  const rfcFiles = (await readdir(rfcDirectory)).filter((file) => file.endsWith('.md'));
+  const developmentDirectory = path.join(docsDirectory, locale, 'development');
+  const developmentFiles = (await readdir(developmentDirectory)).filter((file) => file.endsWith('.md'));
+
+  for (const file of rfcFiles) {
+    const slug = file === 'README.md' ? '' : `/${file.slice(0, -'.md'.length)}`;
+    rfcRoutes.add(`/${locale}/rfcs${slug}`);
+  }
+  for (const file of developmentFiles) {
+    developmentRoutes.add(`/${locale}/development/${file.slice(0, -'.md'.length)}`);
   }
 }
 
-const prerenderManifest = JSON.parse(await readFile(prerenderManifestPath, 'utf8')) as {
-  routes: Record<string, unknown>;
-};
-const prerenderedRoutes = new Set(Object.keys(prerenderManifest.routes));
-const expectedRoutes = [...httpRoutes, ...pythonRoutes];
-const missingFromManifest = expectedRoutes.filter((route) => !prerenderedRoutes.has(route));
-const missingFromOutput: string[] = [];
-
-await Promise.all(
-  expectedRoutes.map(async (route) => {
-    try {
-      await access(outputPage(route));
-    } catch {
-      missingFromOutput.push(route);
-    }
-  }),
+const htmlFiles = await collectHtmlFiles(outputDirectory);
+const exportedDocuments = new Map(
+  await Promise.all(
+    htmlFiles.map(async (file) => [routeFromOutputFile(file), await readFile(file, 'utf8')] as const),
+  ),
 );
+const requiredRoutes = ['/', '/en', '/zh', '/en/docs', '/zh/docs', '/api', '/en/modules', '/zh/modules'];
+const missingRequiredRoutes = requiredRoutes.filter((route) => !exportedDocuments.has(route));
+const missingRfcRoutes = [...rfcRoutes].filter((route) => !exportedDocuments.has(route));
+const missingDevelopmentRoutes = [...developmentRoutes].filter((route) => !exportedDocuments.has(route));
 
-if (missingFromManifest.length > 0 || missingFromOutput.length > 0) {
-  const details = [
-    missingFromManifest.length > 0
-      ? `Missing from Next prerender manifest:\n${missingFromManifest.sort().join('\n')}`
-      : undefined,
-    missingFromOutput.length > 0
-      ? `Missing from static output:\n${missingFromOutput.sort().join('\n')}`
-      : undefined,
-  ].filter(Boolean);
-
-  throw new Error(`Static API export is incomplete.\n\n${details.join('\n\n')}`);
+if (missingRequiredRoutes.length > 0 || missingRfcRoutes.length > 0 || missingDevelopmentRoutes.length > 0) {
+  const missingRoutes = [...missingRequiredRoutes, ...missingRfcRoutes, ...missingDevelopmentRoutes].sort();
+  throw new Error(`Public pages are missing from the static site:\n${missingRoutes.join('\n')}`);
 }
+
+const brokenLinks = new Set<string>();
+const missingAssets = new Set<string>();
+for (const [route, document] of exportedDocuments) {
+  const pageUrl = new URL(absoluteSiteUrl(route === '/' ? '/' : `${route}/`));
+  const markup = renderedMarkup(document);
+
+  for (const match of markup.matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)) {
+    const href = match[1].replaceAll('&amp;', '&');
+    const target = new URL(href, pageUrl);
+    if (target.origin !== pageUrl.origin) continue;
+
+    const targetPath = decodeURIComponent(target.pathname);
+    if (basePath && targetPath !== basePath && !targetPath.startsWith(`${basePath}/`)) {
+      brokenLinks.add(`${route} -> ${targetPath} (outside deployment base path)`);
+      continue;
+    }
+    const targetRoute = normalizeRoute(targetPath.slice(basePath.length) || '/');
+    if (!exportedDocuments.has(targetRoute)) brokenLinks.add(`${route} -> ${targetRoute}`);
+  }
+
+  for (const match of document.matchAll(/<(?:img|script)\b[^>]*\bsrc="([^"]+)"|<link\b[^>]*\bhref="([^"]+)"/g)) {
+    const href = (match[1] || match[2]).replaceAll('&amp;', '&');
+    const target = new URL(href, pageUrl);
+    if (target.origin === pageUrl.origin && target.pathname.endsWith('/_next/image')) {
+      missingAssets.add(`${route} -> ${target.pathname} (image optimizer is unavailable on a static host)`);
+      continue;
+    }
+    if (target.origin !== pageUrl.origin || !/\.(?:png|svg|webp|ico|jpg|jpeg|css|js)$/.test(target.pathname)) continue;
+    const targetPath = decodeURIComponent(target.pathname);
+    if (basePath && !targetPath.startsWith(`${basePath}/`)) {
+      missingAssets.add(`${route} -> ${targetPath} (outside deployment base path)`);
+      continue;
+    }
+    try {
+      await access(path.join(outputDirectory, targetPath.slice(basePath.length)));
+    } catch {
+      missingAssets.add(`${route} -> ${targetPath}`);
+    }
+  }
+}
+
+if (brokenLinks.size > 0) {
+  throw new Error(`Public pages contain broken internal links:\n${[...brokenLinks].sort().join('\n')}`);
+}
+
+if (missingAssets.size > 0) {
+  throw new Error(`Public pages contain missing local assets:\n${[...missingAssets].sort().join('\n')}`);
+}
+
+const rootDocument = exportedDocuments.get('/')!;
+const englishDocument = exportedDocuments.get('/en')!;
+const chineseDocument = exportedDocuments.get('/zh')!;
+const docsDocuments = {
+  en: exportedDocuments.get('/en/docs')!,
+  zh: exportedDocuments.get('/zh/docs')!,
+};
+const homeAlternates = [
+  `<link rel="alternate" hrefLang="en" href="${absoluteSiteUrl('/')}"`,
+  `<link rel="alternate" hrefLang="zh" href="${absoluteSiteUrl('/zh/')}"`,
+  `<link rel="alternate" hrefLang="x-default" href="${absoluteSiteUrl('/')}"`,
+];
+
+if (/http-equiv="refresh"/i.test(rootDocument) || !rootDocument.includes('Keep work moving')) {
+  throw new Error('Static root page does not render the default English site.');
+}
+
+if (
+  !rootDocument.includes('<html lang="en"')
+  || !englishDocument.includes('<html lang="en"')
+  || !chineseDocument.includes('<html lang="zh"')
+) {
+  throw new Error('Static localized pages do not declare the expected document language.');
+}
+
+if (
+  !rootDocument.includes(`<link rel="canonical" href="${absoluteSiteUrl('/')}"`)
+  || !englishDocument.includes(`<link rel="canonical" href="${absoluteSiteUrl('/')}"`)
+  || !chineseDocument.includes(`<link rel="canonical" href="${absoluteSiteUrl('/zh/')}"`)
+  || homeAlternates.some(
+    (alternate) =>
+      !rootDocument.includes(alternate)
+      || !englishDocument.includes(alternate)
+      || !chineseDocument.includes(alternate),
+  )
+) {
+  throw new Error('Static home pages do not declare the expected canonical and language alternate URLs.');
+}
+
+if (rootDocument.includes(`href="${withBasePath('/en/')}"`)) {
+  throw new Error('Static root page links to the duplicate English home URL.');
+}
+
+for (const [locale, document] of Object.entries(docsDocuments)) {
+  const markup = renderedMarkup(document);
+  const apiReferenceLabel = locale === 'en' ? 'API Reference' : 'API 参考';
+  const developerLabel = locale === 'en' ? 'Developer' : '开发者';
+  const productLabel = locale === 'en' ? 'Product' : '产品';
+  const journeyLabels = locale === 'en'
+    ? ['Get started', 'Connect Agents', 'Manage context', 'Deploy and operate', 'Develop with APIs']
+    : ['开始使用', '接入 Agent', '管理上下文', '部署与运维', '开发与 API'];
+  const developmentLabel = locale === 'en' ? 'Development' : '开发';
+  const productIndex = markup.indexOf(`>${productLabel}</p>`);
+  let journeyIndex = productIndex;
+  for (const label of journeyLabels) {
+    const index = markup.indexOf(`>${label}<`, journeyIndex);
+    if (index < journeyIndex) throw new Error(`Static ${locale} documentation is missing journey category ${label}.`);
+    journeyIndex = index;
+  }
+  const integrationMarkup = renderedMarkup(exportedDocuments.get(`/${locale}/docs/integrations/codex`)!);
+  for (const status of ['official', 'community', 'evaluation']) {
+    if (!integrationMarkup.includes(`data-status="${status}"`)) {
+      throw new Error(`Static ${locale} documentation is missing the ${status} integration badge.`);
+    }
+  }
+  const apiReferenceIndex = markup.indexOf(`>${apiReferenceLabel}</p>`);
+  const pythonApiIndex = markup.indexOf('>Python API</a>');
+  const developerIndex = markup.indexOf(`>${developerLabel}</p>`);
+  const rfcIndex = markup.indexOf('>RFCs<', developerIndex);
+  const developmentIndex = markup.indexOf(`>${developmentLabel}<`, rfcIndex);
+  const developerSection = markup.slice(developerIndex, apiReferenceIndex);
+  const collapsedFolders = developerSection.match(/aria-expanded="false"/g)?.length ?? 0;
+
+  if (
+    productIndex === -1
+    || developerIndex < journeyIndex
+    || rfcIndex < developerIndex
+    || developmentIndex < rfcIndex
+    || apiReferenceIndex < developmentIndex
+    || pythonApiIndex < apiReferenceIndex
+    || collapsedFolders < 2
+  ) {
+    throw new Error(
+      `Static ${locale} documentation does not show the expected Product, Developer, and API Reference sections.`,
+    );
+  }
+}
+
+const exportedRoutes = [...exportedDocuments.keys()];
+const httpApiPageCount = exportedRoutes.filter((route) => route === '/api' || route.startsWith('/api/')).length;
+const pythonApiPageCount = exportedRoutes.filter((route) => /^\/(en|zh)\/modules(?:\/|$)/.test(route)).length;
+const rfcPageCount = exportedRoutes.filter((route) => /^\/(en|zh)\/rfcs(?:\/|$)/.test(route)).length;
+const developmentPageCount = exportedRoutes.filter(
+  (route) => /^\/(en|zh)\/development(?:\/|$)/.test(route),
+).length;
 
 console.log(
-  `Verified ${httpRoutes.size} HTTP API pages and ${pythonRoutes.size} Python API pages in the static export.`,
+  `Verified ${exportedDocuments.size} public pages and their internal links `
+  + `(${httpApiPageCount} HTTP API, ${pythonApiPageCount} Python API, ${rfcPageCount} RFC, `
+  + `${developmentPageCount} development).`,
 );

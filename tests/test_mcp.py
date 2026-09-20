@@ -13,8 +13,12 @@
 # limitations under the License.
 
 import asyncio
+import json
 import logging
+import os
+import re
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Self, TypeVar
 
@@ -30,6 +34,35 @@ from powercontext.server.context import is_internal_bridge
 from powercontext.server.mcp import create_mcp_server, mount_mcp
 
 ResultT = TypeVar("ResultT")
+
+
+def test_mcp_guidance_is_visible_without_loading_a_skill() -> None:
+    async def inspect() -> tuple[str, list[Any]]:
+        async with Client(create_mcp_server(create_app())) as client:
+            assert client.initialize_result is not None
+            return client.initialize_result.instructions or "", await client.list_tools()
+
+    guidance, tools = asyncio.run(inspect())
+    assert guidance
+    names = {tool.name for tool in tools}
+    assert set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", guidance)) <= names
+    if directory := os.environ.get("POWERCONTEXT_GUIDANCE_EXPORT"):
+        root = Path(__file__).parents[1]
+        for host in ("codex", "claude-code", "workbuddy", "agent-plugin", "minimax"):
+            plugin = root / "integrations" / host
+            plugin /= "powercontext" if host == "agent-plugin" else "plugins/powercontext"
+            name = "powercontext-project-context"
+            content = (plugin / f"skills/{name}/SKILL.md").read_text(encoding="utf-8")
+            catalog = {
+                "host": host,
+                "guidance": guidance,
+                "tools": [
+                    {"name": tool.name, "description": tool.description, "parameters": tool.inputSchema}
+                    for tool in tools
+                ],
+                "skill": {"name": name, "content": content},
+            }
+            (Path(directory) / f"{host}.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
 
 
 def run_async(operation: Callable[[], Coroutine[Any, Any, ResultT]]) -> ResultT:
@@ -59,8 +92,12 @@ def test_mcp_exposes_only_data_plane_and_integration_control_operations() -> Non
         "finalize_handoff",
         "get_artifact_candidate",
         "get_memory_entry",
+        "get_topic_memory",
         "get_scope",
         "handoff_current_work",
+        "create_dream_run",
+        "get_dream_run",
+        "list_dream_runs",
         "list_artifact_candidates",
         "list_memory_entries",
         "list_scopes",
@@ -73,10 +110,27 @@ def test_mcp_exposes_only_data_plane_and_integration_control_operations() -> Non
         "revise_artifact_candidate",
         "revise_memory_entry",
         "search_memory",
+        "search_topic_memory",
         "set_scope_binding",
     }
     assert resource_count == 0
     assert prompt_count == 0
+
+
+def test_mcp_topic_memory_tools_are_read_only_and_flush_is_excluded() -> None:
+    async def inspect_annotations() -> dict[str, Any]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {tool.name: tool.annotations for tool in await client.list_tools()}
+
+    tools = run_async(inspect_annotations)
+
+    assert "flush_topic_memory" not in tools
+    for name in ("search_topic_memory", "get_topic_memory"):
+        annotations = tools[name]
+        assert annotations is not None
+        assert annotations.readOnlyHint is True
+        assert annotations.destructiveHint is False
+        assert annotations.openWorldHint is False
 
 
 def test_mcp_exposes_read_only_handoff_report_tools_only_when_feature_routes_are_enabled() -> None:

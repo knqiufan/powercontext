@@ -47,6 +47,13 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             inline=True,
         ),
         ProviderField(
+            key="allow_insecure_http",
+            label="Allow unencrypted HTTP",
+            kind=KIND_BOOL,
+            env_key="POWERCONTEXT_HERMES_ALLOW_INSECURE_HTTP",
+            description="Explicitly allow HTTP to the configured non-loopback server; does not disable TLS verification.",
+        ),
+        ProviderField(
             key="scope_id",
             label="Explicit Scope ID",
             kind=KIND_TEXT,
@@ -59,6 +66,14 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             kind=KIND_NUMBER,
             default="8000",
             description="Bounded context returned by /v1/context/prepare.",
+        ),
+        ProviderField(
+            key="context_assembly",
+            label="Context text assembly (JSON)",
+            kind=KIND_TEXT,
+            env_key="POWERCONTEXT_HERMES_CONTEXT_ASSEMBLY",
+            default="",
+            description="Optional JSON object selecting context sections, order, limits, and metadata. Use {} for standard text.",
         ),
         ProviderField(
             key="timeout",

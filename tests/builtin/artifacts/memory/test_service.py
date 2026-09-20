@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -24,6 +25,7 @@ from powercontext.artifacts import ArtifactRef
 from powercontext.builtin.artifacts.memory import (
     EmbeddingProfile,
     Memory,
+    MemoryBackend,
     MemoryCapabilities,
     MemoryChange,
     MemoryCommit,
@@ -34,6 +36,7 @@ from powercontext.builtin.artifacts.memory import (
     MemoryManifestEntry,
     MemoryProjection,
     MemoryRerankDecision,
+    MemorySearchChannels,
     MemoryService,
 )
 from powercontext.builtin.artifacts.memory.canonical import entry_content_hash, memory_content_hash
@@ -124,6 +127,67 @@ class _Float32VectorIndex(_RecordingVectorIndex):
                 )
             )
         return tuple(hydrated)
+
+
+QUERY_EMBEDDING_PROFILE = EmbeddingProfile(profile_id="query-v1", model="test:query", dimension=3)
+
+
+class _QueryRecordingEmbedding:
+    def __init__(self) -> None:
+        self.document_texts: list[str] = []
+        self.query_texts: list[str] = []
+        self.profile = QUERY_EMBEDDING_PROFILE
+
+    async def embed(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+        self.document_texts.extend(texts)
+        return EmbeddingResult(vectors=tuple((0.0, 1.0, 0.0) for _ in texts))
+
+    async def embed_query(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+        self.query_texts.extend(texts)
+        return EmbeddingResult(vectors=tuple((1.0, 0.0, 0.0) for _ in texts))
+
+
+class _QuerySearchBackend:
+    def __init__(self, memory: Memory) -> None:
+        self._memory = memory
+        self.query_vector: tuple[float, ...] | None = None
+
+    async def capabilities(self) -> MemoryCapabilities:
+        return MemoryCapabilities(fts=True, vector=True, hybrid=True, embedding_profile=QUERY_EMBEDDING_PROFILE)
+
+    async def get(self, _ref):
+        return self._memory
+
+    async def latest(self, _artifact_id):
+        return self._memory
+
+    async def vector_complete(self, _memories, _profile) -> bool:
+        return True
+
+    async def search(self, request, /) -> MemorySearchChannels:
+        self.query_vector = request.query_vector
+        return MemorySearchChannels()
+
+
+def test_memory_vector_search_uses_query_embedding_path() -> None:
+    memory = Memory(
+        artifact_id="memory",
+        revision=1,
+        content=MemoryContent(manifest=MemoryManifest(entries=())),
+    )
+
+    async def scenario() -> None:
+        embedding = _QueryRecordingEmbedding()
+        backend = _QuerySearchBackend(memory)
+        service = MemoryService(backend=cast(MemoryBackend, backend), embedding_model=embedding)
+
+        await service.search("project", memories=(memory,), mode="vector")
+
+        assert embedding.document_texts == []
+        assert embedding.query_texts == ["project"]
+        assert backend.query_vector == (1.0, 0.0, 0.0)
+
+    asyncio.run(scenario())
 
 
 def test_memory_search_applies_injected_reranker_after_coarse_fusion() -> None:
@@ -424,5 +488,31 @@ def test_memory_organize_normalizes_an_inactive_entry_without_semantic_revision(
             assert entry.kind == "preference"
             assert entry.text == "User prefers black tea."
             assert entry.previous_version_id == original.entry_version_id
+
+    asyncio.run(scenario())
+
+
+def test_memory_head_entries_matches_head_and_entries_read_separately() -> None:
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            service = (await contexts.get("head-entries")).artifacts.memory
+            initial = await service.remember(
+                memory=None,
+                entries=(
+                    MemoryEntryInput(kind="decision", text="Read a head and its entries together."),
+                    MemoryEntryInput(kind="fact", text="A head read from storage is already canonical."),
+                ),
+                mode="append",
+            )
+            assert initial is not None
+            forgotten = await service.forget(initial, entries=((await service.entries(initial))[0],), reason="done")
+
+            head = await service.head(forgotten.artifact_id)
+            separate = await service.entries(head)
+            combined_head, combined_entries = await service.head_entries(forgotten.artifact_id)
+
+            assert combined_head == head
+            assert combined_entries == separate
+            assert [item.state for item in combined_head.content.manifest.entries] == ["inactive", "active"]
 
     asyncio.run(scenario())

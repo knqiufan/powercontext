@@ -19,7 +19,7 @@ import asyncio
 import pytest
 
 from powercontext.artifacts import ArtifactAddress, ArtifactRef
-from powercontext.builtin.artifacts.experience import ExperienceContent, ExperienceDraft
+from powercontext.builtin.artifacts.experience import ExperienceContent, ExperienceDraft, ExperienceSearchOutcome
 from powercontext.builtin.artifacts.memory import MemoryEntryInput
 from powercontext.builtin.persistence.artifacts import ArtifactRepository
 from powercontext.builtin.persistence.errors import RepositoryNotFoundError
@@ -49,8 +49,8 @@ class _FailingExperienceIndex:
     async def replace(self, _connection, _scope_id, _experience, /) -> None:
         raise _IndexUnavailableError
 
-    async def search(self, _connection, _scope_id, _query, _limit, /):
-        return ()
+    async def search(self, _connection, _scope_id, _query, _limit, /, *, admission=None):
+        return ExperienceSearchOutcome()
 
     async def replace_skill(self, _connection, _scope_id, _skill, _package, /) -> None:
         pass
@@ -166,9 +166,9 @@ def test_published_experience_is_searchable_in_target_scope_immediately() -> Non
                     idempotency_key="publish-experience",
                 )
             )
-            hits = await contexts.search_experience(target_scope.scope_id, "projection updates atomic", 8)
+            outcome = await contexts.search_experience(target_scope.scope_id, "projection updates atomic", 8)
 
-            assert tuple(hit.artifact_ref for hit in hits) == (published.target.artifact,)
+            assert tuple(hit.artifact_ref for hit in outcome) == (published.target.artifact,)
 
     asyncio.run(scenario())
 
@@ -270,6 +270,52 @@ def test_publication_idempotency_key_cannot_select_another_revision() -> None:
                         idempotency_key="accepted-report",
                     )
                 )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("target_has_profile", [False, True])
+def test_profile_publication_is_rejected_without_changing_target(target_has_profile) -> None:
+    from sqlalchemy import func, select
+
+    from powercontext.builtin.persistence.tables import ARTIFACT_PUBLICATIONS_TABLE, PROFILE_POLICIES_TABLE
+    from powercontext.builtin.records import ArtifactWrite
+
+    async def scenario():
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            scopes = [
+                await contexts.scopes.create(ScopeDraft(title=name, summary=name, idempotency_key=name))
+                for name in ("Source", "Target")
+            ]
+            source_id, target_id = (scope.scope_id for scope in scopes)
+            await contexts.records.create_artifact(source_id, "profile", ArtifactWrite(content={"content": "# Source"}))
+            if target_has_profile:
+                await contexts.records.create_artifact(
+                    target_id, "profile", ArtifactWrite(content={"content": "# Target"})
+                )
+            before = await contexts.records.logical_artifacts(target_id)
+            request = ArtifactPublicationRequest(
+                source=ArtifactAddress(
+                    scope_id=source_id, artifact=ArtifactRef(family="profile", artifact_id="profile", revision=1)
+                ),
+                target_scope_id=target_id,
+                idempotency_key="profile-copy",
+            )
+            for _ in range(2):
+                with pytest.raises(ArtifactPublicationUnsupportedError) as error:
+                    await contexts.publications.publish(request)
+                assert error.value.family == "profile"
+            assert await contexts.records.logical_artifacts(target_id) == before
+            if target_has_profile:
+                saved = await contexts.records.get_artifact(target_id, "profile", "profile")
+                assert saved.revision == 1 and saved.content["content"] == "# Target\n"
+            async with contexts.database.transaction() as connection:
+                assert await connection.scalar(select(func.count()).select_from(ARTIFACT_PUBLICATIONS_TABLE)) == 0
+                assert await connection.scalar(
+                    select(func.count())
+                    .select_from(PROFILE_POLICIES_TABLE)
+                    .where(PROFILE_POLICIES_TABLE.c.scope_id == target_id)
+                ) == int(target_has_profile)
 
     asyncio.run(scenario())
 

@@ -55,7 +55,7 @@ def _write_package(root: Path) -> Path:
     script = package / "scripts" / "verify.py"
     script.write_text("print('verified')\n", encoding="utf-8")
     script.chmod(0o755)
-    (package / "references" / "policy.md").write_text("# Release policy\n", encoding="utf-8")
+    (package / "references" / "policy.md").write_bytes(b"# Release policy\n")
     (package / "assets" / "report.json").write_bytes(b'{"status":"pending"}\n')
     (package / ".hidden-note").write_text("Preserved.\n", encoding="utf-8")
     return package
@@ -73,9 +73,33 @@ def test_directory_package_round_trips_exact_files_and_executable_mode(tmp_path:
     assert snapshot.reference.file_count == 5
     assert package_file(snapshot, "references/policy.md") == b"# Release policy\n"
     assert (restored / ".hidden-note").read_text(encoding="utf-8") == "Preserved.\n"
-    assert (restored / "scripts" / "verify.py").stat().st_mode & stat.S_IXUSR
+    if os.name != "nt":
+        assert (restored / "scripts" / "verify.py").stat().st_mode & stat.S_IXUSR
     for entry in snapshot.entries:
         assert (restored / entry.path).read_bytes() == (package / entry.path).read_bytes()
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o755])
+def test_archive_round_trips_explicit_modes_and_exact_bytes(tmp_path: Path, mode: int) -> None:
+    script = zipfile.ZipInfo("scripts/verify.py")
+    script.create_system = 3
+    script.external_attr = (stat.S_IFREG | mode) << 16
+    content = b"print('verified')\r\n"
+    archive = _zip_entries((
+        ("SKILL.md", b"---\nname: release-check\ndescription: Verify a release.\n---\n"),
+        (script, content),
+    ))
+
+    snapshot = capture_skill_archive(archive)
+    restored = tmp_path / "restored"
+    materialize_skill_package(snapshot, restored)
+
+    assert next(entry for entry in snapshot.entries if entry.path == script.filename).mode == mode
+    assert package_file(snapshot, script.filename) == content
+    assert (restored / script.filename).read_bytes() == content
+    assert capture_skill_archive(snapshot.archive_bytes).reference == snapshot.reference
+    if os.name != "nt":
+        assert stat.S_IMODE((restored / script.filename).stat().st_mode) == mode
 
 
 def test_different_zip_order_converges_on_the_same_canonical_package(tmp_path: Path) -> None:
@@ -98,7 +122,6 @@ def test_different_zip_order_converges_on_the_same_canonical_package(tmp_path: P
     [
         ("../outside", b"bad"),
         (".env", b"SECRET=value"),
-        ("nested\\windows", b"bad"),
     ],
 )
 def test_archive_rejects_unsafe_paths(name: str, content: bytes) -> None:
@@ -108,6 +131,23 @@ def test_archive_rejects_unsafe_paths(name: str, content: bytes) -> None:
     ))
 
     with pytest.raises(SkillPackageError):
+        capture_skill_archive(archive)
+
+
+@pytest.mark.parametrize("name", ["nested\\windows", "nested\x00windows"])
+def test_archive_rejects_hostile_raw_entry_names(name: str) -> None:
+    archive = _zip_entries((
+        ("SKILL.md", b"---\nname: safe-skill\ndescription: Safe.\n---\n"),
+        (_raw_entry_name(name), b"bad"),
+    ))
+    # The fixture must keep the hostile bytes in the archive: zipfile
+    # normalizes backslashes on Windows and truncates names at NUL bytes on
+    # every platform while building the ZipInfo, so the names are assigned
+    # after construction and asserted against the raw archive names here.
+    with zipfile.ZipFile(io.BytesIO(archive)) as probe:
+        assert [item.orig_filename for item in probe.infolist()] == ["SKILL.md", name]
+
+    with pytest.raises(SkillPackageError, match="invalid path"):
         capture_skill_archive(archive)
 
 
@@ -259,3 +299,11 @@ def _zip_entries(entries) -> bytes:
         for name, content in entries:
             archive.writestr(name, content)
     return output.getvalue()
+
+
+def _raw_entry_name(name: str) -> zipfile.ZipInfo:
+    """Build an archive entry whose raw name bytes keep ``name`` verbatim."""
+
+    info = zipfile.ZipInfo("placeholder")
+    info.filename = name
+    return info

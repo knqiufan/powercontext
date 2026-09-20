@@ -81,13 +81,26 @@ def _definition(tmp_path: Path, **overrides: object) -> ServiceDefinition:
 def _secure_windows_file(path: Path) -> None:
     if os.name != "nt":
         return
-    account = subprocess.run(
-        ["whoami.exe"],  # noqa: S607
+    account = (
+        subprocess
+        .run(
+            ["whoami.exe"],  # noqa: S607
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=10,
+            check=True,
+        )
+        .stdout.decode("oem")
+        .strip()
+    )
+    # An elevated shell — what hosted Windows runners use — creates files owned
+    # by Administrators rather than by the account itself, which the loader rejects.
+    subprocess.run(
+        ["icacls.exe", str(path), "/setowner", account],  # noqa: S607
         capture_output=True,
-        text=True,
         timeout=10,
         check=True,
-    ).stdout.strip()
+    )
     subprocess.run(
         [  # noqa: S607
             "icacls.exe",
@@ -99,10 +112,35 @@ def _secure_windows_file(path: Path) -> None:
             "Administrators:(F)",
         ],
         capture_output=True,
-        text=True,
         timeout=10,
         check=True,
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Task Scheduler command decoding")
+def test_windows_support_preserves_native_command_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    message = "Access denied: café"
+    try:
+        output = message.encode("oem")
+    except UnicodeEncodeError:
+        pytest.skip("The system OEM code page cannot represent this diagnostic")
+    identity = b'"test\\user","S-1-5-21-1000"\r\n'
+    adapter = WindowsTaskSchedulerAdapter(home=tmp_path, user_account="test\\user", user_sid="S-1-5-21-1000")
+
+    def run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        # ``support`` resolves the current user before it queries the task, so
+        # whoami must succeed for this to exercise the scheduler command.
+        if command[0] == "whoami.exe":
+            return subprocess.CompletedProcess(command, 0, identity, b"")
+        return subprocess.CompletedProcess(command, 5, b"", output)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    support, detail = adapter.support()
+
+    assert support is SupportState.UNSUPPORTED
+    assert "Task Scheduler is unavailable" in detail
+    assert message in detail
 
 
 class FakeAdapter:
@@ -332,6 +370,30 @@ def test_service_controller_installs_and_starts_one_native_registration(tmp_path
     assert adapter.definition is not None
     assert adapter.definition.endpoint == "http://127.0.0.1:8000"
     assert adapter.events == ["write", "reload", "enable", "start:True"]
+
+
+def test_service_controller_allows_slow_native_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = FakeAdapter(tmp_path)
+    clock = 0.0
+
+    def monotonic() -> float:
+        return clock
+
+    def sleep(delay: float) -> None:
+        nonlocal clock
+        clock += delay
+
+    def probe(endpoint: str) -> ProbeResult:
+        if clock >= 45.0:
+            return ProbeResult(ProbeState.LIVE, f"{endpoint} status=ok")
+        return ProbeResult(ProbeState.UNREACHABLE, f"cannot reach {endpoint}")
+
+    monkeypatch.setattr("powercontext.service.controller.time.monotonic", monotonic)
+
+    status = ServiceController(adapter, probe=probe, sleep=sleep).install()
+
+    assert status.ok
+    assert clock >= 45.0
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="login auto-start opt-out is Windows-specific")
@@ -575,12 +637,22 @@ def test_service_install_requires_persistent_config_for_shell_server_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("POWERCONTEXT_SERVER_HTTP_PORT", "8123")
+    monkeypatch.setenv("POWERCONTEXT_HOME", "private-data-directory")
+    monkeypatch.setenv("POWERCONTEXT_SERVER_API_KEY", "secret-test-token")
     adapter = FakeAdapter(tmp_path)
 
     with pytest.raises(ServiceError, match="do not copy shell environment variables") as raised:
         ServiceController(adapter).install()
 
     assert raised.value.exit_code == 2
+    message = str(raised.value)
+    assert "POWERCONTEXT_SERVER_HTTP_PORT" in message
+    assert "POWERCONTEXT_HOME" in message
+    assert "POWERCONTEXT_SERVER_HTTP_PORT=8123" in message
+    assert "POWERCONTEXT_HOME=private-data-directory" in message
+    assert "POWERCONTEXT_SERVER_API_KEY=<your-current-value>" in message
+    assert "secret-test-token" not in message
+    assert "powercontext service install --env-file" in message
     assert adapter.events == []
 
 
@@ -632,7 +704,6 @@ def test_service_install_rejects_a_group_readable_environment_file(tmp_path: Pat
         subprocess.run(
             ["icacls.exe", str(environment), "/grant", "*S-1-5-32-545:(R)"],  # noqa: S607
             capture_output=True,
-            text=True,
             timeout=10,
             check=True,
         )
@@ -873,29 +944,87 @@ def test_windows_loaded_registration_rejects_extra_task_elements(
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected"),
+    ("status", "last_result", "expected"),
     [
-        ({"State": "Running", "LastTaskResult": 0}, ManagerState.ACTIVE),
-        ({"State": "Ready", "LastTaskResult": 0x41303}, ManagerState.INACTIVE),
-        ({"State": "Ready", "LastTaskResult": 1}, ManagerState.FAILED),
-        ({"State": "Disabled", "LastTaskResult": 0}, ManagerState.INACTIVE),
-        ({"State": "Running", "LastTaskResult": 0, "状态": "正在运行"}, ManagerState.ACTIVE),
+        ("Running", "0", ManagerState.ACTIVE),
+        ("Running", "267009", ManagerState.ACTIVE),
+        ("Ready", "267011", ManagerState.INACTIVE),
+        ("Ready", "1", ManagerState.FAILED),
+        ("Disabled", "0", ManagerState.INACTIVE),
+        # The status text is localized, but the running result code is stable.
+        ("正在运行", "267009", ManagerState.ACTIVE),
+        ("准备就绪", "0", ManagerState.INACTIVE),
+        ("unknown", "not-a-result", ManagerState.UNKNOWN),
     ],
 )
-def test_windows_manager_state_uses_locale_independent_task_info(
+def test_windows_manager_state_uses_schtasks_task_info(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    payload: dict[str, object],
+    status: str,
+    last_result: str,
     expected: ManagerState,
+) -> None:
+    adapter = WindowsTaskSchedulerAdapter(config_home=tmp_path)
+    output = f'"HOST","{adapter.identifier}","N/A","{status}","Interactive only","Never","{last_result}"\n'
+    monkeypatch.setattr(
+        adapter,
+        "_run_task_info",
+        Mock(return_value=subprocess.CompletedProcess(["schtasks.exe"], 0, output, "")),
+    )
+
+    assert adapter.manager_state() is expected
+
+
+def test_windows_manager_state_accepts_schtasks_csv_without_a_host_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = WindowsTaskSchedulerAdapter(config_home=tmp_path)
+    output = f'"{adapter.identifier}","N/A","Running","Interactive only","Never","0"\n'
+    monkeypatch.setattr(
+        adapter,
+        "_run_task_info",
+        Mock(return_value=subprocess.CompletedProcess(["schtasks.exe"], 0, output, "")),
+    )
+
+    assert adapter.manager_state() is ManagerState.ACTIVE
+
+
+def test_windows_manager_state_treats_a_missing_task_as_inactive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = WindowsTaskSchedulerAdapter(config_home=tmp_path)
     monkeypatch.setattr(
         adapter,
         "_run_task_info",
-        Mock(return_value=subprocess.CompletedProcess(["powershell.exe"], 0, json.dumps(payload), "")),
+        Mock(return_value=subprocess.CompletedProcess(["schtasks.exe"], -2147024894, "", "")),
     )
 
-    assert adapter.manager_state() is expected
+    assert adapter.manager_state() is ManagerState.INACTIVE
+
+
+def test_windows_task_info_uses_schtasks_instead_of_powershell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = WindowsTaskSchedulerAdapter(config_home=tmp_path)
+    run = Mock(return_value=subprocess.CompletedProcess(["schtasks.exe"], 0, "", ""))
+    monkeypatch.setattr(adapter, "_run", run)
+
+    adapter._run_task_info(check=False)
+
+    run.assert_called_once_with(
+        "/Query",
+        "/TN",
+        adapter.identifier,
+        "/FO",
+        "CSV",
+        "/NH",
+        "/V",
+        "/HRESULT",
+        check=False,
+    )
 
 
 def test_windows_uninstall_recovery_uses_scoped_task_commands(tmp_path: Path) -> None:
@@ -1084,6 +1213,27 @@ def test_launchd_stop_waits_until_bootout_removes_the_loaded_job(
     adapter.stop()
 
     run.assert_called_once_with("bootout", "gui/501/com.oceanbase.powercontext")
+
+
+def test_launchd_start_kickstarts_a_newly_bootstrapped_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LaunchdUserAdapter(home=tmp_path, uid=501)
+    monkeypatch.setattr(
+        adapter,
+        "loaded_registration",
+        lambda: ManagerRegistration(ManagerOwnershipState.NOT_LOADED),
+    )
+    run = Mock()
+    monkeypatch.setattr(adapter, "_run", run)
+
+    adapter.start(reload_definition=False)
+
+    assert run.call_args_list == [
+        (("bootstrap", "gui/501", str(adapter.artifact_path)), {}),
+        (("kickstart", "gui/501/com.oceanbase.powercontext"), {}),
+    ]
 
 
 @pytest.mark.parametrize("corruption", ["fragment", "path", "arguments", "marker", "metadata"])
@@ -1381,6 +1531,136 @@ def test_service_install_cli_prompts_for_login_autostart(monkeypatch: pytest.Mon
     confirm.assert_called_once_with("Enable automatic Server startup when you log in?", default=False)
     controller.install.assert_called_once_with(env_file=None, start_on_login=False)
     assert "without login auto-start" in result.output
+    assert "environment file: not configured" in result.output
+    assert "POWERCONTEXT_SERVER_AUTH_TOKEN" in result.output
+    assert "the value is never printed" in result.output
+    assert "Inference capability notice" in result.output
+    assert "可能影响部分制品功能" in result.output
+    assert "https://powercontext.oceanbase.io/en/docs/reference/configuration/" in result.output
+
+
+def test_service_install_cli_reports_the_environment_file_without_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_ACCESS_MODE=disabled\n", encoding="utf-8")
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    assert f"environment file: {environment.resolve()} (mode 0600)" in result.output
+    assert "token location: POWERCONTEXT_SERVER_AUTH_TOKEN" in result.output
+    assert "the value is never printed" in result.output
+    assert "Inference capability notice" in result.output
+
+
+def test_service_install_preflight_keeps_the_environment_file_authoritative(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_HTTP_HOST=127.0.0.1\n", encoding="utf-8")
+    monkeypatch.setenv("POWERCONTEXT_SERVER_HTTP_HOST", "0.0.0.0")  # noqa: S104 - exercise the rejected non-loopback shell value.
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    controller.install.assert_called_once_with(env_file=environment, start_on_login=True)
+
+
+def test_service_install_cli_expands_the_environment_file_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # Windows expanduser reads USERPROFILE rather than HOME.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    environment = tmp_path / "powercontext.env"
+    environment.write_text("POWERCONTEXT_SERVER_ACCESS_MODE=disabled\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        service_app,
+        ["install", "--env-file", "~/powercontext.env", "--start-on-login"],
+    )
+
+    assert result.exit_code == 0
+    controller.install.assert_called_once_with(env_file=environment, start_on_login=True)
+    assert f"environment file: {environment.resolve()} (mode 0600)" in result.output
+
+
+def test_service_install_cli_omits_inference_notice_when_models_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status = ServiceStatus(
+        support=SupportState.SUPPORTED,
+        registration=RegistrationState.INSTALLED,
+        definition=DefinitionState.CURRENT,
+        manager=ManagerState.ACTIVE,
+        server_liveness=LivenessState.LIVE,
+        endpoint="http://127.0.0.1:8000",
+        log_location="fake logs",
+        manager_ownership=ManagerOwnershipState.OWNED,
+    )
+    controller = Mock()
+    controller.install.return_value = status
+    monkeypatch.setattr(service_cli, "_controller", lambda: controller)
+    environment = tmp_path / "powercontext.env"
+    environment.write_text(
+        "\n".join((
+            "POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL=openai-chat:test-generation",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_MODEL=openai:test-embedding",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_PROFILE_ID=test-profile",
+            "POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_DIMENSION=3",
+            "",
+        )),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(service_app, ["install", "--env-file", str(environment), "--start-on-login"])
+
+    assert result.exit_code == 0
+    assert "Inference capability notice" not in result.output
 
 
 def test_service_uninstall_cli_renders_partial_failure_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1418,7 +1698,7 @@ def test_service_launcher_hands_control_to_the_foreground_server_runner(
         "probe_server",
         lambda _endpoint: ProbeResult(ProbeState.UNREACHABLE, "not listening"),
     )
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     data_dir = tmp_path / "data"
     exit_code = service_launcher.main(["--endpoint", "http://127.0.0.1:8000", "--data-dir", str(data_dir)])
@@ -1445,8 +1725,7 @@ def test_service_launcher_pins_the_recorded_data_directory(
         lambda _endpoint: ProbeResult(ProbeState.UNREACHABLE, "not listening"),
     )
     monkeypatch.setattr(
-        service_launcher.server_cli,
-        "_run_configured_server",
+        "powercontext.server.cli._run_configured_server",
         lambda _settings: observed_data.append(powercontext_data_dir()),
     )
 
@@ -1471,7 +1750,7 @@ def test_service_launcher_does_not_start_over_an_existing_powercontext_server(
         "probe_server",
         lambda endpoint: ProbeResult(ProbeState.LIVE, f"{endpoint} status=ok"),
     )
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     exit_code = service_launcher.main(["--endpoint", "http://127.0.0.1:8000", "--data-dir", str(tmp_path / "data")])
 
@@ -1495,7 +1774,7 @@ def test_service_launcher_can_redirect_server_output_to_owned_log_files(
         print("server output")
         print("server error", file=sys.stderr)
 
-    monkeypatch.setattr(service_launcher.server_cli, "_run_configured_server", run_server)
+    monkeypatch.setattr("powercontext.server.cli._run_configured_server", run_server)
 
     exit_code = service_launcher.main([
         "--endpoint",

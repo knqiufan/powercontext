@@ -16,15 +16,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Literal, Protocol
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from powercontext.artifacts import ArtifactRef
+from powercontext.artifacts import ArtifactRef, MemoryCitation
 from powercontext.sources import SourceRef
 
-BaseArtifactFamily = Literal["memory", "experience", "skill", "handoff"]
+if TYPE_CHECKING:
+    from powercontext.builtin.artifacts.memory import MemoryEntryVersion
+    from powercontext.builtin.persistence.cursor_codec import SignedCursorCodec
+    from powercontext.builtin.tags import ArtifactTagSet, TagFilter, TagQuery, TagQueryPage, TagTarget
+
+BaseArtifactFamily = Literal["memory", "experience", "skill", "handoff", "profile", "prompt", "topic-memory"]
+ArtifactReadFamily = Literal["memory", "experience", "skill", "handoff", "profile", "prompt", "topic-memory"]
 
 
 class _RecordModel(BaseModel):
@@ -40,12 +47,21 @@ class SourceRecord(_RecordModel):
     content: JsonValue
     position: int
     content_digest: str
+    handoff_receipt: bool = Field(default=False, exclude=True)
+
+
+class SourceRecordPage(_RecordModel):
+    """One stable page of public Sources."""
+
+    items: tuple[SourceRecord, ...]
+    next_cursor: str | None
 
 
 class ArtifactWrite(_RecordModel):
     """Complete family-specific content for one Artifact write."""
 
     content: dict[str, JsonValue]
+    prompt_key: str | None = None
 
 
 class ArtifactCreated(_RecordModel):
@@ -63,12 +79,13 @@ class ArtifactRecord(_RecordModel):
     """One immutable Artifact revision with direct lineage."""
 
     scope_id: str
-    family: BaseArtifactFamily
+    family: ArtifactReadFamily
     artifact_id: str
     revision: int
     content: dict[str, JsonValue]
     sources: tuple[SourceRef, ...]
     artifacts: tuple[ArtifactRef, ...]
+    memory_citations: tuple[MemoryCitation, ...] = ()
     content_digest: str
 
 
@@ -76,12 +93,24 @@ class ArtifactCollectionItem(_RecordModel):
     """One active Artifact head without content or lineage."""
 
     scope_id: str
-    family: BaseArtifactFamily
+    family: ArtifactReadFamily
     artifact_id: str
     revision: int
     sources: tuple[SourceRef, ...]
     artifacts: tuple[ArtifactRef, ...]
     content_digest: str
+    title: str | None = None
+    summary: str | None = None
+    published_at: datetime | None = None
+    source_count: int | None = None
+
+
+class LogicalArtifactRecord(_RecordModel):
+    """A committed logical identity, without content or revision selection."""
+
+    family: str
+    artifact_id: str
+    entry_id: str | None = None
 
 
 class ArtifactRecordPage(_RecordModel):
@@ -89,6 +118,30 @@ class ArtifactRecordPage(_RecordModel):
 
     items: tuple[ArtifactCollectionItem, ...]
     next_cursor: str | None
+
+
+class ArtifactRevisionPage(_RecordModel):
+    """One descending, snapshot-bounded page of immutable Artifact revisions."""
+
+    items: tuple[ArtifactCollectionItem, ...]
+    next_cursor: str | None
+
+
+class ArtifactListReader(Protocol):
+    """Topic Memory adapter for the standard Artifact list."""
+
+    family: str
+
+    async def query(
+        self,
+        scope_id: str,
+        /,
+        *,
+        limit: int,
+        cursor: str | None,
+        tag_filter: TagFilter | None,
+        cursor_codec: SignedCursorCodec,
+    ) -> ArtifactRecordPage: ...
 
 
 class ScopeSummary(_RecordModel):
@@ -119,7 +172,7 @@ class BaseAccessError(Exception):
 class BaseValueNotFoundError(BaseAccessError):
     """Report an absent or non-visible Source or Artifact."""
 
-    def __init__(self, kind: Literal["source", "artifact"], identity: object) -> None:
+    def __init__(self, kind: str, identity: object) -> None:
         self.kind = kind
         self.identity = identity
         super().__init__(f"{kind} was not found")
@@ -128,7 +181,7 @@ class BaseValueNotFoundError(BaseAccessError):
 class BaseValueConflictError(BaseAccessError):
     """Report an identity that already names different durable state."""
 
-    def __init__(self, kind: Literal["source", "artifact"], identity: object) -> None:
+    def __init__(self, kind: str, identity: object) -> None:
         self.kind = kind
         self.identity = identity
         super().__init__(f"{kind} identity conflicts with durable state")
@@ -186,6 +239,12 @@ class ArtifactRevisionPreconditionError(BaseAccessError):
 class RecordService(Protocol):
     """Persistence-backed base Source, Artifact, and Scope operations."""
 
+    async def migrate_handoff_receipts(
+        self,
+        committed_identity_lookup: Callable[[str, str], Awaitable[object | None]],
+        /,
+    ) -> tuple[int, int]: ...
+
     async def create_source(
         self,
         scope_id: str,
@@ -202,9 +261,21 @@ class RecordService(Protocol):
         content: JsonValue,
         metadata: Mapping[str, JsonValue],
         /,
+        *,
+        handoff_receipt: bool = False,
     ) -> SourceRecord: ...
 
     async def get_source(self, scope_id: str, source_type: str, source_id: str, /) -> SourceRecord: ...
+
+    async def list_sources(
+        self,
+        scope_id: str,
+        /,
+        *,
+        limit: int,
+        cursor: str | None,
+        caller: str = "runtime",
+    ) -> SourceRecordPage: ...
 
     async def create_artifact(
         self,
@@ -225,6 +296,21 @@ class RecordService(Protocol):
         /,
     ) -> ArtifactRecord: ...
 
+    async def list_artifact_revisions(
+        self,
+        scope_id: str,
+        family: str,
+        artifact_id: str,
+        /,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> ArtifactRevisionPage: ...
+
+    async def current_memory_entry(self, scope_id: str, artifact_id: str, entry_id: str, /) -> MemoryEntryVersion: ...
+
+    async def logical_artifacts(self, scope_id: str, /) -> tuple[LogicalArtifactRecord, ...]: ...
+
     async def query_artifacts(
         self,
         scope_id: str,
@@ -233,7 +319,16 @@ class RecordService(Protocol):
         *,
         limit: int,
         cursor: str | None,
+        tag_filter: TagFilter | None = None,
     ) -> ArtifactRecordPage: ...
+
+    async def get_tags(self, scope_id: str, target: TagTarget) -> ArtifactTagSet: ...
+
+    async def replace_tags(
+        self, scope_id: str, target: TagTarget, tags: tuple[str, ...], *, expected_etag: str
+    ) -> ArtifactTagSet: ...
+
+    async def query_tags(self, scope_id: str, query: TagQuery, *, caller: str = "runtime") -> TagQueryPage: ...
 
     async def replace_artifact(
         self,
