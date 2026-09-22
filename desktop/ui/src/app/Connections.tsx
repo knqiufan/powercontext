@@ -24,15 +24,23 @@ import type {
 } from "../generated/ipc";
 import { desktopApi } from "../shared/ipc";
 import { connectionMessages, connectionError } from "./connection-messages";
-import type { Language } from "./messages";
+import { messages, type Language } from "./messages";
+import connectionsIcon from "../assets/connections.svg";
 
 type Props = {
   state: DesktopState | null;
   language: Language;
   onState: (value: DesktopState) => void;
   onDirty: (value: boolean) => void;
+  addSignal?: number;
 };
-export function Connections({ state, language, onState, onDirty }: Props) {
+export function Connections({
+  state,
+  language,
+  onState,
+  onDirty,
+  addSignal = 0,
+}: Props) {
   const t = connectionMessages[language];
   const [selected, setSelected] = useState<string | null>(null);
   const profile = state?.profiles.find((p) => p.id === selected);
@@ -69,6 +77,9 @@ export function Connections({ state, language, onState, onDirty }: Props) {
   useEffect(() => {
     reset(profile);
   }, [selected, profile?.revision]);
+  useEffect(() => {
+    if (addSignal > 0) select(null);
+  }, [addSignal]);
   function change(target = false) {
     setDirty(true);
     onDirty(true);
@@ -139,34 +150,55 @@ export function Connections({ state, language, onState, onDirty }: Props) {
         ? connectionError(value.error, language)
         : t.unverified;
   }
+  const isActive = !!profile && state?.active?.connectionId === profile.id;
+  const readiness = report?.readiness.value?.status;
+  const hasCredential =
+    !!profile &&
+    (profile.credentialState === "stored" ||
+      profile.credentialState === "session_only") &&
+    !invalidated.current;
   return (
     <div className="connection-grid">
-      <section className="card">
-        <button onClick={() => select(null)} disabled={busy}>
-          {t.add}
-        </button>
+      <section className="card stack">
+        <div className="card-heading">
+          <h2>{t.savedConnections}</h2>
+        </div>
+        {state && state.profiles.length === 0 && (
+          <p>{messages[language].noConnections}</p>
+        )}
         <ul className="profile-list">
           {state?.profiles.map((p) => (
             <li key={p.id}>
               <button
+                className="profile-item"
                 aria-pressed={selected === p.id}
                 onClick={() => select(p.id)}
                 disabled={busy}
               >
-                {p.name}
+                <img src={connectionsIcon} alt="" />
+                <span className="profile-main">
+                  <span className="profile-name">{p.name}</span>
+                  <span className="profile-endpoint">{p.endpoint}</span>
+                </span>
+                {state.active?.connectionId === p.id ? (
+                  <span className="badge success">{t.activeBadge}</span>
+                ) : (
+                  <span className="badge subtle">{t.notActiveBadge}</span>
+                )}
               </button>
-              {state.active?.connectionId === p.id && (
-                <span className="badge">{t.active}</span>
-              )}
             </li>
           ))}
         </ul>
         {state?.pendingCredentialCleanup ? (
           <p role="status">{t.cleanup}</p>
         ) : null}
+        <p className="note-line">{t.selectHint}</p>
       </section>
       <section className="card stack">
-        <h2>{profile ? profile.name : t.add}</h2>
+        <div className="card-heading">
+          <h2>{profile ? profile.name : t.add}</h2>
+          {isActive && <span className="badge success">{t.activeBadge}</span>}
+        </div>
         {dirty && <p role="status">{t.dirty}</p>}
         {error != null && (
           <p role="alert">{connectionError(error, language)}</p>
@@ -197,6 +229,7 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               }}
             />
           </label>
+          <p className="field-hint">{t.endpointHint}</p>
           <label>
             {t.authentication}
             <select
@@ -212,26 +245,30 @@ export function Connections({ state, language, onState, onDirty }: Props) {
           </label>
           {authentication === "bearer" && (
             <>
-              {profile && <p>{t[profile.credentialState]}</p>}
-              {profile &&
-                (profile.credentialState === "stored" ||
-                  profile.credentialState === "session_only") &&
-                !invalidated.current && (
-                  <label className="inline">
-                    <input
-                      type="checkbox"
-                      checked={keep}
-                      onChange={(e) => {
-                        setKeep(e.target.checked);
-                        setSecret("");
-                        change();
-                      }}
-                    />
-                    {t.keep}
-                  </label>
-                )}
-              {!keep && (
+              {hasCredential && keep ? (
+                <div className="credential-block">
+                  <span aria-hidden="true" className="lock">
+                    🔒
+                  </span>
+                  <div className="credential-main">
+                    <strong>{t[profile.credentialState]}</strong>
+                    <p>{t.credentialNote}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setKeep(false);
+                      setSecret("");
+                      change();
+                    }}
+                  >
+                    {t.changeCredential}
+                  </button>
+                </div>
+              ) : (
                 <>
+                  {profile && (
+                    <p className="field-hint">{t[profile.credentialState]}</p>
+                  )}
                   <label>
                     {t.secret}
                     <input
@@ -279,7 +316,7 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               ))}
             </select>
           </label>
-          <p className="small">{t.compatibilityHint}</p>
+          <p className="field-hint">{t.compatibilityHint}</p>
           <details>
             <summary>{t.ca}</summary>
             <label>
@@ -316,6 +353,77 @@ export function Connections({ state, language, onState, onDirty }: Props) {
         </fieldset>
         {profile && (
           <>
+            <h3>{t.recentCheck}</h3>
+            <dl className="detail-grid">
+              <div>
+                <dt>{t.serviceStatus}</dt>
+                <dd>
+                  {readiness === "ready" ? (
+                    <>
+                      <span aria-hidden="true" className="dot ok" /> {t.readyOK}
+                    </>
+                  ) : (
+                    fact(report?.readiness, (v) => v.status)
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.actualIdentity}</dt>
+                <dd>
+                  {report?.anonymousAccess
+                    ? t.noIdentity
+                    : fact(
+                        report?.identity,
+                        (v) => `${v.principal.type}: ${v.principal.id}`,
+                      )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.ftsCapability}</dt>
+                <dd>
+                  {report?.capabilities.value?.search_modes.includes("fts")
+                    ? t.available
+                    : t.unverified}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.live}</dt>
+                <dd>{fact(report?.liveness, (v) => v.status)}</dd>
+              </div>
+              <div>
+                <dt>{t.access}</dt>
+                <dd>
+                  {report?.anonymousAccess
+                    ? "disabled"
+                    : fact(report?.identity, (v) => v.mode)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.compatibility}</dt>
+                <dd>
+                  {report?.compatibilityVerified ? t.verified : t.unverified}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.capabilities}</dt>
+                <dd>
+                  {fact(report?.capabilities, (v) =>
+                    v.artifact_families.join(", "),
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.checked}</dt>
+                <dd>
+                  {report
+                    ? new Date(report.checkedAt * 1000).toLocaleString(
+                        language === "zh" ? "zh-CN" : "en-US",
+                      )
+                    : t.unverified}
+                </dd>
+              </div>
+            </dl>
+            <p className="note-line">{t.noPermissionClaim}</p>
             <div className="actions">
               <button
                 disabled={dirty || busy}
@@ -334,7 +442,9 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               >
                 {t.activate}
               </button>
+              <span className="spacer" />
               <button
+                className="link-danger"
                 disabled={busy}
                 onClick={() => {
                   if (dirty && !window.confirm(t.discard)) return;
@@ -352,65 +462,10 @@ export function Connections({ state, language, onState, onDirty }: Props) {
                 {t.remove}
               </button>
             </div>
-            <details open>
-              <summary>{t.selected}</summary>
-              <dl>
-                <div>
-                  <dt>{t.live}</dt>
-                  <dd>{fact(report?.liveness, (v) => v.status)}</dd>
-                </div>
-                <div>
-                  <dt>{t.readiness}</dt>
-                  <dd>{fact(report?.readiness, (v) => v.status)}</dd>
-                </div>
-                <div>
-                  <dt>{t.identity}</dt>
-                  <dd>
-                    {report?.anonymousAccess
-                      ? t.noIdentity
-                      : fact(
-                          report?.identity,
-                          (v) => `${v.principal.type}: ${v.principal.id}`,
-                        )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t.access}</dt>
-                  <dd>
-                    {report?.anonymousAccess
-                      ? "disabled"
-                      : fact(report?.identity, (v) => v.mode)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t.compatibility}</dt>
-                  <dd>
-                    {report?.compatibilityVerified ? t.verified : t.unverified}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t.capabilities}</dt>
-                  <dd>
-                    {fact(report?.capabilities, (v) =>
-                      v.artifact_families.join(", "),
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t.checked}</dt>
-                  <dd>
-                    {report
-                      ? new Date(report.checkedAt * 1000).toLocaleString(
-                          language === "zh" ? "zh-CN" : "en-US",
-                        )
-                      : t.unverified}
-                  </dd>
-                </div>
-              </dl>
-              <p className="small">{t.noPermissionClaim}</p>
-            </details>
+            <p className="field-hint">{t.removeNote}</p>
           </>
         )}
+        <p className="note-line">{t.manageNote}</p>
       </section>
     </div>
   );

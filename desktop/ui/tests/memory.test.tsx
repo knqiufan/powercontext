@@ -187,7 +187,6 @@ test("search opens only the full citation and renders hostile text literally", a
     <MemoryWorkspace
       state={state}
       language="en"
-      home={false}
       onState={vi.fn()}
       onDirty={vi.fn()}
     />,
@@ -196,17 +195,20 @@ test("search opens only the full citation and renders hostile text literally", a
     screen.getByLabelText("Full-text search keywords"),
     "synthetic",
   );
-  await user.click(screen.getByRole("button", { name: "Find" }));
+  await user.click(screen.getByRole("button", { name: "Search" }));
   await user.click(screen.getByRole("button", { name: "Read exact version" }));
   expect(desktopApi.entry).toHaveBeenCalledWith(1, citation);
   expect(screen.getByText("<img src=x onerror=unsafe()>")).toBeTruthy();
-  expect(document.querySelector("img")).toBeNull();
+  expect(document.querySelector(".hit-main img")).toBeNull();
+  expect(document.querySelector(".reader-body img")).toBeNull();
   const clipboard = vi
     .spyOn(navigator.clipboard, "writeText")
     .mockResolvedValue();
   await user.click(screen.getByRole("button", { name: "Copy text" }));
   expect(clipboard).toHaveBeenLastCalledWith("<img src=x onerror=unsafe()>");
-  await user.click(screen.getByRole("button", { name: "Copy reference" }));
+  await user.click(
+    screen.getByRole("button", { name: "Copy exact reference" }),
+  );
   expect(clipboard).toHaveBeenLastCalledWith(JSON.stringify(citation, null, 2));
 
   expect(
@@ -226,14 +228,13 @@ test("changing query discards a late response instead of showing old matches", a
     <MemoryWorkspace
       state={state}
       language="en"
-      home={false}
       onState={vi.fn()}
       onDirty={vi.fn()}
     />,
   );
   const query = screen.getByLabelText("Full-text search keywords");
   await user.type(query, "old");
-  await user.click(screen.getByRole("button", { name: "Find" }));
+  await user.click(screen.getByRole("button", { name: "Search" }));
   await user.type(query, " new");
   await act(async () => {
     finish({
@@ -274,7 +275,6 @@ test.each(["forbidden", "not_found", "network"])(
       <MemoryWorkspace
         state={state}
         language="en"
-        home={false}
         onState={vi.fn()}
         onDirty={vi.fn()}
       />,
@@ -283,7 +283,7 @@ test.each(["forbidden", "not_found", "network"])(
       screen.getByLabelText("Full-text search keywords"),
       "private",
     );
-    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(screen.getByRole("button", { name: "Search" }));
     await user.click(
       screen.getByRole("button", { name: "Read exact version" }),
     );

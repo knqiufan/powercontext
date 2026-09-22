@@ -68,7 +68,7 @@ def exercise_search_limit(page: InstalledPage, server: httpx.Client, scope: str)
         response.raise_for_status()
     for query, expected in [("desktopnonexistentci", 0), ("desktoplimitci", 10)]:
         page.type("全文搜索关键词", "\ue009a\ue000\ue003" + query)
-        page.button("查找")
+        page.button("搜索")
         page.wait_text("没有匹配的记忆。" if expected == 0 else "已返回本次上限 10 条")
         count = page.observe("return document.querySelectorAll('.memory-hits li').length;")
         if count != expected:

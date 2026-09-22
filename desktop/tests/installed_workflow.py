@@ -61,7 +61,7 @@ class InstalledPage:
         self.click(f"//button[normalize-space(.)='{text}']")
 
     def field(self, label: str, tag: str = "input") -> str:
-        return self.element(f"//label[normalize-space(text())='{label}']/{tag}")
+        return self.element(f"//label[normalize-space(text())='{label}']//{tag}")
 
     def type(self, label: str, value: str, tag: str = "input") -> None:
         self.post(f"/element/{self.field(label, tag)}/value", {"text": value})
@@ -79,10 +79,16 @@ class InstalledPage:
     def wait_text(self, text: str) -> None:
         self.wait("return document.body.innerText.includes(arguments[0]);", [text])
 
+    def profile(self, name: str) -> None:
+        self.click(f"//ul[@class='profile-list']//span[@class='profile-name'][normalize-space(.)='{name}']/ancestor::button")
+
+    def open_connection_menu(self) -> None:
+        self.click("//div[contains(@class,'topbar')]/div[contains(@class,'menu-wrap')][1]/button")
+
     def activate(self, name: str) -> None:
         self.button("使用此连接")
-        self.element(f"//ul[@class='profile-list']/li[button[normalize-space(.)='{name}']]/span[@class='badge']")
-        self.button("首页")
+        self.element(f"//ul[@class='profile-list']/li[.//span[@class='profile-name'][normalize-space(.)='{name}']]//span[contains(@class,'badge')]")
+        self.button("记忆")
 
     def connect(self, name: str, endpoint: str) -> None:
         self.button("连接")
@@ -93,10 +99,12 @@ class InstalledPage:
         self.activate(name)
 
     def select_scope(self, scope_id: str) -> None:
+        self.button("精确范围")
         self.click("//summary[normalize-space(.)='精确 Scope ID']")
         self.type("精确 Scope ID", scope_id)
         self.button("选择范围")
         self.wait_text("当前范围: Desktop installed CI")
+        self.button("关闭")
 
     def expect_empty_context(self) -> None:
         observed = self.observe("""return {
@@ -111,9 +119,9 @@ class InstalledPage:
 
     def search_read(self, text: str, keyword: str = "desktopinstalledci") -> dict[str, object]:
         self.type("全文搜索关键词", keyword)
-        self.button("查找")
+        self.button("搜索")
         self.button("阅读精确版本")
-        self.wait_text("记忆正文")
+        self.wait_text("记忆详情")
         if self.observe("return document.querySelector('.reader > .plain-text')?.textContent;") != text:
             raise HarnessFailure("installed_exact_body_mismatch")
         return json.loads(self.observe("return document.querySelector('.reader pre')?.textContent;"))
@@ -223,6 +231,7 @@ def exercise_connection_isolation(
             raise HarnessFailure("installed_second_server_citation_mismatch")
         draft = "desktopunsavedci 不应写入的草稿"
         page.type("记忆内容", draft, "textarea")
+        page.open_connection_menu()
         page.button("断开桌面连接")
         alert = page.client.get(page.prefix + "/alert/text")
         alert.raise_for_status()
@@ -233,23 +242,24 @@ def exercise_connection_isolation(
             raise HarnessFailure("installed_cancel_disconnect_lost_draft")
         if page.observe("return document.querySelector('.reader > .plain-text')?.textContent;") != text_b:
             raise HarnessFailure("installed_cancel_disconnect_changed_reader")
+        page.open_connection_menu()
         page.button("断开桌面连接")
         page.post("/alert/accept", {})
         page.wait_text("尚未连接")
         page.expect_empty_context()
         page.button("连接")
-        page.button("Desktop CI synthetic")
+        page.profile("Desktop CI synthetic")
         page.activate("Desktop CI synthetic")
         page.expect_empty_context()
         page.select_scope(scope_a)
         if page.search_read(NOTE) != current_citation_a:
             raise HarnessFailure("installed_reconnected_citation_mismatch")
         page.button("连接")
-        page.button("Desktop CI B")
+        page.profile("Desktop CI B")
         page.button("移除连接")
         page.post("/alert/accept", {})
-        page.wait("""return ![...document.querySelectorAll('.profile-list button')].some(
-          button => button.textContent.trim() === 'Desktop CI B');""")
+        page.wait("""return ![...document.querySelectorAll('.profile-name')].some(
+          name => name.textContent.trim() === 'Desktop CI B');""")
         for server, scope, citation, expected in (
             (server_a, scope_a, citation_a, NOTE),
             (server_b, scope_b, citation_b, text_b),
@@ -258,7 +268,7 @@ def exercise_connection_isolation(
             response.raise_for_status()
             if response.json()["text"] != expected:
                 raise HarnessFailure("installed_profile_operation_changed_server_data")
-        page.button("首页")
+        page.button("记忆")
         if page.search_read(NOTE) != current_citation_a:
             raise HarnessFailure("installed_inactive_profile_removal_changed_active_connection")
 

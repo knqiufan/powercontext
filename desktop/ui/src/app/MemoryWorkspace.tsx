@@ -26,21 +26,16 @@ import { desktopApi } from "../shared/ipc";
 import { connectionError } from "./connection-messages";
 import { memoryMessages } from "./memory-messages";
 import type { Language } from "./messages";
+import memoryIcon from "../assets/memory.svg";
 type Props = {
   state: DesktopState | null;
   language: Language;
-  home: boolean;
   onState: (state: DesktopState) => void;
   onDirty: (dirty: boolean) => void;
 };
 export const textBytes = (value: string) =>
   new TextEncoder().encode(value).length;
-export function NoteForm({
-  state,
-  language,
-  onState,
-  onDirty,
-}: Omit<Props, "home">) {
+export function NoteForm({ state, language, onState, onDirty }: Props) {
   const t = memoryMessages[language];
   const active = state?.active;
   const profile = state?.profiles.find((p) => p.id === active?.connectionId);
@@ -100,47 +95,54 @@ export function NoteForm({
   }
   return (
     <section className="card stack">
-      <h2>{t.quick}</h2>
-      <p>{t.hint}</p>
-      <p>
+      <h2>{t.saveOne}</h2>
+      <div className="save-row">
+        <label>
+          {t.note}
+          <textarea
+            rows={2}
+            disabled={!enabled || busy}
+            value={text}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onChange={(e) => {
+              setText(e.target.value);
+              onDirty(e.target.value.length > 0);
+            }}
+          />
+        </label>
+        <div className="save-action">
+          <button
+            className="primary"
+            disabled={!enabled || busy || !text.trim() || bytes > 8192}
+            onClick={() => void save()}
+          >
+            {busy ? t.saving : t.save}
+          </button>
+          <p className="hint">{t.writeOnClick}</p>
+        </div>
+      </div>
+      <p className="small">
         {enabled ? (
           <>
-            {t.target}: <strong>{profile?.name}</strong> ·{" "}
-            {active?.scope?.title} <code>{active?.scope?.scope_id}</code>
+            {t.saveTarget}
+            <strong>
+              {profile?.name} / {active?.scope?.title}
+            </strong>{" "}
+            <code>{active?.scope?.scope_id}</code>
           </>
         ) : (
           t.noScope
         )}
       </p>
-      <label>
-        {t.note}
-        <textarea
-          rows={6}
-          disabled={!enabled || busy}
-          value={text}
-          onCompositionStart={() => {
-            composing.current = true;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-          }}
-          onChange={(e) => {
-            setText(e.target.value);
-            onDirty(e.target.value.length > 0);
-          }}
-        />
-      </label>
       <p className="small">
         {bytes} / 8192 {t.budget}
       </p>
       {bytes > 8192 && <p role="alert">{t.bytesError}</p>}
-      <button
-        className="primary"
-        disabled={!enabled || busy || !text.trim() || bytes > 8192}
-        onClick={() => void save()}
-      >
-        {busy ? t.saving : t.save}
-      </button>
       {error != null && (
         <p role="alert">
           {t.failed} {connectionError(error, language)}
@@ -161,15 +163,15 @@ export function NoteForm({
   );
 }
 export function MemoryWorkspace(props: Props) {
-  const { state, language, home, onState, onDirty } = props;
+  const { state, language, onState, onDirty } = props;
   const t = memoryMessages[language];
   const active = state?.active;
-  const [adding, setAdding] = useState(false);
   const readerHeading = useRef<HTMLHeadingElement>(null);
   const readButton = useRef<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchMemoryHit[] | null>(null);
   const [entry, setEntry] = useState<MemoryEntry | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<"search" | "detail" | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [copied, setCopied] = useState("");
@@ -182,6 +184,7 @@ export function MemoryWorkspace(props: Props) {
     sequence.current++;
     setHits(null);
     setEntry(null);
+    setSelected(null);
     setError(null);
     setCopied("");
     setBusy(null);
@@ -212,7 +215,8 @@ export function MemoryWorkspace(props: Props) {
     setEntry(null);
     setCopied("");
     setBusy(citation ? "detail" : "search");
-    if (!citation) setHits(null);
+    if (citation) setSelected(JSON.stringify(citation));
+    else setHits(null);
     try {
       await pendingCancel.current;
       if (ticket !== sequence.current || generation !== current.current) return;
@@ -222,14 +226,17 @@ export function MemoryWorkspace(props: Props) {
           setEntry(result);
       } else {
         const result = await desktopApi.search(generation, query);
-        if (ticket === sequence.current && generation === current.current)
+        if (ticket === sequence.current && generation === current.current) {
           setHits(result.hits);
+          setSelected(null);
+        }
       }
     } catch (e) {
       if (ticket === sequence.current) {
         setError(e);
         setHits(null);
         setEntry(null);
+        setSelected(null);
         try {
           onState(await desktopApi.state());
         } catch {
@@ -277,111 +284,205 @@ export function MemoryWorkspace(props: Props) {
             </p>
           </section>
         )}
-      {!home && !adding && (
-        <button onClick={() => setAdding(true)}>{t.add}</button>
-      )}
-      {(home || adding) && (
-        <NoteForm
-          state={state}
-          language={language}
-          onState={onState}
-          onDirty={onDirty}
-        />
-      )}
+      <NoteForm
+        state={state}
+        language={language}
+        onState={onState}
+        onDirty={onDirty}
+      />
       <section className="card stack">
-        <h2>{t.search}</h2>
-        <p>{t.searchHint}</p>
+        <div className="search-row">
+          <label>
+            {t.query}
+            <span className="search-input">
+              <input
+                disabled={!enabled}
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  cancel();
+                }}
+              />
+              {query && (
+                <button
+                  className="clear-query"
+                  aria-label={t.clearQuery}
+                  disabled={!enabled}
+                  onClick={() => {
+                    setQuery("");
+                    cancel();
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </span>
+          </label>
+          <button
+            disabled={
+              !enabled || !!busy || !query.trim() || textBytes(query) > 8192
+            }
+            onClick={() => void read()}
+          >
+            {busy === "search" ? t.searching : t.search}
+          </button>
+        </div>
+        <div className="search-meta">
+          <span>
+            {t.searchModeLabel}
+            <select disabled value="fts" aria-label={t.searchModeLabel}>
+              <option value="fts">{t.ftsLabel}</option>
+            </select>
+          </span>
+          <span>
+            {t.limitLabel}
+            <select disabled value="10" aria-label={t.limitLabel}>
+              <option value="10">10</option>
+            </select>
+          </span>
+          <span aria-hidden="true" className="divider" />
+          <span className="note-line">{t.searchConfigNote}</span>
+        </div>
         {!enabled && <p>{t.noScope}</p>}
-        <label>
-          {t.query}
-          <input
-            disabled={!enabled}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              cancel();
-            }}
-          />
-        </label>
-        <button
-          disabled={
-            !enabled || !!busy || !query.trim() || textBytes(query) > 8192
-          }
-          onClick={() => void read()}
-        >
-          {busy === "search" ? t.searching : t.search}
-        </button>
         {textBytes(query) > 8192 && <p role="alert">{t.inputError}</p>}
         {error != null && (
           <p role="alert">{connectionError(error, language)}</p>
         )}
-        {hits === null && !busy && error == null && <p>{t.start}</p>}
-        {hits?.length === 0 && <p>{t.none}</p>}
-        {hits?.length === 10 && <p>{t.limit}</p>}
-        {hits && (
-          <ul className="memory-hits">
-            {hits.map((hit) => (
-              <li key={JSON.stringify(hit.citation)}>
-                <p className="plain-text">{hit.text}</p>
-                <button
-                  disabled={!!busy}
-                  onClick={(event) => {
-                    readButton.current = event.currentTarget;
-                    void read(hit.citation);
-                  }}
-                >
-                  {t.read}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
-      {busy === "detail" && <p role="status">{t.loading}</p>}
-      {entry && (
-        <section className="card stack reader" aria-label={t.detail}>
-          <h2 ref={readerHeading} tabIndex={-1}>
-            {t.detail}
-          </h2>
-          <div className="plain-text" tabIndex={0}>
-            {entry.text}
+      <div className="memory-grid">
+        <section className="card stack" aria-label={t.results}>
+          <div className="card-heading">
+            <h2>{t.results}</h2>
           </div>
-          <div className="actions">
-            <button onClick={() => void copy(false)}>{t.copyText}</button>
-            <button onClick={() => void copy(true)}>{t.copyReference}</button>
-            <button
-              onClick={() => {
-                setEntry(null);
-                setCopied("");
-                requestAnimationFrame(() => readButton.current?.focus());
-              }}
-            >
-              {t.close}
-            </button>
-          </div>
-          {copied && <p role="status">{copied}</p>}
-          <details>
-            <summary>{t.reference}</summary>
-            <pre className="plain-text">
-              {JSON.stringify(entry.citation, null, 2)}
-            </pre>
-          </details>
-          <details>
-            <summary>{t.sources}</summary>
-            {entry.source_refs.length ? (
-              <ul>
-                {entry.source_refs.map((source) => (
-                  <li key={source.source_id}>
-                    {source.name} <code>{source.source_id}</code>
+          {hits === null && !busy && error == null && <p>{t.start}</p>}
+          {hits?.length === 0 && <p>{t.none}</p>}
+          {hits?.length === 10 && <p>{t.limit}</p>}
+          {hits && (
+            <p className="small">
+              {t.returned(hits.length)}
+              {active?.scope?.title ? ` · ${active.scope.title}` : ""}
+            </p>
+          )}
+          {hits && hits.length > 0 && (
+            <ul className="memory-hits">
+              {hits.map((hit) => {
+                const key = JSON.stringify(hit.citation);
+                const title = hit.text.split("\n", 1)[0] || hit.text;
+                return (
+                  <li key={key}>
+                    <div className="hit-card">
+                      <img src={memoryIcon} alt="" />
+                      <div className="hit-main">
+                        <div className="hit-title">{title}</div>
+                        <div className="hit-snippet">{hit.text}</div>
+                      </div>
+                      {hit.matched_by.includes("fts") && (
+                        <span className="badge success">{t.hitFts}</span>
+                      )}
+                      {!hit.matched_by.includes("fts") &&
+                        hit.matched_by.includes("vector") && (
+                          <span className="badge">{t.hitVector}</span>
+                        )}
+                      <button
+                        disabled={!!busy}
+                        aria-pressed={selected === key}
+                        onClick={(event) => {
+                          readButton.current = event.currentTarget;
+                          void read(hit.citation);
+                        }}
+                      >
+                        {busy === "detail" && selected === key
+                          ? t.loading
+                          : t.read}
+                      </button>
+                    </div>
                   </li>
-                ))}
-              </ul>
-            ) : (
-              <p>{t.noSources}</p>
-            )}
-          </details>
+                );
+              })}
+            </ul>
+          )}
+          <p className="note-line">{t.browseNote}</p>
         </section>
-      )}
+        {entry && (
+          <section className="card stack reader" aria-label={t.detail}>
+            <div className="card-heading">
+              <h2 ref={readerHeading} tabIndex={-1}>
+                {t.detail}
+              </h2>
+              <span>
+                <span className="badge">{entry.kind}</span>{" "}
+                <span
+                  className={
+                    entry.state === "active" ? "badge success" : "badge subtle"
+                  }
+                >
+                  {entry.state === "active" ? t.badgeActive : t.badgeInactive}
+                </span>
+              </span>
+            </div>
+            <div className="plain-text reader-body" tabIndex={0}>
+              {entry.text}
+            </div>
+            {active?.scope && (
+              <p className="small">
+                {t.scopeBelong} <strong>{active.scope.title}</strong>
+              </p>
+            )}
+            <div className="citation-block">
+              <h3>{t.reference}</h3>
+              <dl className="citation-summary">
+                <dt>Memory revision</dt>
+                <dd>{entry.citation.memory_ref.revision}</dd>
+                <dt>Entry ID</dt>
+                <dd>{entry.citation.entry_id}</dd>
+                <dt>Entry version</dt>
+                <dd>{entry.citation.entry_version_id}</dd>
+              </dl>
+              <p className="small">{t.citationNote}</p>
+              <button
+                className="primary-outline"
+                onClick={() => void copy(true)}
+              >
+                {t.copyReference}
+              </button>
+            </div>
+            <div className="actions">
+              <button onClick={() => void copy(false)}>{t.copyText}</button>
+              <button
+                onClick={() => {
+                  setEntry(null);
+                  setCopied("");
+                  requestAnimationFrame(() => readButton.current?.focus());
+                }}
+              >
+                {t.close}
+              </button>
+            </div>
+            {copied && <p role="status">{copied}</p>}
+            <details>
+              <summary>{t.referenceFull}</summary>
+              <pre className="plain-text">
+                {JSON.stringify(entry.citation, null, 2)}
+              </pre>
+            </details>
+            <details>
+              <summary>{t.sources}</summary>
+              {entry.source_refs.length ? (
+                <ul>
+                  {entry.source_refs.map((source) => (
+                    <li key={source.source_id}>
+                      {source.name} <code>{source.source_id}</code>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>{t.noSources}</p>
+              )}
+            </details>
+            <p className="note-line">{t.agentScopeNote}</p>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

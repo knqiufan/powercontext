@@ -72,7 +72,7 @@ afterEach(() => {
 test("canceling discard leaves the saved connection and its draft intact", async () => {
   const user = userEvent.setup();
   show();
-  await user.click(screen.getByRole("button", { name: "Original" }));
+  await user.click(screen.getByRole("button", { name: /Original/ }));
   await user.type(screen.getByLabelText("Connection name"), " draft");
   vi.spyOn(window, "confirm").mockReturnValue(false);
   await user.click(screen.getByRole("button", { name: "Remove connection" }));
@@ -89,7 +89,7 @@ test("confirmed removal clears the form without asking to discard after deletion
     generation: 1,
     profiles: [],
   });
-  await user.click(screen.getByRole("button", { name: "Original" }));
+  await user.click(screen.getByRole("button", { name: /Original/ }));
   await user.type(screen.getByLabelText("Connection name"), " draft");
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   await user.click(screen.getByRole("button", { name: "Remove connection" }));
@@ -106,7 +106,7 @@ test("confirmed removal clears the form without asking to discard after deletion
 test("missing credentials cannot be retained and entering a new one never activates a connection", async () => {
   const user = userEvent.setup();
   show({ ...profile, credentialState: "missing" });
-  await user.click(screen.getByRole("button", { name: "Original" }));
+  await user.click(screen.getByRole("button", { name: /Original/ }));
   expect(screen.queryByLabelText("Keep existing credential")).toBeNull();
   await user.type(
     screen.getByLabelText("New Bearer credential"),
@@ -126,7 +126,7 @@ test("retargeting immediately invalidates verification and prevents retaining th
     ...state(),
     generation: 1,
   });
-  await user.click(screen.getByRole("button", { name: "Original" }));
+  await user.click(screen.getByRole("button", { name: /Original/ }));
   await user.type(screen.getByLabelText("Server address"), "new");
   expect(desktopApi.invalidate).toHaveBeenCalledWith(profile.id);
   expect(screen.queryByLabelText("Keep existing credential")).toBeNull();

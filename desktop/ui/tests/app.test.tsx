@@ -22,18 +22,20 @@ afterEach(cleanup);
 test("disconnected shell prevents writes and search and explains the boundary", async () => {
   const user = userEvent.setup();
   render(<App />);
+  expect(screen.getByRole("heading", { name: "尚未连接服务" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /连接已有服务/ }));
+  expect(screen.getByRole("heading", { name: "添加连接" })).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "保存配置" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await user.click(screen.getByRole("button", { name: "记忆" }));
   expect(
     (screen.getByRole("button", { name: "保存记忆" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(
-    (screen.getByRole("button", { name: "查找" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  await user.click(screen.getByRole("button", { name: /连接已有服务/ }));
-  expect(screen.getByRole("heading", { name: "添加连接" })).toBeTruthy();
-  expect(
-    (screen.getByRole("button", { name: "保存配置" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "搜索" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(screen.getByText(/正文和搜索结果只在内存中使用/)).toBeTruthy();
@@ -41,15 +43,15 @@ test("disconnected shell prevents writes and search and explains the boundary", 
 test("navigation, bilingual settings and theme remain usable without the native host", async () => {
   const user = userEvent.setup();
   render(<App />);
-  await user.click(screen.getByRole("button", { name: "设置" }));
+  await user.click(screen.getByRole("button", { name: "设置与诊断" }));
   await user.selectOptions(screen.getByLabelText("语言"), "en");
   expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-    "Settings",
+    "Settings & diagnostics",
   );
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   expect(document.documentElement.dataset.theme).toBe("dark");
   expect(document.documentElement.lang).toBe("en");
-  await user.click(screen.getByRole("button", { name: /My memories/ }));
+  await user.click(screen.getByRole("button", { name: /Memories/ }));
   expect(
     screen.getByText("Enter keywords to find existing memories."),
   ).toBeTruthy();

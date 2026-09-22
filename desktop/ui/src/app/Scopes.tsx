@@ -24,11 +24,13 @@ export function Scopes({
   language,
   onState,
   confirmSwitch,
+  hideHeading = false,
 }: {
   state: DesktopState | null;
   language: Language;
   onState: (state: DesktopState) => void;
   confirmSwitch: () => boolean;
+  hideHeading?: boolean;
 }) {
   const t = connectionMessages[language];
   const active = state?.active;
@@ -112,7 +114,7 @@ export function Scopes({
   }
   return (
     <section className="card stack scope-picker">
-      <h2>{t.scope}</h2>
+      {!hideHeading && <h2>{t.scope}</h2>}
       <p className="small">{t.scopeHint}</p>
       {!active ? (
         <p>{t.noConnection}</p>
