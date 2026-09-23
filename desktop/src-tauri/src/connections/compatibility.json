@@ -2,7 +2,7 @@
   {
     "id": "sqlite-63f918b7-v1",
     "serverCommit": "63f918b7ee8076965d488a3565020b70eee6a472",
-    "contractSha256": "de9750808e12e7a6c7a88b736b5368ba3b7c5fcf3c986f1c8cb762b66afce03c",
+    "contractSha256": "915866dd26fd2bdce6f987a52fed7febaa859eaf506412765e7c847ea530a6ee",
     "artifactSha256": "de90495cf9cf66a00a0b063825b458557b63b805faf8ff64f33d2dcd8bb73ec9",
     "operations": [
       "get_liveness",
