@@ -2,7 +2,7 @@
 
 Internal Windows preview for [#1654](https://github.com/oceanbase/powercontext/issues/1654), following RFC #1455. It provides a packaged Tauri 2 shell with Home, Connections, My memories, Chinese/English settings, semantic light/dark/system themes and honest disconnected states. Connection profiles, explicit activation, identity/readiness checks, exact Scope selection and local diagnostics are implemented. Shared note saving, bounded FTS search and exact-version reading are implemented; native workflow qualification remains open.
 
-See [中文说明](README.zh.md), [security boundary](SECURITY.md), and [qualification evidence](evidence/S1.md). This is not a supported or signed release, and does not close #1654 or #1428.
+See [中文说明](README.zh.md), [security boundary](SECURITY.md), and [validation guide](VALIDATION.md). This is not a supported or signed release, and does not close #1654 or #1428.
 
 ## Run the installed preview
 
@@ -47,7 +47,7 @@ The unsigned installer is for internal verification. If WebView2 is absent, its 
 
 1. Open Connections and add a named profile. HTTP is restricted to literal loopback hosts; other addresses require HTTPS. A reverse-proxy path prefix is preserved.
 2. Explicitly choose unauthenticated loopback access or Bearer authentication. Bearer storage is either Windows Credential Manager or this session only. Trust/address changes require credential reconfiguration. An optional CA augments system trust without disabling certificate checks.
-3. Select a qualified compatibility profile after comparing its tested build with your deployment. The selection does not prove the remote binary identity. See [S2 evidence](evidence/S2.md) for the exact fixture and supported combinations.
+3. Select a qualified compatibility profile after comparing its tested build with your deployment. The selection does not prove the remote binary identity. See [validation guide](VALIDATION.md) for the exact fixture and supported combinations.
 4. Save, then explicitly use the connection. Merely selecting a saved profile does not activate it. Review liveness, readiness, identity and capabilities separately; none implies resource authorization.
 5. Find an authorized Scope by title (50 per page), inspect a default suggestion, or enter an exact Scope ID. Selection never creates a Scope or changes Agent bindings. Editing a query cancels its old read; connection and identity changes invalidate old results.
 
@@ -59,7 +59,7 @@ After explicitly activating a qualified connection and choosing a Scope, use Hom
 
 Search uses FTS in the selected Scope and returns at most 10 matches. This is not a full directory or history, and ten matches do not establish a total count. **Read exact version** sends the complete returned citation; it never substitutes the latest version. Copy buttons explicitly copy either the full plain text or citation JSON.
 
-A successful save without an entry is reported as an operation success without inventing a citation. A timeout or interrupted dispatched write is **unknown**, not a safe invitation to retry: inspect the original Server/Scope before deciding whether to submit again. Identical text alone cannot identify that operation. Desktop does not automatically replay writes or keep an offline queue. Switching context hides old results while retaining minimal original-operation metadata for this session. See [S3 evidence](evidence/S3.md) for tested behavior and qualification gaps.
+A successful save without an entry is reported as an operation success without inventing a citation. A timeout or interrupted dispatched write is **unknown**, not a safe invitation to retry: inspect the original Server/Scope before deciding whether to submit again. Identical text alone cannot identify that operation. Desktop does not automatically replay writes or keep an offline queue. Switching context hides old results while retaining minimal original-operation metadata for this session. See [validation guide](VALIDATION.md) for tested behavior and qualification gaps.
 
 ## Contracts and resources
 
@@ -96,9 +96,9 @@ Register an explicitly trusted local installation in `%APPDATA%/com.powercontext
 
 The native adapter checks the absolute executable path, pinned digest and fixed `--version` result before running either `service status --json` or `doctor integrations --json`. This is a local installation pin, not publisher-signature verification; the Python environment and dependencies must also be trusted. The adapter admits 1.0.1 and 1.1.1 and their development builds; the registration must pin the exact installed version. The example identifies the tested baseline. Other version series require adapter qualification. No PATH-first CLI selection or renderer-provided commands are accepted.
 
-Version verification has a 15-second deadline, service status 20 seconds, and integration diagnostics 60 seconds. Each invocation limits combined stdout/stderr to 256 KiB. Helpers run hidden in an owned Windows Job; completion, timeout and cancellation clean up their descendants. Only allowlisted status fields reach the UI. Valid unhealthy JSON remains useful even with exit code 1. Isolated real-CLI checks pass; installed-application qualification remains open in [S2 evidence](evidence/S2.md).
+Version verification has a 15-second deadline, service status 20 seconds, and integration diagnostics 60 seconds. Each invocation limits combined stdout/stderr to 256 KiB. Helpers run hidden in an owned Windows Job; completion, timeout and cancellation clean up their descendants. Only allowlisted status fields reach the UI. Valid unhealthy JSON remains useful even with exit code 1. Isolated real-CLI checks pass; installed-application qualification remains open in [validation guide](VALIDATION.md).
 
-[Complete qualification matrix](evidence/S4.md) distinguishes passing checks from outstanding platform and product gates.
+[Validation guide](VALIDATION.md) describes reproducible checks and outstanding platform and product gates.
 
 ## Remote installed-package acceptance
 
@@ -114,4 +114,4 @@ The CI-only lifecycle scenario forcibly ends its own installed Desktop process a
 
 Installed boundary checks exercise an 8192-byte Unicode note, reject over-budget input, display zero and capped-ten search results, and verify cancel/confirm behavior when disconnecting with an unsaved draft. Each result requires its matching remote report.
 
-After upgrading from the earlier preview, select `sqlite-1.1.1-v1` and recheck your connection. The previous `sqlite-63f918b7-v1` selection is not silently upgraded to a different contract. See [current qualification](evidence/ui-review-20260923.md).
+After upgrading from the earlier preview, select `sqlite-1.1.1-v1` and recheck your connection. The previous `sqlite-63f918b7-v1` selection is not silently upgraded to a different contract. See [current qualification](VALIDATION.md).
