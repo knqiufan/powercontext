@@ -80,14 +80,18 @@ class InstalledPage:
         self.wait("return document.body.innerText.includes(arguments[0]);", [text])
 
     def profile(self, name: str) -> None:
-        self.click(f"//ul[@class='profile-list']//span[@class='profile-name'][normalize-space(.)='{name}']/ancestor::button")
+        self.click(
+            f"//ul[@class='profile-list']//span[@class='profile-name'][normalize-space(.)='{name}']/ancestor::button"
+        )
 
     def open_connection_menu(self) -> None:
         self.click("//div[contains(@class,'topbar')]/div[contains(@class,'menu-wrap')][1]/button")
 
     def activate(self, name: str) -> None:
         self.button("使用此连接")
-        self.element(f"//ul[@class='profile-list']/li[.//span[@class='profile-name'][normalize-space(.)='{name}']]//span[contains(@class,'badge')]")
+        self.element(
+            f"//ul[@class='profile-list']/li[.//span[@class='profile-name'][normalize-space(.)='{name}']]//span[contains(@class,'badge')]"
+        )
         self.button("记忆")
 
     def connect(self, name: str, endpoint: str) -> None:
