@@ -94,7 +94,7 @@ Register an explicitly trusted local installation in `%APPDATA%/com.powercontext
 }
 ```
 
-The native adapter checks the absolute executable path, pinned digest and fixed `--version` result before running either `service status --json` or `doctor integrations --json`. This is a local installation pin, not publisher-signature verification; the Python environment and dependencies must also be trusted. The adapter admits 1.0.1 and its development builds; the registration must pin the exact installed version. The example identifies the tested baseline. Other version series require adapter qualification. No PATH-first CLI selection or renderer-provided commands are accepted.
+The native adapter checks the absolute executable path, pinned digest and fixed `--version` result before running either `service status --json` or `doctor integrations --json`. This is a local installation pin, not publisher-signature verification; the Python environment and dependencies must also be trusted. The adapter admits 1.0.1 and 1.1.1 and their development builds; the registration must pin the exact installed version. The example identifies the tested baseline. Other version series require adapter qualification. No PATH-first CLI selection or renderer-provided commands are accepted.
 
 Version verification has a 15-second deadline, service status 20 seconds, and integration diagnostics 60 seconds. Each invocation limits combined stdout/stderr to 256 KiB. Helpers run hidden in an owned Windows Job; completion, timeout and cancellation clean up their descendants. Only allowlisted status fields reach the UI. Valid unhealthy JSON remains useful even with exit code 1. Isolated real-CLI checks pass; installed-application qualification remains open in [S2 evidence](evidence/S2.md).
 
@@ -113,3 +113,5 @@ Installed UI acceptance also checks content isolation between two independent co
 The CI-only lifecycle scenario forcibly ends its own installed Desktop process after saving a synthetic note, then checks that the independent Server still serves the original exact entry and accepts a new readable write. Consult the matching lifecycle report for its result; it does not simulate normal window closure or uninstall preservation.
 
 Installed boundary checks exercise an 8192-byte Unicode note, reject over-budget input, display zero and capped-ten search results, and verify cancel/confirm behavior when disconnecting with an unsaved draft. Each result requires its matching remote report.
+
+After upgrading from the earlier preview, select `sqlite-1.1.1-v1` and recheck your connection. The previous `sqlite-63f918b7-v1` selection is not silently upgraded to a different contract. See [current qualification](evidence/ui-review-20260923.md).

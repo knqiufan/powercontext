@@ -98,7 +98,7 @@ class InstalledPage:
         self.button("连接")
         self.type("连接名称", name)
         self.type("Server 地址", endpoint)
-        self.click("//label[normalize-space(text())='已验证兼容配置']/select/option[@value='sqlite-63f918b7-v1']")
+        self.click("//label[normalize-space(text())='已验证兼容配置']/select/option[@value='sqlite-1.1.1-v1']")
         self.button("保存配置")
         self.activate(name)
 

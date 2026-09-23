@@ -28,6 +28,7 @@ import {
   MemoryWorkspace,
   textBytes,
 } from "../src/app/MemoryWorkspace";
+import { Overview } from "../src/app/Overview";
 import { desktopApi } from "../src/shared/ipc";
 import type {
   DesktopState,
@@ -299,3 +300,31 @@ test.each(["forbidden", "not_found", "network"])(
     expect(desktopApi.entry).toHaveBeenLastCalledWith(1, citation);
   },
 );
+
+test("overview refresh shows the latest readiness instead of the activation snapshot", () => {
+  const active = state.active!;
+  const ready = {
+    ...active.report,
+    readiness: { value: { status: "ready" as const, checks: {} }, error: null },
+  };
+  const latest = {
+    ...ready,
+    readiness: {
+      value: { status: "degraded" as const, checks: {} },
+      error: null,
+    },
+  };
+  render(
+    <Overview
+      state={{
+        ...state,
+        active: { ...active, report: ready },
+        reports: [latest],
+      }}
+      language="en"
+      onNavigate={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Service not ready")).toBeTruthy();
+  expect(screen.queryByText("Service ready")).toBeNull();
+});

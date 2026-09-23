@@ -1,9 +1,9 @@
 [
   {
-    "id": "sqlite-63f918b7-v1",
-    "serverCommit": "63f918b7ee8076965d488a3565020b70eee6a472",
+    "id": "sqlite-1.1.1-v1",
+    "serverCommit": "1e90376a18e80437a74f2f55141d4301dc7f89c4",
     "contractSha256": "915866dd26fd2bdce6f987a52fed7febaa859eaf506412765e7c847ea530a6ee",
-    "artifactSha256": "de90495cf9cf66a00a0b063825b458557b63b805faf8ff64f33d2dcd8bb73ec9",
+    "artifactSha256": "163973110ce96e4332d0304796efa2f98d45e3efca3964e66b9c8ebcdc8f8658",
     "operations": [
       "get_liveness",
       "get_readiness",
@@ -16,6 +16,6 @@
       "search_memory",
       "get_memory_entry"
     ],
-    "evidence": "desktop/evidence/S2.md"
+    "evidence": "desktop/evidence/ui-review-20260923.md"
   }
 ]

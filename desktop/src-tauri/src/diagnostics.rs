@@ -261,7 +261,8 @@ fn execute(
         serde_json::from_slice(&bytes).map_err(|_| SafeError::InvalidInput)?;
     // This is an explicit local-installation pin, not publisher-signature verification.
     if config.source != "explicit_local_installation"
-        || !(config.version == "1.0.1" || config.version.starts_with("1.0.1.dev"))
+        || !((config.version == "1.0.1" || config.version.starts_with("1.0.1.dev"))
+            || (config.version == "1.1.1" || config.version.starts_with("1.1.1.dev")))
         || config.version.len() > 128
         || !config
             .version

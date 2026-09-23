@@ -57,7 +57,7 @@ pnpm --dir desktop desktop:dev
 
 设置中的诊断只检查当前电脑，与远程连接状态分开。程序不从 PATH 自动选择 CLI，也不安装或启动 Server。集成检查可能运行临时 Agent 辅助进程；结果不代表实际 capture/recall 已验证。
 
-显式信任某个本地 PowerContext 安装后，在 `%APPDATA%/com.powercontext.desktop.preview/diagnostic-cli.json` 写入下面的配置。`executable` 必须是 `powercontext.exe` 的绝对路径，`sha256` 是该文件经核对的 SHA-256。当前诊断适配器允许 1.0.1 及其开发构建；必须填写实际安装的精确版本，下列示例是已测试基线。其他版本系列需另行验证。不要把文件摘要匹配当作发布者签名认证；Python 安装及其依赖也必须来自你信任的环境。
+显式信任某个本地 PowerContext 安装后，在 `%APPDATA%/com.powercontext.desktop.preview/diagnostic-cli.json` 写入下面的配置。`executable` 必须是 `powercontext.exe` 的绝对路径，`sha256` 是该文件经核对的 SHA-256。当前诊断适配器允许 1.0.1 和 1.1.1 及其开发构建；必须填写实际安装的精确版本，下列示例是已测试基线。其他版本系列需另行验证。不要把文件摘要匹配当作发布者签名认证；Python 安装及其依赖也必须来自你信任的环境。
 
 ```json
 {
@@ -95,3 +95,5 @@ Windows GitHub Actions 会构建未签名安装包，安装到临时中文路径
 仅在 CI 执行的生命周期场景会先通过安装版保存测试记忆，再强制结束本次测试启动的 Desktop，独立检查 Server 是否仍能读取原记忆并完成新的写入和读取。结果以对应生命周期报告为准；这不代替正常关窗或卸载保留数据库的验收。
 
 安装版边界测试覆盖 8192 字节 Unicode 正文、超限输入禁止提交、搜索无结果和最多 10 条的提示，以及未保存草稿时取消或确认断开连接的行为。是否通过以对应远程报告为准。
+
+从早期预览版升级后，请选择 `sqlite-1.1.1-v1` 并重新检查连接。旧的 `sqlite-63f918b7-v1` 选择不会静默升级为另一份契约。当前验证范围见[审查记录](evidence/ui-review-20260923.md)。

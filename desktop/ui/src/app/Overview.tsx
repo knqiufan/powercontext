@@ -30,7 +30,9 @@ export function Overview({ state, language, onNavigate }: Props) {
   const t = messages[language];
   const active = state?.active;
   const profile = state?.profiles.find((p) => p.id === active?.connectionId);
-  const report = active?.report;
+  const report =
+    state?.reports.find((item) => item.connectionId === active?.connectionId) ??
+    active?.report;
   const readiness = report?.readiness.value?.status;
   const enabled = !!active?.scope && !!report?.compatibilityVerified;
   const principal = report?.anonymousAccess
