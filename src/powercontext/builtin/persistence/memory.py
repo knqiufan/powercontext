@@ -242,7 +242,6 @@ class RelationalMemoryBackend:
                     .where(
                         MEMORY_ENTRY_HEADS_TABLE.c.scope_id == self._scope_id,
                         MEMORY_ENTRY_HEADS_TABLE.c.memory_artifact_id == memory.artifact_id,
-                        MEMORY_ENTRY_HEADS_TABLE.c.head_revision == memory.revision,
                     )
                     .order_by(MEMORY_ENTRY_HEADS_TABLE.c.entry_id)
                 )
@@ -384,7 +383,6 @@ class RelationalMemoryBackend:
             await connection.execute(
                 select(
                     MEMORY_ENTRY_VERSIONS_TABLE,
-                    MEMORY_ENTRY_HEADS_TABLE.c.head_revision.label("_head_revision"),
                     MEMORY_ENTRY_HEADS_TABLE.c.entry_content_hash.label("_head_content_hash"),
                     MEMORY_ENTRY_HEADS_TABLE.c.searchable_text.label("_searchable_text"),
                 )
@@ -404,10 +402,11 @@ class RelationalMemoryBackend:
                 )
             )
         ).mappings()
+        # Unchanged projections retain their original revision stamp. The checked
+        # current manifest, not that stamp, binds each entry version to this head.
         authoritative = {
             (
                 str(row["memory_artifact_id"]),
-                int(row["_head_revision"]),
                 str(row["entry_id"]),
                 str(row["entry_version_id"]),
             ): row
@@ -420,7 +419,7 @@ class RelationalMemoryBackend:
             memory_key = (hit.memory_ref.artifact_id, hit.memory_ref.revision)
             memory = memories.get(memory_key)
             item = manifests.get(memory_key, {}).get(hit.entry_id)
-            row = authoritative.get((*memory_key, hit.entry_id, hit.entry_version_id))
+            row = authoritative.get((hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id))
             if (
                 memory is None
                 or hit.memory_ref.family != Memory.family
@@ -619,30 +618,56 @@ class RelationalMemoryBackend:
                 )
             except IntegrityError as error:
                 raise _InvalidMemoryCommitError("entry-identity") from error
-        # Clear the index before the heads go, as rebuild_projections does: index
-        # metadata may cascade from the heads, and an index can only find its
-        # rows through that metadata.
-        await self._index.replace(connection, self._scope_id, value.memory.as_ref(), ())
-        await connection.execute(
-            delete(MEMORY_ENTRY_HEADS_TABLE).where(
-                MEMORY_ENTRY_HEADS_TABLE.c.scope_id == self._scope_id,
-                MEMORY_ENTRY_HEADS_TABLE.c.memory_artifact_id == value.memory.artifact_id,
+        # Only entries whose pointer or state changed need projection work; the
+        # rest of the active head stays exactly as the previous revision left it.
+        previous_active = (
+            {}
+            if value.base is None
+            else {
+                item.entry_id: item.entry_version_id
+                for item in value.base.content.manifest.entries
+                if item.state == "active"
+            }
+        )
+        current_active = {
+            item.entry_id: item.entry_version_id
+            for item in value.memory.content.manifest.entries
+            if item.state == "active"
+        }
+        removed = tuple(sorted(entry_id for entry_id in previous_active if entry_id not in current_active))
+        changed = tuple(
+            sorted(
+                entry_id
+                for entry_id, entry_version_id in current_active.items()
+                if previous_active.get(entry_id) != entry_version_id
             )
         )
-        if value.projections:
+        drop = tuple(sorted({*removed, *changed}))
+        # Clear the index rows before the heads go, as rebuild_projections does:
+        # index metadata may cascade from the heads, and an index can only find its
+        # rows through that metadata.
+        await self._index.delete(connection, self._scope_id, value.memory.as_ref(), drop)
+        if drop:
+            await connection.execute(
+                delete(MEMORY_ENTRY_HEADS_TABLE).where(
+                    MEMORY_ENTRY_HEADS_TABLE.c.scope_id == self._scope_id,
+                    MEMORY_ENTRY_HEADS_TABLE.c.memory_artifact_id == value.memory.artifact_id,
+                    MEMORY_ENTRY_HEADS_TABLE.c.entry_id.in_(drop),
+                )
+            )
+        if changed:
+            by_entry = {projection.entry_version.entry_id: projection for projection in value.projections}
+            upserts = tuple(by_entry[entry_id] for entry_id in changed)
             await connection.execute(
                 insert(MEMORY_ENTRY_HEADS_TABLE),
-                [
-                    _projection_values(self._scope_id, value.memory.as_ref(), projection)
-                    for projection in value.projections
-                ],
+                [_projection_values(self._scope_id, value.memory.as_ref(), projection) for projection in upserts],
             )
-        await self._index.replace(
-            connection,
-            self._scope_id,
-            value.memory.as_ref(),
-            value.projections,
-        )
+            await self._index.upsert(
+                connection,
+                self._scope_id,
+                value.memory.as_ref(),
+                upserts,
+            )
         return committed
 
     async def _validate_commit_relations(self, connection: AsyncConnection, value: MemoryCommit) -> None:
