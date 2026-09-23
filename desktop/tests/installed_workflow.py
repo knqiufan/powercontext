@@ -54,8 +54,17 @@ class InstalledPage:
             time.sleep(0.2)
         raise HarnessFailure("installed_element_timeout", xpath)
 
+    def click_element(self, identifier: str) -> None:
+        # Scroll through the browser before a real pointer click. WebDriver's
+        # automatic edge alignment can put the target behind a wrapping sticky bar.
+        self.observe(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+            [{ELEMENT: identifier}],
+        )
+        self.post(f"/element/{identifier}/click", {})
+
     def click(self, xpath: str) -> None:
-        self.post(f"/element/{self.element(xpath)}/click", {})
+        self.click_element(self.element(xpath))
 
     def button(self, text: str) -> None:
         self.click(f"//button[normalize-space(.)='{text}']")
@@ -132,7 +141,7 @@ class InstalledPage:
 
     def paste(self) -> str:
         field = self.field("记忆内容", "textarea")
-        self.post(f"/element/{field}/click", {})
+        self.click_element(field)
         self.post(f"/element/{field}/value", {"text": "\ue009v\ue000"})
         for _ in range(100):
             value = self.observe("return arguments[0].value;", [{ELEMENT: field}])

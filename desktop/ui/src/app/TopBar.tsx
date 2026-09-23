@@ -38,6 +38,24 @@ export function TopBar({
   const [open, setOpen] = useState<"connection" | "identity" | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const bar = wrap.current;
+    if (!bar) return;
+    const update = () => {
+      document.documentElement.style.setProperty(
+        "--topbar-height",
+        `${bar.getBoundingClientRect().height}px`,
+      );
+    };
+    update();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(bar);
+    return () => {
+      observer?.disconnect();
+      document.documentElement.style.removeProperty("--topbar-height");
+    };
+  }, []);
+  useEffect(() => {
     if (!open) return;
     function onPointerDown(event: PointerEvent) {
       if (event.target instanceof Node && !wrap.current?.contains(event.target))
