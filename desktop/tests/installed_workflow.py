@@ -183,7 +183,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         if page.paste() != NOTE:
             raise HarnessFailure("installed_body_clipboard_mismatch")
         page.clear_note()
-        page.button("复制引用")
+        page.button("复制精确引用")
         if json.loads(page.paste()) != citation:
             raise HarnessFailure("installed_citation_clipboard_mismatch")
         page.clear_note()
