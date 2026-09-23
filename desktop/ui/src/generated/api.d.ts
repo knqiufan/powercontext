@@ -3801,8 +3801,9 @@ export interface components {
             next_cursor: string | null;
         };
         SourceTypeReference: {
-            /** @enum {string} */
-            source_type: "content";
+            /** @description Stable Source type, including dynamically registered Source names. */
+            source_type: string;
+            /** @description Source identity as accepted at ingestion, including Unicode and interior spaces. */
             source_id: string;
         };
         SourceReference: {
