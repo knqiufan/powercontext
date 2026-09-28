@@ -70,7 +70,10 @@ class InstalledPage:
         self.click(f"//button[normalize-space(.)='{text}']")
 
     def field(self, label: str, tag: str = "input") -> str:
-        return self.element(f"//label[normalize-space(.)='{label}']//{tag} | //{tag}[@aria-label='{label}']")
+        return self.element(
+            f"//label[normalize-space(text())='{label}' or span[normalize-space(.)='{label}']]//{tag}"
+            f" | //{tag}[@aria-label='{label}']"
+        )
 
     def type(self, label: str, value: str, tag: str = "input") -> None:
         self.post(f"/element/{self.field(label, tag)}/value", {"text": value})
