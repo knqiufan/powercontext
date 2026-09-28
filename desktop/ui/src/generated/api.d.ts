@@ -376,6 +376,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/scopes/{scope_id}/code/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query current repository code evidence
+         * @description Read a bounded native Git code index for the authorized Scope. Use symbols or explore before relation or read operations, then pass the returned fingerprint. Results are static evidence with explicit limitations. Queries never build indexes, execute repository code, or persist history. code_changed requires local sync before retry.
+         */
+        post: operations["query_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/context/prepare": {
         parameters: {
             query?: never;
@@ -3314,11 +3334,182 @@ export interface components {
             memory_ref: components["schemas"]["ArtifactReference"];
             changes: components["schemas"]["EntryChange"][];
         };
+        CodeChangesOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "changes";
+        };
+        /** @description path_prefix is empty or a normalized repository-relative path, without dot segments, backslashes, colons or NUL. */
+        CodeMapOperation: {
+            /** @default  */
+            path_prefix: string;
+            /** @default 20 */
+            limit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "map";
+            /** @default 2 */
+            depth: number;
+        };
+        /** @description Read a normalized repository-relative path without dot segments, backslashes, colons or NUL. The inclusive range must contain 1 to 200 lines (start_line <= end_line < start_line + 200). */
+        CodeReadOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "read";
+            path: string;
+            file_sha256: string;
+            start_line: number;
+            end_line: number;
+        };
+        /** @description path_prefix is empty or a normalized repository-relative path, without dot segments, backslashes, colons or NUL. */
+        CodeRelationOperation: {
+            /** @default  */
+            path_prefix: string;
+            /** @default 20 */
+            limit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "callers" | "callees" | "impact";
+            symbol_id: string;
+            /** @default 2 */
+            depth: number;
+        };
+        /** @description query must contain non-whitespace text. path_prefix is empty or a normalized repository-relative path, without dot segments, backslashes, colons or NUL. */
+        CodeSearchOperation: {
+            /** @default  */
+            path_prefix: string;
+            /** @default 20 */
+            limit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "symbols" | "explore";
+            query: string;
+        };
+        CodeStatusOperation: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "status";
+        };
+        /** @description paths must be unique normalized repository-relative paths, without dot segments, backslashes, colons or NUL. path_prefix follows the same rules but may be empty. */
+        CodeTestsOperation: {
+            /** @default  */
+            path_prefix: string;
+            /** @default 20 */
+            limit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "affected_tests" | "impact_changes";
+            paths: string[];
+        };
+        /** @description callers, callees, impact, affected_tests, impact_changes and read require expected_fingerprint. impact_changes also requires before_fingerprint; other operations must omit it or set it to null. */
+        CodeQueryRequest: {
+            /** @description Operation object, never a string. Start with {"kind":"explore","query":"symbol or task"} or {"kind":"symbols","query":"name"}. For callers/callees/impact pass symbol_id inside operation and the returned expected_fingerprint at the request root. */
+            operation: components["schemas"]["CodeStatusOperation"] | components["schemas"]["CodeChangesOperation"] | components["schemas"]["CodeMapOperation"] | components["schemas"]["CodeSearchOperation"] | components["schemas"]["CodeRelationOperation"] | components["schemas"]["CodeTestsOperation"] | components["schemas"]["CodeReadOperation"];
+            expected_fingerprint?: string | null;
+            before_fingerprint?: string | null;
+            /** @default 16000 */
+            max_bytes: number;
+        };
+        CodeQueryResult: {
+            /**
+             * @default powercontext.code-query.v1
+             * @enum {string}
+             */
+            schema: "powercontext.code-query.v1";
+            scope_id: string;
+            fingerprint: string;
+            before_fingerprint?: string | null;
+            commit: string | null;
+            /** @enum {string} */
+            git_object_format: "sha1" | "sha256";
+            dirty: boolean;
+            checked_at: string;
+            operation: string;
+            /**
+             * @default ok
+             * @enum {string}
+             */
+            status: "ok" | "partial";
+            items?: {
+                [key: string]: unknown;
+            }[];
+            coverage?: {
+                [key: string]: unknown;
+            };
+            limitations?: string[];
+        };
+        CodeStatus: {
+            /**
+             * @default powercontext.code-status.v1
+             * @enum {string}
+             */
+            schema: "powercontext.code-status.v1";
+            scope_id: string;
+            /** @enum {string} */
+            status: "disabled" | "missing" | "building" | "ready" | "stale" | "failed";
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            freshness: "fresh" | "stale" | "unknown";
+            fingerprint?: string | null;
+            /** @default powercontext-native-v1 */
+            engine: string;
+            /**
+             * @default [
+             *       "python",
+             *       "javascript",
+             *       "typescript",
+             *       "go"
+             *     ]
+             */
+            languages: string[];
+            /**
+             * @default [
+             *       "status",
+             *       "map",
+             *       "symbols",
+             *       "explore",
+             *       "callers",
+             *       "callees",
+             *       "impact",
+             *       "affected_tests",
+             *       "read",
+             *       "changes",
+             *       "impact_changes"
+             *     ]
+             */
+            operations: string[];
+            last_build?: {
+                [key: string]: unknown;
+            } | null;
+            reason?: string | null;
+        };
+        CodeQueryResponse: components["schemas"]["CodeQueryResult"] | components["schemas"]["CodeStatus"];
         PrepareContextRequest: {
             scope_id: string;
             query: string;
             /** @default 8000 */
             max_bytes: number;
+            /**
+             * @description Opt into current-Scope native code evidence. No index is built during preparation.
+             * @default false
+             */
+            include_code: boolean;
             assembly?: components["schemas"]["ContextAssembly"];
         };
         ContextAssemblySection: {
@@ -4921,6 +5112,49 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["InvalidRequest"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    query_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scope_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Bounded code evidence or index status. */
+            200: {
+                headers: {
+                    "X-PowerContext-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeQueryResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InvalidRequest"];
+            500: components["responses"]["InternalError"];
+            /** @description The requested code capability is unsupported. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["Unavailable"];
         };
     };

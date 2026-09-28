@@ -1,9 +1,9 @@
 [
   {
-    "id": "sqlite-1.1.1-v1",
-    "serverCommit": "1e90376a18e80437a74f2f55141d4301dc7f89c4",
-    "contractSha256": "915866dd26fd2bdce6f987a52fed7febaa859eaf506412765e7c847ea530a6ee",
-    "artifactSha256": "163973110ce96e4332d0304796efa2f98d45e3efca3964e66b9c8ebcdc8f8658",
+    "id": "sqlite-ab43e3a7-v1",
+    "serverCommit": "ab43e3a7d1a470c007b44ef8649c172adb01ae6a",
+    "contractSha256": "1f573193b7e71c6d2c04b0ce4fd706c524048f83e9bf6d09f309b9cc7cdd3ff8",
+    "artifactSha256": "a7c30a7cad50ef675aa741d5fd6a9d948dbe3f145f069ed201f39e5f6c6f586d",
     "operations": [
       "get_liveness",
       "get_readiness",
