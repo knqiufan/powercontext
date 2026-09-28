@@ -25,8 +25,16 @@ type Props = {
   state: DesktopState | null;
   language: Language;
   onNavigate: (page: Page) => void;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 };
-export function Overview({ state, language, onNavigate }: Props) {
+export function Overview({
+  state,
+  language,
+  onNavigate,
+  refreshing = false,
+  onRefresh,
+}: Props) {
   const t = messages[language];
   const active = state?.active;
   const profile = state?.profiles.find((p) => p.id === active?.connectionId);
@@ -63,15 +71,23 @@ export function Overview({ state, language, onNavigate }: Props) {
       <section className="card">
         <div className="card-heading">
           <h2>{t.current}</h2>
-          {active && (
-            <span className={readyBadge(readiness)}>
-              {readiness === "ready"
-                ? t.serviceReady
-                : readiness
-                  ? t.serviceNotReady
-                  : t.unverified}
-            </span>
-          )}
+          <div className="actions">
+            {active && (
+              <span className={readyBadge(readiness)}>
+                {readiness === "ready"
+                  ? t.serviceReady
+                  : readiness
+                    ? t.serviceNotReady
+                    : t.unverified}
+              </span>
+            )}
+            {onRefresh && (
+              <button disabled={refreshing || !state} onClick={onRefresh}>
+                <span aria-hidden="true">↻ </span>
+                {refreshing ? t.refreshing : t.refresh}
+              </button>
+            )}
+          </div>
         </div>
         {active && profile ? (
           <>

@@ -17,10 +17,12 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { App } from "../src/app/App";
 import { Scopes } from "../src/app/Scopes";
 import { desktopApi } from "../src/shared/ipc";
 import type { DesktopState, ScopePage } from "../src/generated/ipc";
 vi.mock("../src/shared/ipc", () => ({
+  getFoundationInfo: vi.fn().mockResolvedValue(null),
   desktopApi: {
     scopes: vi.fn(),
     cancelScopes: vi.fn(),
@@ -151,25 +153,51 @@ test("expired scope cursor discards the old page and restarts explicitly", async
   expect(desktopApi.scopes).toHaveBeenLastCalledWith(1, "team", null);
 });
 
-test("directory denial does not prevent explicitly authorized exact scope selection", async () => {
-  const user = userEvent.setup();
-  const onState = vi.fn();
-  vi.mocked(desktopApi.scopes).mockRejectedValueOnce({ code: "forbidden" });
-  vi.mocked(desktopApi.state).mockResolvedValue(state);
-  vi.mocked(desktopApi.selectScope).mockResolvedValue(state);
-  render(
-    <Scopes
-      state={state}
-      language="en"
-      onState={onState}
-      confirmSwitch={() => true}
-    />,
-  );
-  await user.click(screen.getByRole("button", { name: "Find scopes" }));
-  expect(screen.getByRole("alert").textContent).toContain("cannot perform");
-  await user.click(screen.getByText("Exact Scope ID", { selector: "summary" }));
-  await user.type(screen.getByLabelText("Exact Scope ID"), "explicit-scope-b");
-  await user.click(screen.getByRole("button", { name: "Select scope" }));
-  expect(desktopApi.selectScope).toHaveBeenCalledWith(1, "explicit-scope-b");
-  expect(desktopApi.scopes).toHaveBeenCalledTimes(1);
-});
+test.each([false, true])(
+  "scope dialog closes only after a successful selection (failure=%s)",
+  async (failure) => {
+    const user = userEvent.setup();
+    const scope = {
+      scope_id: "scope-b",
+      title: "Selected team",
+      summary: "",
+      context_references: [],
+      external_references: [],
+      version: 1,
+    };
+    vi.mocked(desktopApi.state).mockResolvedValue(state);
+    vi.mocked(desktopApi.scopes).mockResolvedValue({
+      items: [scope],
+      next_cursor: null,
+    });
+    if (failure)
+      vi.mocked(desktopApi.selectScope).mockRejectedValueOnce({
+        code: "forbidden",
+      });
+    else
+      vi.mocked(desktopApi.selectScope).mockResolvedValue({
+        ...state,
+        generation: 2,
+        active: { ...state.active!, generation: 2, scope },
+      });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /未选择/ }));
+    expect(screen.queryByRole("button", { name: "精确范围" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "查看默认范围建议" }),
+    ).toBeNull();
+    expect(screen.queryByLabelText("精确 Scope ID")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "查找范围" }));
+    await user.click(screen.getByRole("button", { name: "Selected team" }));
+    expect(desktopApi.selectScope).toHaveBeenCalledWith(1, "scope-b");
+    if (failure) {
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(screen.getByRole("alert").textContent).toContain("无权");
+    } else {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /Selected team/ }),
+      ).toBeTruthy();
+    }
+  },
+);

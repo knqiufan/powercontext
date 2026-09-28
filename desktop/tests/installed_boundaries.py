@@ -32,7 +32,7 @@ def exercise_note_budget(page: InstalledPage, server: httpx.Client, scope: str) 
     page.type("记忆内容", note + "é", "textarea")
     page.wait_text("正文超过 8192 UTF-8 字节")
     disabled = page.observe("""return [...document.querySelectorAll('button')].find(
-      b => b.textContent.trim() === '保存记忆')?.disabled;""")
+      b => b.textContent.trim() === '保存')?.disabled;""")
     if disabled is not True:
         raise HarnessFailure("installed_over_budget_save_enabled")
     matches = server.post(
@@ -43,8 +43,9 @@ def exercise_note_budget(page: InstalledPage, server: httpx.Client, scope: str) 
         raise HarnessFailure("installed_over_budget_note_submitted")
     page.clear_note()
     page.type("记忆内容", note, "textarea")
-    page.wait_text("8192 / 8192")
-    page.button("保存记忆")
+    page.wait("""return [...document.querySelectorAll('button')].some(
+      b => b.textContent.trim() === '保存' && !b.disabled);""")
+    page.button("保存")
     page.wait_text("保存成功。")
     matches = server.post(
         "/v1/memory/search", json={"scope_id": scope, "query": "desktopbudgetci", "mode": "fts", "limit": 10}
@@ -67,7 +68,7 @@ def exercise_search_limit(page: InstalledPage, server: httpx.Client, scope: str)
         )
         response.raise_for_status()
     for query, expected in [("desktopnonexistentci", 0), ("desktoplimitci", 10)]:
-        page.type("全文搜索关键词", "\ue009a\ue000\ue003" + query)
+        page.type("关键词搜索", "\ue009a\ue000\ue003" + query)
         page.button("搜索")
         page.wait_text("没有匹配的记忆。" if expected == 0 else "已返回本次上限 10 条")
         count = page.observe("return document.querySelectorAll('.memory-hits li').length;")

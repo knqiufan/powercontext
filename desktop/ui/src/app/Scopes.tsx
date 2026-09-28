@@ -24,18 +24,19 @@ export function Scopes({
   language,
   onState,
   confirmSwitch,
+  onSelected,
   hideHeading = false,
 }: {
   state: DesktopState | null;
   language: Language;
   onState: (state: DesktopState) => void;
   confirmSwitch: () => boolean;
+  onSelected?: () => void;
   hideHeading?: boolean;
 }) {
   const t = connectionMessages[language];
   const active = state?.active;
   const [query, setQuery] = useState("");
-  const [exact, setExact] = useState("");
   const [items, setItems] = useState<ScopeDescriptor[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -50,10 +51,9 @@ export function Scopes({
     setCursor(null);
     setError(null);
     setQuery("");
-    setExact("");
     setBusy(false);
   }, [active?.generation]);
-  async function load(next: string | null, suggestion = false) {
+  async function load(next: string | null) {
     if (!active) return;
     const generation = active.generation;
     const ticket = ++sequence.current;
@@ -68,12 +68,7 @@ export function Scopes({
         generation !== currentGeneration.current
       )
         return;
-      const result = suggestion
-        ? {
-            items: [await desktopApi.defaultScope(generation)],
-            next_cursor: null,
-          }
-        : await desktopApi.scopes(generation, query, next);
+      const result = await desktopApi.scopes(generation, query, next);
       if (
         generation === currentGeneration.current &&
         ticket === sequence.current
@@ -101,6 +96,7 @@ export function Scopes({
     setError(null);
     try {
       onState(await desktopApi.selectScope(active.generation, id));
+      onSelected?.();
     } catch (e) {
       setError(e);
       try {
@@ -158,9 +154,6 @@ export function Scopes({
               <button disabled={busy} onClick={() => void load(null)}>
                 {t.find}
               </button>
-              <button disabled={busy} onClick={() => void load(null, true)}>
-                {t.defaultScope}
-              </button>
             </div>
             {items && (
               <ul className="scope-list">
@@ -183,23 +176,6 @@ export function Scopes({
                 {t.more}
               </button>
             )}
-            <details>
-              <summary>{t.exact}</summary>
-              <label>
-                {t.exact}
-                <input
-                  value={exact}
-                  maxLength={256}
-                  onChange={(e) => setExact(e.target.value)}
-                />
-              </label>
-              <button
-                disabled={busy || !exact.trim()}
-                onClick={() => void select(exact)}
-              >
-                {t.choose}
-              </button>
-            </details>
           </fieldset>
         </>
       )}

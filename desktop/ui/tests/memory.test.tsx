@@ -127,7 +127,7 @@ test("a nullable save succeeds without inventing an entry or submitting on Enter
   vi.mocked(desktopApi.remember).mockResolvedValue(outcome("succeeded"));
   await user.type(screen.getByLabelText("Memory text"), "Café 中文{enter}note");
   expect(desktopApi.remember).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "Save memory" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
   expect(desktopApi.remember).toHaveBeenCalledWith(1, "Café 中文\nnote");
   expect(screen.getByText(/Server returned no entry/)).toBeTruthy();
   expect(
@@ -142,13 +142,13 @@ test("UTF-8 overflow and IME composition cannot accidentally submit", async () =
   expect(textBytes(text)).toBe(8193);
   fireEvent.change(input, { target: { value: text } });
   expect(
-    (screen.getByRole("button", { name: "Save memory" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect((input as HTMLTextAreaElement).value).toBe(text);
   fireEvent.change(input, { target: { value: "中文" } });
   fireEvent.compositionStart(input);
-  await user.click(screen.getByRole("button", { name: "Save memory" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
   expect(desktopApi.remember).not.toHaveBeenCalled();
 });
 test("unknown save retains the draft and does not replay automatically", async () => {
@@ -156,7 +156,7 @@ test("unknown save retains the draft and does not replay automatically", async (
   form();
   vi.mocked(desktopApi.remember).mockResolvedValue(outcome("unknown"));
   await user.type(screen.getByLabelText("Memory text"), "preserve me");
-  await user.click(screen.getByRole("button", { name: "Save memory" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.getByRole("alert").textContent).toContain("outcome is unknown");
   expect(
     (screen.getByLabelText("Memory text") as HTMLTextAreaElement).value,
@@ -192,10 +192,7 @@ test("search opens only the full citation and renders hostile text literally", a
       onDirty={vi.fn()}
     />,
   );
-  await user.type(
-    screen.getByLabelText("Full-text search keywords"),
-    "synthetic",
-  );
+  await user.type(screen.getByLabelText("Keyword search"), "synthetic");
   await user.click(screen.getByRole("button", { name: "Search" }));
   await user.click(screen.getByRole("button", { name: "Read exact version" }));
   expect(desktopApi.entry).toHaveBeenCalledWith(1, citation);
@@ -233,7 +230,7 @@ test("changing query discards a late response instead of showing old matches", a
       onDirty={vi.fn()}
     />,
   );
-  const query = screen.getByLabelText("Full-text search keywords");
+  const query = screen.getByLabelText("Keyword search");
   await user.type(query, "old");
   await user.click(screen.getByRole("button", { name: "Search" }));
   await user.type(query, " new");
@@ -280,10 +277,7 @@ test.each(["forbidden", "not_found", "network"])(
         onDirty={vi.fn()}
       />,
     );
-    await user.type(
-      screen.getByLabelText("Full-text search keywords"),
-      "private",
-    );
+    await user.type(screen.getByLabelText("Keyword search"), "private");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.click(
       screen.getByRole("button", { name: "Read exact version" }),

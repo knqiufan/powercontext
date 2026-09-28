@@ -44,7 +44,6 @@ export function App() {
   const [nativeError, setNativeError] = useState<unknown>(null);
   const [dirty, setDirty] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
-  const [addSignal, setAddSignal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   function receiveState(next: DesktopState) {
     setDesktop((current) =>
@@ -108,32 +107,6 @@ export function App() {
       setRefreshing(false);
     }
   }
-  const subtitle =
-    page === "home"
-      ? t.tagline
-      : page === "connections"
-        ? t.connectionIntro
-        : page === "memories"
-          ? t.memoriesIntro
-          : t.settingsIntro;
-  const headingAction =
-    page === "home" ? (
-      <button
-        className="heading-action"
-        disabled={refreshing || !desktop}
-        onClick={() => void refresh()}
-      >
-        {refreshing ? t.refreshing : t.refresh}
-      </button>
-    ) : page === "connections" ? (
-      <button
-        className="heading-action primary"
-        onClick={() => setAddSignal((value) => value + 1)}
-      >
-        <span aria-hidden="true">+ </span>
-        {ct.add}
-      </button>
-    ) : null;
   const ready = activeReport?.readiness.value?.status === "ready";
   return (
     <div className="app">
@@ -202,15 +175,9 @@ export function App() {
           onDisconnect={disconnect}
         />
         <main id="main">
-          <div className="page-heading">
-            <div>
-              <h1 tabIndex={-1} ref={heading}>
-                {t[page]}
-              </h1>
-              <p>{subtitle}</p>
-            </div>
-            {headingAction}
-          </div>
+          <h1 className="sr-only" tabIndex={-1} ref={heading}>
+            {t[page]}
+          </h1>
           {nativeError != null && (
             <p role="alert">{connectionError(nativeError, language)}</p>
           )}
@@ -231,6 +198,8 @@ export function App() {
               state={desktop}
               language={language}
               onNavigate={navigate}
+              refreshing={refreshing}
+              onRefresh={() => void refresh()}
             />
           )}
           {page === "memories" && (
@@ -248,7 +217,6 @@ export function App() {
               language={language}
               onState={receiveState}
               onDirty={setDirty}
-              addSignal={addSignal}
             />
           )}
           {page === "settings" && (
@@ -297,7 +265,6 @@ export function App() {
               </section>
             </div>
           )}
-          <footer>{t.privacy}</footer>
         </main>
       </div>
       {scopeOpen && (
@@ -325,6 +292,10 @@ export function App() {
               language={language}
               onState={receiveState}
               confirmSwitch={confirmSwitch}
+              onSelected={() => {
+                setDirty(false);
+                setScopeOpen(false);
+              }}
               hideHeading
             />
           </div>

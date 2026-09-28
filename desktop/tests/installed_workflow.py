@@ -70,7 +70,7 @@ class InstalledPage:
         self.click(f"//button[normalize-space(.)='{text}']")
 
     def field(self, label: str, tag: str = "input") -> str:
-        return self.element(f"//label[normalize-space(text())='{label}']//{tag}")
+        return self.element(f"//label[normalize-space(.)='{label}']//{tag} | //{tag}[@aria-label='{label}']")
 
     def type(self, label: str, value: str, tag: str = "input") -> None:
         self.post(f"/element/{self.field(label, tag)}/value", {"text": value})
@@ -112,29 +112,42 @@ class InstalledPage:
         self.activate(name)
 
     def select_scope(self, scope_id: str) -> None:
-        self.button("精确范围")
-        self.click("//summary[normalize-space(.)='精确 Scope ID']")
-        self.type("精确 Scope ID", scope_id)
-        self.button("选择范围")
-        self.wait_text("当前范围: Desktop installed CI")
-        self.button("关闭")
+        self.click("//div[@class='topbar-group']/button")
+        self.type("按范围标题查找", "Desktop installed CI")
+        self.button("查找范围")
+        self.click(f"//ul[@class='scope-list']/li[code[normalize-space(.)='{scope_id}']]/button")
+        self.wait("return !document.querySelector('[role=dialog]');")
+        self.wait(
+            "return document.querySelector('.topbar-group button')?.textContent.includes('Desktop installed CI');"
+        )
 
     def expect_empty_context(self) -> None:
         observed = self.observe("""return {
           reader: !!document.querySelector('.reader'),
           hits: document.querySelectorAll('.memory-hits li').length,
           draft: document.querySelector('.memory-workspace textarea')?.value,
-          query: [...document.querySelectorAll('label')].find(
-            label => label.textContent.trim() === '全文搜索关键词')?.querySelector('input')?.value
+          query: document.querySelector('.search-input input')?.value
         };""")
         if observed != {"reader": False, "hits": 0, "draft": "", "query": ""}:
             raise HarnessFailure("installed_previous_context_not_cleared")
 
     def search_read(self, text: str, keyword: str = "desktopinstalledci") -> dict[str, object]:
-        self.type("全文搜索关键词", keyword)
+        self.type("关键词搜索", keyword)
         self.button("搜索")
         self.button("阅读精确版本")
         self.wait_text("记忆详情")
+        if not self.observe("""return [...document.querySelectorAll('.memory-hits li')].every(hit => {
+          const button = hit.querySelector('button').getBoundingClientRect();
+          const card = hit.closest('section').getBoundingClientRect();
+          return button.left >= card.left && button.right <= card.right
+            && button.top >= card.top && button.bottom <= card.bottom;
+        }) && (() => {
+          const reader = document.querySelector('.reader');
+          const style = getComputedStyle(reader);
+          return reader.getBoundingClientRect().height <= Math.min(760, innerHeight * 0.75) + 1
+            && style.overflowY === 'auto' && reader.scrollWidth <= reader.clientWidth;
+        })();"""):
+            raise HarnessFailure("installed_memory_layout_overflow")
         if self.observe("return document.querySelector('.reader > .plain-text')?.textContent;") != text:
             raise HarnessFailure("installed_exact_body_mismatch")
         return json.loads(self.observe("return document.querySelector('.reader pre')?.textContent;"))
@@ -171,7 +184,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         before_submit.raise_for_status()
         if before_submit.json()["hits"]:
             raise HarnessFailure("installed_enter_submitted_without_button")
-        page.button("保存记忆")
+        page.button("保存")
         page.wait_text("保存成功。")
         citation = page.search_read(NOTE)
         response = server.post("/v1/memory/entries/get", json={"scope_id": scope_id, "citation": citation})
@@ -295,7 +308,7 @@ def exercise_unknown_write(page: InstalledPage) -> None:
             page.connect("Desktop CI response loss", str(server.base_url).rstrip("/"))
             page.select_scope(scope)
             page.type("记忆内容", note, "textarea")
-            page.button("保存记忆")
+            page.button("保存")
             page.wait_text("提交结果未知。")
             if page.observe("return document.querySelector('.memory-workspace textarea')?.value;") != note:
                 raise HarnessFailure("installed_unknown_write_lost_draft")

@@ -389,20 +389,6 @@ main {
   padding: 0;
 }
 
-/* ---------- Page heading ---------- */
-.page-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 4px;
-}
-.page-heading p {
-  margin-bottom: 8px;
-}
-.page-heading .heading-action {
-  flex: none;
-}
 .context-line {
   display: flex;
   align-items: center;
@@ -645,20 +631,13 @@ textarea {
   gap: 8px;
 }
 .profile-form label,
-.scope-picker label,
-.save-row label,
-.search-row label {
+.scope-picker label {
   font-size: 14px;
   color: var(--muted);
 }
-.save-row label,
-.search-row label {
+.save-row label {
   display: grid;
-  gap: 6px;
   min-width: 0;
-}
-.search-row label {
-  flex: 1;
 }
 .getting-started-actions {
   margin-top: 16px;
@@ -766,27 +745,24 @@ dd {
 .memory-workspace {
   margin-top: 8px;
 }
-.save-row {
+.save-row,
+.search-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
-  align-items: start;
+  align-items: center;
 }
 .save-row textarea {
-  min-height: 48px;
+  min-height: 80px;
 }
-.save-action {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
+.save-row > button,
+.search-row > button {
+  min-width: 88px;
+  min-height: 44px;
 }
-.save-action .hint {
-  font-size: 13px;
+.memory-workspace h2,
+.memory-workspace .small {
   margin: 0;
-}
-.search-row {
-  display: flex;
-  gap: 12px;
 }
 .search-row .search-input {
   position: relative;
@@ -810,23 +786,6 @@ dd {
   padding: 4px 10px;
   font-size: 16px;
 }
-.search-meta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  color: var(--muted);
-  font-size: 14px;
-}
-.search-meta select {
-  padding: 6px 12px;
-  font-size: 14px;
-}
-.search-meta .divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-}
 .memory-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -840,38 +799,56 @@ dd {
   display: grid;
   gap: 12px;
 }
+.memory-grid > *,
+.memory-hits > li {
+  min-width: 0;
+}
 .hit-card {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
   gap: 12px;
-  align-items: flex-start;
-  width: 100%;
+  align-items: start;
   text-align: left;
   padding: 14px 16px;
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
-.hit-card[aria-pressed="true"] {
+.hit-card[data-selected="true"] {
   border-color: var(--accent);
   background: var(--selected);
 }
 .hit-card img {
   width: 36px;
   height: 36px;
-  flex: none;
 }
-.hit-card .hit-main {
+.hit-main {
   min-width: 0;
-  flex: 1 1 14ch;
 }
-.hit-card > button {
-  flex: none;
+.hit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hit-actions > button {
+  margin-left: auto;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .hit-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   font-weight: 600;
   color: var(--text);
   overflow-wrap: anywhere;
 }
 .hit-snippet {
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 14px;
   display: -webkit-box;
@@ -881,6 +858,13 @@ dd {
 }
 .hit-card .badge {
   flex: none;
+}
+.reader {
+  max-height: min(760px, 75dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  overflow-wrap: anywhere;
 }
 .reader-body {
   border: 1px solid var(--border);
@@ -1099,21 +1083,6 @@ footer {
   }
   .card {
     padding: 20px 16px;
-  }
-  .page-heading {
-    flex-wrap: wrap;
-  }
-  .search-row {
-    flex-wrap: wrap;
-  }
-  .search-row .search-input {
-    flex-basis: 100%;
-  }
-  .save-row {
-    grid-template-columns: 1fr;
-  }
-  .save-action {
-    justify-items: start;
   }
   dl > div,
   .detail-grid > div {

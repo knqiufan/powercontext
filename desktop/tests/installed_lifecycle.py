@@ -31,7 +31,7 @@ def exercise_forced_exit(client: httpx.Client, prefix: str, app: subprocess.Pope
         page.connect("Desktop CI lifecycle", str(server.base_url).rstrip("/"))
         page.select_scope(scope)
         page.type("记忆内容", note, "textarea")
-        page.button("保存记忆")
+        page.button("保存")
         # The preceding workflow intentionally leaves an unknown last write. A new
         # explicit write must still pass the product's duplicate-risk confirmation.
         alert = client.get(prefix + "/alert/text")

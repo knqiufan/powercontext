@@ -32,15 +32,8 @@ type Props = {
   language: Language;
   onState: (value: DesktopState) => void;
   onDirty: (value: boolean) => void;
-  addSignal?: number;
 };
-export function Connections({
-  state,
-  language,
-  onState,
-  onDirty,
-  addSignal = 0,
-}: Props) {
+export function Connections({ state, language, onState, onDirty }: Props) {
   const t = connectionMessages[language];
   const [selected, setSelected] = useState<string | null>(null);
   const profile = state?.profiles.find((p) => p.id === selected);
@@ -77,9 +70,6 @@ export function Connections({
   useEffect(() => {
     reset(profile);
   }, [selected, profile?.revision]);
-  useEffect(() => {
-    if (addSignal > 0) select(null);
-  }, [addSignal]);
   function change(target = false) {
     setDirty(true);
     onDirty(true);
@@ -162,6 +152,14 @@ export function Connections({
       <section className="card stack">
         <div className="card-heading">
           <h2>{t.savedConnections}</h2>
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => select(null)}
+          >
+            <span aria-hidden="true">+ </span>
+            {t.add}
+          </button>
         </div>
         {state && state.profiles.length === 0 && (
           <p>{messages[language].noConnections}</p>

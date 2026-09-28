@@ -162,7 +162,6 @@ export function TopBar({
           </span>
           <span aria-hidden="true">▾</span>
         </button>
-        <button onClick={onOpenScopes}>{t.exactScope}</button>
       </div>
       <span className="topbar-spacer" />
       <div className="menu-wrap">

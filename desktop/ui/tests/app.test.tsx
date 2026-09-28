@@ -31,14 +31,14 @@ test("disconnected shell prevents writes and search and explains the boundary", 
   ).toBe(true);
   await user.click(screen.getByRole("button", { name: "记忆" }));
   expect(
-    (screen.getByRole("button", { name: "保存记忆" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "保存" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(
     (screen.getByRole("button", { name: "搜索" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-  expect(screen.getByText(/正文和搜索结果只在内存中使用/)).toBeTruthy();
+  expect(screen.queryByText(/正文和搜索结果只在内存中使用/)).toBeNull();
 });
 test("navigation, bilingual settings and theme remain usable without the native host", async () => {
   const user = userEvent.setup();

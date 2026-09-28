@@ -98,7 +98,7 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
       <h2>{t.saveOne}</h2>
       <div className="save-row">
         <label>
-          {t.note}
+          <span className="sr-only">{t.note}</span>
           <textarea
             rows={2}
             disabled={!enabled || busy}
@@ -115,16 +115,13 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
             }}
           />
         </label>
-        <div className="save-action">
-          <button
-            className="primary"
-            disabled={!enabled || busy || !text.trim() || bytes > 8192}
-            onClick={() => void save()}
-          >
-            {busy ? t.saving : t.save}
-          </button>
-          <p className="hint">{t.writeOnClick}</p>
-        </div>
+        <button
+          className="primary"
+          disabled={!enabled || busy || !text.trim() || bytes > 8192}
+          onClick={() => void save()}
+        >
+          {busy ? t.saving : t.save}
+        </button>
       </div>
       <p className="small">
         {enabled ? (
@@ -138,9 +135,6 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
         ) : (
           t.noScope
         )}
-      </p>
-      <p className="small">
-        {bytes} / 8192 {t.budget}
       </p>
       {bytes > 8192 && <p role="alert">{t.bytesError}</p>}
       {error != null && (
@@ -291,33 +285,32 @@ export function MemoryWorkspace(props: Props) {
         onDirty={onDirty}
       />
       <section className="card stack">
+        <h2>{t.query}</h2>
         <div className="search-row">
-          <label>
-            {t.query}
-            <span className="search-input">
-              <input
+          <span className="search-input">
+            <input
+              aria-label={t.query}
+              disabled={!enabled}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                cancel();
+              }}
+            />
+            {query && (
+              <button
+                className="clear-query"
+                aria-label={t.clearQuery}
                 disabled={!enabled}
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
+                onClick={() => {
+                  setQuery("");
                   cancel();
                 }}
-              />
-              {query && (
-                <button
-                  className="clear-query"
-                  aria-label={t.clearQuery}
-                  disabled={!enabled}
-                  onClick={() => {
-                    setQuery("");
-                    cancel();
-                  }}
-                >
-                  ✕
-                </button>
-              )}
-            </span>
-          </label>
+              >
+                ✕
+              </button>
+            )}
+          </span>
           <button
             disabled={
               !enabled || !!busy || !query.trim() || textBytes(query) > 8192
@@ -327,22 +320,7 @@ export function MemoryWorkspace(props: Props) {
             {busy === "search" ? t.searching : t.search}
           </button>
         </div>
-        <div className="search-meta">
-          <span>
-            {t.searchModeLabel}
-            <select disabled value="fts" aria-label={t.searchModeLabel}>
-              <option value="fts">{t.ftsLabel}</option>
-            </select>
-          </span>
-          <span>
-            {t.limitLabel}
-            <select disabled value="10" aria-label={t.limitLabel}>
-              <option value="10">10</option>
-            </select>
-          </span>
-          <span aria-hidden="true" className="divider" />
-          <span className="note-line">{t.searchConfigNote}</span>
-        </div>
+        <p className="small search-meta">{t.searchSummary}</p>
         {!enabled && <p>{t.noScope}</p>}
         {textBytes(query) > 8192 && <p role="alert">{t.inputError}</p>}
         {error != null && (
@@ -370,31 +348,33 @@ export function MemoryWorkspace(props: Props) {
                 const title = hit.text.split("\n", 1)[0] || hit.text;
                 return (
                   <li key={key}>
-                    <div className="hit-card">
+                    <div className="hit-card" data-selected={selected === key}>
                       <img src={memoryIcon} alt="" />
                       <div className="hit-main">
                         <div className="hit-title">{title}</div>
                         <div className="hit-snippet">{hit.text}</div>
                       </div>
-                      {hit.matched_by.includes("fts") && (
-                        <span className="badge success">{t.hitFts}</span>
-                      )}
-                      {!hit.matched_by.includes("fts") &&
-                        hit.matched_by.includes("vector") && (
-                          <span className="badge">{t.hitVector}</span>
+                      <div className="hit-actions">
+                        {hit.matched_by.includes("fts") && (
+                          <span className="badge success">{t.hitFts}</span>
                         )}
-                      <button
-                        disabled={!!busy}
-                        aria-pressed={selected === key}
-                        onClick={(event) => {
-                          readButton.current = event.currentTarget;
-                          void read(hit.citation);
-                        }}
-                      >
-                        {busy === "detail" && selected === key
-                          ? t.loading
-                          : t.read}
-                      </button>
+                        {!hit.matched_by.includes("fts") &&
+                          hit.matched_by.includes("vector") && (
+                            <span className="badge">{t.hitVector}</span>
+                          )}
+                        <button
+                          disabled={!!busy}
+                          aria-pressed={selected === key}
+                          onClick={(event) => {
+                            readButton.current = event.currentTarget;
+                            void read(hit.citation);
+                          }}
+                        >
+                          {busy === "detail" && selected === key
+                            ? t.loading
+                            : t.read}
+                        </button>
+                      </div>
                     </div>
                   </li>
                 );

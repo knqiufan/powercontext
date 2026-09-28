@@ -26,7 +26,6 @@ import type {
   DesktopState,
   ProfileInput,
   ScopePage,
-  ScopeDescriptor,
 } from "../generated/ipc";
 export async function getFoundationInfo(): Promise<FoundationInfo | null> {
   if (!isTauri()) return null;
@@ -58,8 +57,6 @@ export const desktopApi = {
     invoke<ScopePage>("list_scopes", { generation, query, cursor }),
   cancelScopes: (generation: number) =>
     invoke<void>("cancel_scope_reads", { generation }),
-  defaultScope: (generation: number) =>
-    invoke<ScopeDescriptor>("default_scope", { generation }),
   selectScope: (generation: number, id: string) =>
     invoke<DesktopState>("select_scope", { generation, id }),
 };
