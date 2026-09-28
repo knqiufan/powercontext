@@ -315,16 +315,10 @@ def test_bind_scope_puts_the_codex_workspace_key(
     settings = _CliSettings()
 
     bound = scope_module.bind_scope(str(tmp_path), "scp_project_a", settings=settings, deadline=float("inf"))
+    key = scope_module.workspace_binding_key(str(tmp_path))
 
     assert bound == "scp_project_a"
-    assert requests == [
-        (
-            "/v1/scope-bindings",
-            {"key": scope_module.workspace_binding_key(str(tmp_path)), "scope_id": "scp_project_a"},
-            "PUT",
-        )
-    ]
-    key = requests[0][1]["key"]
+    assert requests == [("/v1/scope-bindings", {"key": key, "scope_id": "scp_project_a"}, "PUT")]
     assert key["integration"] == "codex"
     assert key["kind"] == "workspace"
     assert key["external_id"] != str(tmp_path)
