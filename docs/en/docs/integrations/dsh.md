@@ -38,6 +38,9 @@ repeating that command does not update a moving branch. A broken checkout is rep
 
 `setup dsh` calls `dsh plugin --profile web add`; it does not start the Server. Restart DSH after installation.
 
+Existing UI and model patches can remain in place. Setup checks the composed PowerContext connection settings;
+see [remote connection configuration](../operate/connect-remote-server.md) for conflicts and dynamic configuration limits.
+
 ## Start the Server and the host
 
 For automatic Source-to-Memory extraction, generate and validate a Server configuration:

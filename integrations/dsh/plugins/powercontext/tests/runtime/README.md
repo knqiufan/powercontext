@@ -30,6 +30,9 @@ failures at individual PowerContext endpoints.
 The setup scenario first runs `powercontext setup dsh --source <this checkout>` with the pinned DSH executable
 and a clean DSH home. It verifies Web-profile registration through `powercontext doctor dsh --json`, then loads
 that installed package's distributable files into the SDK profile. The Server and plugin use the same checkout.
+A separate setup acceptance installs twice into an existing Web profile with a non-empty, unrelated model patch,
+checks registration through the real CLI, and verifies the patch is preserved. Run it independently with
+`node --test setup.test.mjs`; it does not require an SDK conversation or external model service.
 A test-only loopback adapter invokes the real host command service because the pinned SDK protocol only exposes
 prompts. It verifies `/pc doctor` with an environment URL overriding an unusable patch URL, preserves health when
 Scope authentication fails, and confirms that Doctor makes no capture or flush requests.

@@ -15,13 +15,14 @@
  */
 
 import { execFile } from 'node:child_process'
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import assert from 'node:assert/strict'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { defaultPowerContextRoot } from '../../scripts/e2e-server.mjs'
 import { dshBin } from './fixture.mjs'
 
-export async function installIntoCleanHome(home) {
+export async function installIntoHome(home, { customized = false } = {}) {
   const bin = join(home, 'bin')
   mkdirSync(bin)
   const windows = process.platform === 'win32'
@@ -40,7 +41,19 @@ export async function installIntoCleanHome(home) {
   const cli = async args => (await promisify(execFile)(windows ? 'uv.exe' : 'uv',
     ['run', '--no-sync', 'powercontext', ...args],
     { cwd: root, env, windowsHide: true, timeout: 150000, maxBuffer: 4 * 1024 * 1024 })).stdout
+  const patch = join(env.DSH_HOME, 'profiles/web/cordis.patch.yml')
+  const customizations = '- id: agent-default-model\n  name: "@deepseek-ai/dsh-agent-default-model"\n'
+  if (customized) {
+    await promisify(execFile)(process.execPath, [dshBin, '--profile', 'web', '--dump-default-config'], {
+      cwd: root, env, windowsHide: true, timeout: 30000,
+    })
+    writeFileSync(patch, customizations)
+  }
   const setup = await cli(['setup', 'dsh', '--source', root])
+  if (customized) {
+    await cli(['setup', 'dsh', '--source', root])
+    assert.equal(readFileSync(patch, 'utf8'), customizations)
+  }
   const doctor = await cli(['doctor', 'dsh', '--json'])
   return { setup, doctor: JSON.parse(doctor), plugin: join(env.DSH_HOME, 'profiles/web/node_modules/powercontext-dsh') }
 }

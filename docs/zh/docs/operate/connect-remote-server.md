@@ -65,9 +65,15 @@ Codex、Claude Code、WorkBuddy 的 setup 会同时配置原生 MCP 地址与 Ho
 Codex Hook 特意读取已安装插件中的 `.mcp.json`，插件升级覆盖该文件后需重新运行 setup。
 只修改 Hook 的 URL 环境变量，不能视为宿主原生 MCP 的地址也已修改。
 
-DSH 自定义 `cordis.patch.yml` 可能覆盖 setup 保存的地址与同意状态。标准空白 profile patch 可直接安装；
-检测到自定义覆盖层时，setup 会在安装前退出，请先手动对齐地址及同意设置，或移除覆盖后重试。
-对无法解析的原生配置组合（包括未支持的 JSON5/include），doctor 会报告未知/失败，不会假定连接是安全的环回地址。
+DSH setup 保留已有的界面、模型及其他无关 `cordis.patch.yml` 自定义配置。它使用已安装 DSH 的原生解析和合成接口，
+检查 PowerContext 的 `baseUrl` 与 `allowInsecureHttp`，并在安装前用实际待安装 bundle 再次检查。
+配置一致时允许安装；会覆盖所选地址或 HTTP 同意状态的设置，需要先对齐或移除。
+检查不会改写用户 patch、启动插件或执行 `!!js`。动态 PowerContext 连接字段、被禁用或不唯一的插件条目，
+以及无法读取或不兼容的 bundle 会明确报错；其他插件的动态配置不会因此阻止安装。
+
+配置检查需要 Node.js，以及提供原生配置合成接口的 npm/pnpm DSH 安装。
+独立 CLI 只能观察所选配置文件和自身环境，无法观察运行中 DSH 会话额外的 `--patch` 参数或环境；请在该会话内运行 `/pc doctor`。
+对无法解析的原生配置组合（包括其他宿主未支持的 JSON5/include），doctor 会报告未知/失败，不会假定连接安全。
 
 MiniMax 和通用 Agent Plugin 由宿主负责 MCP 传输，没有单独的 PowerContext HTTP Client 或 setup 子命令；
 本选项不能绕过宿主自己的限制。LangChain、LangGraph、Pydantic AI 及 Bub 评测适配器支持客户端显式同意，
