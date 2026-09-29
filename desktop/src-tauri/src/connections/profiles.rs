@@ -98,12 +98,28 @@ pub struct ProfileInput {
 
 pub struct ProfileRepository {
     path: PathBuf,
+    _lock: std::fs::File,
     document: Document,
     session: BTreeMap<String, Arc<Credential>>,
     vault: Arc<dyn Vault>,
 }
 impl ProfileRepository {
     pub fn open(path: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, SafeError> {
+        // Lock a stable sidecar: persist atomically replaces the document itself.
+        // Hold ownership before reading or replaying credential cleanup, until drop.
+        let parent = path.parent().ok_or(SafeError::Storage)?;
+        std::fs::create_dir_all(parent).map_err(|_| SafeError::Storage)?;
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))
+            .map_err(|_| SafeError::Storage)?;
+        lock.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => SafeError::Busy,
+            std::fs::TryLockError::Error(_) => SafeError::Storage,
+        })?;
         let document = if path.exists() {
             let metadata = path.metadata().map_err(|_| SafeError::Storage)?;
             if metadata.len() > 1024 * 1024 {
@@ -152,6 +168,7 @@ impl ProfileRepository {
         }
         let mut result = Self {
             path,
+            _lock: lock,
             document,
             session: BTreeMap::new(),
             vault,

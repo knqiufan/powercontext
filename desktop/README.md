@@ -12,6 +12,8 @@ Install it, then open **PowerContext Desktop Preview** from the Windows Start me
 
 Uninstall Desktop through Windows **Installed apps**. Uninstallation does not manage the independent Server, business database or Agent configuration; removing Server data is not part of removing Desktop.
 
+Repeated launches activate the existing window for this channel. Profile storage is exclusively owned until the application exits, preventing concurrent instances from overwriting saved connections. Late save completions cannot clear the unsaved-input warning of a new editor or Scope.
+
 ## Build on Windows
 
 Use Windows 11 x64, Visual Studio C++ Build Tools with a Windows SDK, Node **24.14.1**, pnpm **11.13.1**, Rust **1.95.0 MSVC**, and WebView2. `desktop/.mise.toml`, `rust-toolchain.toml`, `pnpm-lock.yaml` and `src-tauri/Cargo.lock` pin the tools and dependencies independently of Python and the website.

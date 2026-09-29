@@ -180,3 +180,27 @@ fn corrupt_configuration_is_reported_without_overwriting_it() {
         "broken configuration"
     );
 }
+
+#[test]
+fn exclusive_repository_preserves_profiles_across_owners() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("profiles.json");
+    let vault = Arc::new(TestVault::default());
+    let mut first = ProfileRepository::open(path.clone(), vault.clone()).unwrap();
+    assert!(matches!(
+        ProfileRepository::open(path.clone(), vault.clone()),
+        Err(SafeError::Busy)
+    ));
+    first.save(input("Personal", "persistent")).unwrap();
+    assert!(matches!(
+        ProfileRepository::open(path.clone(), vault.clone()),
+        Err(SafeError::Busy)
+    ));
+    drop(first);
+    let mut second = ProfileRepository::open(path.clone(), vault.clone()).unwrap();
+    second.save(input("Work", "persistent")).unwrap();
+    drop(second);
+    let reopened = ProfileRepository::open(path, vault).unwrap();
+    let names: Vec<_> = reopened.views().into_iter().map(|p| p.name).collect();
+    assert_eq!(names, vec!["Personal", "Work"]);
+}

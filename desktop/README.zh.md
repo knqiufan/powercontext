@@ -12,6 +12,8 @@
 
 在 Windows「已安装的应用」中卸载 Desktop。卸载不负责删除 Server、业务数据库或 Agent 配置；不要把清理 Server 数据作为卸载桌面的步骤。
 
+同一通道重复启动会唤醒已有窗口。应用运行期间独占连接配置存储，防止多个实例互相覆盖已保存的连接。旧保存任务完成后，不会清除新页面或新 Scope 中草稿的未保存提醒。
+
 ## 开发与构建
 
 Windows 11 x64 上需要 Node 24.14.1、pnpm 11.13.1、Rust 1.95.0 MSVC、Visual Studio C++ Build Tools、Windows SDK 和 WebView2。安装后的用户程序不依赖 Node、Rust、Python 或本地 Server。

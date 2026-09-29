@@ -15,12 +15,14 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { App } from "../src/app/App";
 import { Connections } from "../src/app/Connections";
 import { desktopApi } from "../src/shared/ipc";
 import type { DesktopState, ProfileView } from "../src/generated/ipc";
 vi.mock("../src/shared/ipc", () => ({
+  getFoundationInfo: vi.fn().mockResolvedValue(null),
   desktopApi: {
     remove: vi.fn(),
     invalidate: vi.fn(),
@@ -140,4 +142,37 @@ test("retargeting immediately invalidates verification and prevents retaining th
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
+});
+
+test("a save from the previous connection editor cannot dismiss a new draft", async () => {
+  const user = userEvent.setup();
+  vi.mocked(desktopApi.state).mockResolvedValue(state());
+  let finish!: (next: DesktopState) => void;
+  vi.mocked(desktopApi.save).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "连接" }));
+  await user.type(screen.getByLabelText("连接名称"), "First");
+  await user.type(
+    screen.getByLabelText("Server 地址"),
+    "http://localhost:8000",
+  );
+  await user.click(screen.getByRole("button", { name: "保存配置" }));
+  await user.click(screen.getByRole("button", { name: "总览" }));
+  await user.click(screen.getByRole("button", { name: "连接" }));
+  await user.type(screen.getByLabelText("连接名称"), "New draft");
+  await act(async () => {
+    finish(state({ ...profile, name: "First" }));
+  });
+  confirm.mockClear().mockReturnValue(false);
+  await user.click(screen.getByRole("button", { name: "总览" }));
+  expect(confirm).toHaveBeenCalled();
+  expect((screen.getByLabelText("连接名称") as HTMLInputElement).value).toBe(
+    "New draft",
+  );
 });

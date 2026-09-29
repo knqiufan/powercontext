@@ -110,6 +110,28 @@ async def forward_with_response_loss(app, scope, receive, send, control_path):
     raise ConnectionResetError
 
 
+async def forward_with_response_gate(app, scope, receive, send, gate):
+    """Delay only the response to a committed write, controlled by the UI harness."""
+    messages = []
+
+    async def capture(message):
+        messages.append(message)
+
+    await app(scope, receive, capture)
+
+    def wait_for_release():
+        Path(gate + ".ready").touch()
+        deadline = time.monotonic() + 12
+        while Path(gate).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if Path(gate).exists():
+            raise HarnessFailure("installed_response_gate_timeout")
+
+    await asyncio.to_thread(wait_for_release)
+    for message in messages:
+        await send(message)
+
+
 def serve(config_path: Path) -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     sys.path.insert(0, config["wheel_root"])
@@ -145,6 +167,10 @@ def serve(config_path: Path) -> None:
             scope["path"] = scope["path"][len(prefix) :]
             scope["raw_path"] = scope["path"].encode()
             scope["root_path"] = prefix
+        gate = config.get("response_gate_path")
+        if gate and scope["type"] == "http" and scope["path"] == "/v1/memory/remember":
+            await forward_with_response_gate(app, scope, receive, send, gate)
+            return
         await forward_with_response_loss(app, scope, receive, send, config.get("response_loss_path"))
 
     server = uvicorn.Server(

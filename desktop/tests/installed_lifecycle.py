@@ -16,11 +16,12 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import httpx
 from installed_fixture import isolated_server
-from installed_workflow import InstalledPage
+from installed_workflow import ELEMENT, InstalledPage
 from real_server import HarnessFailure
 
 
@@ -69,3 +70,33 @@ def exercise_forced_exit(client: httpx.Client, prefix: str, app: subprocess.Pope
             "originalExactReadAfterExit": True,
             "independentWriteAndExactReadAfterExit": True,
         }
+
+
+def exercise_single_instance(client: httpx.Client, prefix: str, app: subprocess.Popen[bytes]) -> dict[str, object]:
+    """A real second executable must exit without replacing the current editor."""
+    page = InstalledPage(client, prefix)
+    page.button("连接")
+    page.type("连接名称", "single-instance unsaved draft")
+    for _ in range(3):
+        second = subprocess.Popen(  # noqa: S603 - exact application already launched by this harness
+            app.args, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        )
+        try:
+            if second.wait(timeout=10) != 0:
+                raise HarnessFailure("installed_second_instance_failed")
+        finally:
+            if second.poll() is None:
+                second.kill()
+                second.wait(timeout=10)
+        if app.poll() is not None:
+            raise HarnessFailure("installed_original_instance_exited")
+        if (
+            page.observe("return arguments[0].value;", [{ELEMENT: page.field("连接名称")}])
+            != "single-instance unsaved draft"
+        ):
+            raise HarnessFailure("installed_second_launch_changed_draft")
+    page.button("总览")
+    page.post("/alert/dismiss", {})
+    page.button("总览")
+    page.post("/alert/accept", {})
+    return {"secondLaunchesExited": 3, "originalEditorAndDraftPreserved": True}

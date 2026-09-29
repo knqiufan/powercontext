@@ -28,6 +28,7 @@ import {
   MemoryWorkspace,
   textBytes,
 } from "../src/app/MemoryWorkspace";
+import { App } from "../src/app/App";
 import { Overview } from "../src/app/Overview";
 import { desktopApi } from "../src/shared/ipc";
 import type {
@@ -37,7 +38,11 @@ import type {
   WriteOutcome,
 } from "../src/generated/ipc";
 vi.mock("../src/shared/ipc", () => ({
+  getFoundationInfo: vi.fn().mockResolvedValue(null),
   desktopApi: {
+    scopes: vi.fn(),
+    selectScope: vi.fn(),
+    cancelScopes: vi.fn().mockResolvedValue(undefined),
     remember: vi.fn(),
     state: vi.fn(),
     search: vi.fn(),
@@ -322,3 +327,53 @@ test("overview refresh shows the latest readiness instead of the activation snap
   expect(screen.getByText("Service not ready")).toBeTruthy();
   expect(screen.queryByText("Service ready")).toBeNull();
 });
+
+test.each(["scope", "page"])(
+  "late save after a %s switch preserves the new draft's navigation guard",
+  async (switchKind) => {
+    const user = userEvent.setup();
+    let finish!: (value: WriteOutcome) => void;
+    vi.mocked(desktopApi.remember).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.mocked(desktopApi.state).mockResolvedValue(state);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "记忆" }));
+    await user.type(screen.getByLabelText("记忆内容"), "draft A");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    if (switchKind === "scope") {
+      const scopeB = { ...scope, scope_id: "scope-b", title: "Scope B" };
+      const next = {
+        ...state,
+        generation: 2,
+        active: { ...state.active!, generation: 2, scope: scopeB },
+      };
+      vi.mocked(desktopApi.scopes).mockResolvedValue({
+        items: [scopeB],
+        next_cursor: null,
+      });
+      vi.mocked(desktopApi.selectScope).mockResolvedValue(next);
+      vi.mocked(desktopApi.state).mockResolvedValue(next);
+      await user.click(screen.getByRole("button", { name: /Test scope/ }));
+      await user.click(screen.getByRole("button", { name: "查找范围" }));
+      await user.click(screen.getByRole("button", { name: "Scope B" }));
+    } else {
+      await user.click(screen.getByRole("button", { name: "总览" }));
+      await user.click(screen.getByRole("button", { name: "记忆" }));
+    }
+    await user.type(screen.getByLabelText("记忆内容"), "draft B");
+    await act(async () => {
+      finish(outcome("succeeded"));
+    });
+    confirm.mockClear().mockReturnValue(false);
+    await user.click(screen.getByRole("button", { name: "总览" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(
+      (screen.getByLabelText("记忆内容") as HTMLTextAreaElement).value,
+    ).toBe("draft B");
+  },
+);

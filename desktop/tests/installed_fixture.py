@@ -47,7 +47,9 @@ def wait_ready(client: httpx.Client, process: subprocess.Popen[bytes]) -> None:
 
 
 @contextmanager
-def isolated_server(response_loss_counter: Path | None = None) -> Iterator[tuple[httpx.Client, str, str]]:
+def isolated_server(
+    response_loss_counter: Path | None = None, response_gate: Path | None = None
+) -> Iterator[tuple[httpx.Client, str, str]]:
     desktop = Path(__file__).resolve().parents[1]
     wheels = list((desktop / ".artifacts/server-wheel").glob("*.whl"))
     if len(wheels) != 1:
@@ -69,6 +71,7 @@ def isolated_server(response_loss_counter: Path | None = None) -> Iterator[tuple
             "prefix": "",
             "port": port,
             "tls": False,
+            "response_gate_path": str(response_gate) if response_gate else None,
             "response_loss_path": str(response_loss_counter) if response_loss_counter else None,
         }
         config_path = temp / "server.json"

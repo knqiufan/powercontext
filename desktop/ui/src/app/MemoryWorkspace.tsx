@@ -45,6 +45,7 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
   const [outcome, setOutcome] = useState<WriteOutcome | null>(null);
   const submitting = useRef(false);
   const composing = useRef(false);
+  const lifetime = useRef(0);
   const generation = useRef(active?.generation);
   generation.current = active?.generation;
   const enabled = !!active?.scope && active.report.compatibilityVerified;
@@ -54,6 +55,11 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
     setError(null);
     setOutcome(null);
     onDirty(false);
+    submitting.current = false;
+    setBusy(false);
+    return () => {
+      lifetime.current++;
+    };
   }, [active?.generation]);
   async function save() {
     if (!active?.scope || submitting.current || composing.current) return;
@@ -68,13 +74,16 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
     )
       return;
     const original = active.generation;
+    const ticket = lifetime.current;
+    const isCurrent = () =>
+      ticket === lifetime.current && generation.current === original;
     submitting.current = true;
     setBusy(true);
     setError(null);
     setOutcome(null);
     try {
       const result = await desktopApi.remember(original, text);
-      if (generation.current === original) {
+      if (isCurrent()) {
         setOutcome(result);
         if (result.record.status === "succeeded") {
           setText("");
@@ -82,10 +91,13 @@ export function NoteForm({ state, language, onState, onDirty }: Props) {
         }
       }
     } catch (e) {
-      if (generation.current === original) setError(e);
+      if (isCurrent()) setError(e);
     } finally {
-      submitting.current = false;
-      setBusy(false);
+      if (isCurrent()) {
+        submitting.current = false;
+        setBusy(false);
+      }
+      // The native write still completes against its original target after unmount.
       try {
         onState(await desktopApi.state());
       } catch {

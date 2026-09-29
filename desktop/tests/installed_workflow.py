@@ -205,6 +205,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
         page.clear_note()
         exercise_search_limit(page, server, scope_id)
         exercise_connection_isolation(page, server, scope_id, citation)
+        exercise_late_save(page)
         exercise_unknown_write(page)
         return {
             "serverWheelSha256": wheel_digest,
@@ -221,6 +222,7 @@ def exercise_memory(client: httpx.Client, prefix: str) -> dict[str, object]:
             "rawUtf8BudgetBoundary": True,
             "emptyAndCappedSearchPresentation": True,
             "committedLostResponseUnknownWithoutReplay": True,
+            "lateSavePreservesNewScopeDraft": True,
         }
 
 
@@ -329,4 +331,58 @@ def exercise_unknown_write(page: InstalledPage) -> None:
             hits = matches.json()["hits"]
             if len(hits) != 1 or hits[0]["citation"] != citation or counter.read_text(encoding="utf-8") != "1":
                 raise HarnessFailure("installed_unknown_write_replayed_or_missing")
+            page.clear_note()
+
+
+def exercise_late_save(page: InstalledPage) -> None:
+    with tempfile.TemporaryDirectory(prefix="desktop-late-save-") as directory:
+        gate = Path(directory) / "hold-response"
+        gate.touch()
+        with isolated_server(response_gate=gate) as (server, scope_a, _):
+            response = server.post(
+                "/v1/scopes",
+                json={
+                    "title": "Desktop installed CI B",
+                    "summary": "Late save isolation",
+                    "idempotency_key": "desktop-late-scope-b",
+                },
+            )
+            response.raise_for_status()
+            scope_b = response.json()["scope_id"]
+            page.connect("Desktop CI late save", str(server.base_url).rstrip("/"))
+            page.select_scope(scope_a)
+            page.type("记忆内容", "desktoplatesave Original scope note", "textarea")
+            page.button("保存")
+            for _ in range(100):
+                if Path(str(gate) + ".ready").exists():
+                    break
+                time.sleep(0.05)
+            else:
+                raise HarnessFailure("installed_late_save_not_dispatched")
+            page.click("//div[@class='topbar-group']/button")
+            page.button("查找范围")
+            page.click(f"//ul[@class='scope-list']/li[code[normalize-space(.)='{scope_b}']]/button")
+            page.post("/alert/accept", {})
+            page.wait("return !document.querySelector('[role=dialog]');")
+            draft = "new scope unsaved draft"
+            page.type("记忆内容", draft, "textarea")
+            gate.unlink()
+            # This is shown only after the old form refreshes the native write record.
+            page.wait_text("连接或范围已改变，旧正文已隐藏。")  # noqa: RUF001 - exact localized UI
+            page.button("总览")
+            page.post("/alert/dismiss", {})
+            if page.observe("return document.querySelector('.memory-workspace textarea')?.value;") != draft:
+                raise HarnessFailure("installed_late_save_lost_new_draft")
+            original = server.post(
+                "/v1/memory/search",
+                json={
+                    "scope_id": scope_a,
+                    "query": "desktoplatesave",
+                    "mode": "fts",
+                    "limit": 10,
+                },
+            )
+            original.raise_for_status()
+            if len(original.json()["hits"]) != 1:
+                raise HarnessFailure("installed_late_save_original_target_missing")
             page.clear_note()

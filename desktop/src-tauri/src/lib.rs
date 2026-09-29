@@ -28,6 +28,14 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch only activates the existing editor; never replaces its context.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             ipc::foundation_info,
             commands::local_diagnostics,
@@ -58,6 +66,13 @@ pub fn run() {
                     )
                 })
                 .map(connections::session::ConnectionManager::new);
+            // Fail closed if another process owns this user's channel storage, including
+            // the interval before the single-instance plugin's activation window exists.
+            if matches!(&manager, Err(error::SafeError::Busy)) {
+                return Err(
+                    std::io::Error::other("Desktop profile storage is already in use").into(),
+                );
+            }
             app.manage(commands::HostState { manager });
             app.manage(diagnostics::DiagnosticHost::new(
                 app.path().app_data_dir().ok(),

@@ -42,6 +42,7 @@ zeroize = "=1.8.2"
 native-tls = "=0.2.18"
 uuid = { version = "=1.26.1", features = ["v4"] }
 tempfile = "=3.27.0"
+tauri-plugin-single-instance = "=2.4.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_Storage_FileSystem"] }

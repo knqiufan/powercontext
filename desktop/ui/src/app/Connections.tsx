@@ -52,6 +52,13 @@ export function Connections({ state, language, onState, onDirty }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const invalidated = useRef(false);
+  const lifetime = useRef(0);
+  useEffect(
+    () => () => {
+      lifetime.current++;
+    },
+    [],
+  );
   function reset(p?: ProfileView) {
     setName(p?.name ?? "");
     setEndpoint(p?.endpoint ?? "");
@@ -89,21 +96,22 @@ export function Connections({ state, language, onState, onDirty }: Props) {
     reset(state?.profiles.find((p) => p.id === id));
   }
   async function action(work: () => Promise<DesktopState>) {
+    const ticket = lifetime.current;
     setBusy(true);
     setError(null);
     try {
       const next = await work();
       onState(next);
-      return next;
+      if (ticket === lifetime.current) return next;
     } catch (e) {
-      setError(e);
+      if (ticket === lifetime.current) setError(e);
       try {
         onState(await desktopApi.state());
       } catch {
         /* Keep the explicit failure visible. */
       }
     } finally {
-      setBusy(false);
+      if (ticket === lifetime.current) setBusy(false);
     }
   }
   async function save() {
