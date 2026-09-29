@@ -716,6 +716,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read Memory capacity
+         * @description Measure the current Memory head against the deployment budget, including exact canonical content bytes and the number of aged, untagged tombstones eligible for compaction. Returns 404 when no Memory exists. Tombstone eligibility can load complete manifests for up to memory_compaction_min_tombstone_revisions recent revisions (10 by default), in addition to reading the target revision. Read and decode cost scales with their combined size; this is not a constant-cost counter and is unsuitable for frequent polling.
+         */
+        post: operations["get_memory_capacity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/memory/entries/list": {
         parameters: {
             query?: never;
@@ -3235,6 +3255,26 @@ export interface components {
         FlushTopicMemoryResponse: {
             status: components["schemas"]["TopicMemoryFlushStatus"];
         };
+        GetMemoryCapacityRequest: {
+            scope_id: string;
+        };
+        /** @enum {string} */
+        MemoryCapacityDimension: "active_entries" | "manifest_entries" | "manifest_bytes";
+        MemoryCapacityBudget: {
+            max_active_entries: number;
+            max_manifest_entries: number;
+            max_manifest_bytes: number;
+        };
+        MemoryCapacity: {
+            memory_ref: components["schemas"]["ArtifactReference"];
+            active_entry_count: number;
+            manifest_entry_count: number;
+            /** @description Exact canonical bytes of the complete Revision content, including its change records. */
+            manifest_bytes: number;
+            compactable_entry_count: number;
+            budget: components["schemas"]["MemoryCapacityBudget"];
+            exceeded: components["schemas"]["MemoryCapacityDimension"][];
+        };
         GetMemoryEntryRequest: {
             scope_id: string;
             citation: components["schemas"]["MemoryCitation"];
@@ -4023,7 +4063,7 @@ export interface components {
         /** @enum {string} */
         PreparedContextStatus: "ready" | "empty";
         /** @enum {string} */
-        EntryChangeOperation: "add" | "revise" | "deactivate" | "reactivate";
+        EntryChangeOperation: "add" | "revise" | "deactivate" | "reactivate" | "compact";
         /** @enum {string} */
         FlushStatus: "idle" | "processed";
         /** @enum {string} */
@@ -5650,6 +5690,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["InvalidRequest"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    get_memory_capacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GetMemoryCapacityRequest"];
+            };
+        };
+        responses: {
+            /** @description Capacity of one exact current Memory Revision. */
+            200: {
+                headers: {
+                    "X-PowerContext-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryCapacity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["InvalidRequest"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["Unavailable"];
