@@ -3248,6 +3248,16 @@ export interface components {
             high_watermark: number;
             processed_source_count: number;
             memory?: components["schemas"]["ArtifactReference"];
+            /**
+             * @description Number of source windows held by the Memory write gate.
+             * @default 0
+             */
+            held_count: number;
+            /**
+             * @description Structured Memory write gate refusal codes for held windows.
+             * @default []
+             */
+            hold_codes: string[];
         };
         FlushTopicMemoryRequest: {
             scope_id: string;

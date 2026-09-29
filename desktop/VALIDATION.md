@@ -22,11 +22,11 @@ cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 
 ## Compatibility scope
 
-[compatibility.json](src-tauri/src/connections/compatibility.json) identifies the qualified Server source, normalized OpenAPI contract digest and qualification-wheel digest for `sqlite-f1089f4e-v1`. The qualification wheel was built from checkout `527a4226`; its backend sources, OpenAPI contract, project configuration and lock match the Server commit recorded in that manifest. CI builds have their own artifact identities.
+[compatibility.json](src-tauri/src/connections/compatibility.json) identifies the qualified Server source, normalized OpenAPI contract digest and qualification-wheel digest for `sqlite-6e237568-v1`. The qualification wheel was built from checkout `ea30fd5c`; its backend sources, OpenAPI contract, project configuration and lock match the Server commit recorded in that manifest. CI builds have their own artifact identities.
 
 The real Server harness covers SQLite with anonymous loopback, static Bearer, HTTPS with explicit CA/base path, and injected-provider/enforced access. It exercises save/search/exact reads, identity changes, binding revocation, ambiguous writes without replay and Scope pagination. Installed UI checks cover repeated launches preserving the existing editor, late committed-save responses preserving a new Scope draft, explicit connection/Scope selection, clipboard copies, connection isolation, draft cancellation, byte limits and independent Server survival after Desktop exit.
 
-Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` selections require explicitly choosing the new profile and rechecking the connection. CLI diagnostics separately verify the registered executable path, digest and exact version.
+Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` selections require explicitly choosing the new profile and rechecking the connection. CLI diagnostics separately verify the registered executable path, digest and exact version.
 
 ## Remaining release qualification
 

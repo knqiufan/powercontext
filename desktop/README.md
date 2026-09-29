@@ -116,4 +116,4 @@ The CI-only lifecycle scenario forcibly ends its own installed Desktop process a
 
 Installed boundary checks exercise an 8192-byte Unicode note, reject over-budget input, display zero and capped-ten search results, and verify cancel/confirm behavior when disconnecting with an unsaved draft. Each result requires its matching remote report.
 
-After upgrading from the earlier preview, select `sqlite-f1089f4e-v1` and recheck your connection. The previous `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` selection is not silently upgraded to a different contract. See [current qualification](VALIDATION.md).
+After upgrading from the earlier preview, select `sqlite-6e237568-v1` and recheck your connection. The previous `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` selection is not silently upgraded to a different contract. See [current qualification](VALIDATION.md).
