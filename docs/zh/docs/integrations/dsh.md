@@ -38,6 +38,9 @@ powercontext setup dsh --source ./powercontext-dsh-dev
 
 `setup dsh` 调用 `dsh plugin --profile web add`，不会启动 Server。安装完成后重启 DSH。
 
+已有界面和模型 patch 可以保留。setup 检查合成后的 PowerContext 连接设置；
+冲突处理及动态配置限制见[远程连接配置](../operate/connect-remote-server.md)。
+
 ## 启动 Server 和宿主
 
 需要自动将 Source 提取为 Memory 时，生成并校验 Server 配置：

@@ -40,6 +40,7 @@ def isolated_client_connection_settings(tmp_path, monkeypatch, request):
     if not request.config.getoption("run_real_e2e"):
         monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "client-settings.json"))
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+        monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh-home"))
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

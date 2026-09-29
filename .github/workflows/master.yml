@@ -181,6 +181,11 @@ jobs:
       - name: Test built plugin in the real DSH runtime
         run: make dsh-runtime-test
 
+      - name: Verify DSH setup with customized profiles
+        run: |
+          export DSH_TEST_EXECUTABLE="$(node --input-type=module -e "import { dshBin } from './integrations/dsh/plugins/powercontext/tests/runtime/fixture.mjs'; process.stdout.write(dshBin)")"
+          uv run pytest tests/test_dsh_transport.py
+
       - name: Verify DSH guidance adapter requests and results
         run: uv run pytest "tests/test_integration_guidance_evaluation.py::test_native_adapter_handoff_uses_real_request_mapping_and_response_envelopes[dsh]"
 

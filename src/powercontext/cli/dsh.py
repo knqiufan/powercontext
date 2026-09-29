@@ -51,7 +51,9 @@ class DshSetupResult:
     authorization_state: str = "not_attempted"
 
 
-def install_dsh_plugin(*, source: str, ref: str, server_url: str = "http://127.0.0.1:8000") -> DshSetupResult:
+def install_dsh_plugin(
+    *, source: str, ref: str, server_url: str = "http://127.0.0.1:8000", allow_insecure_http: bool = False
+) -> DshSetupResult:
     """Install the plugin from a PowerContext checkout or Git source."""
 
     dsh_executable()
@@ -62,6 +64,13 @@ def install_dsh_plugin(*, source: str, ref: str, server_url: str = "http://127.0
         raise SetupError.data_directory(data_dir, error) from error
     plugin_dir = resolve_dsh_plugin_dir(source=source, ref=ref)
     require_built_plugin(plugin_dir)
+    from powercontext.cli.dsh_transport import read_dsh_settings, validate_dsh_setup_transport
+
+    try:
+        settings = read_dsh_settings(profile=DSH_PROFILE, candidate=plugin_dir, prospective=True)
+        validate_dsh_setup_transport(settings, server_url, allow_insecure_http)
+    except ValueError as error:
+        raise SetupError(str(error)) from error
     _run_dsh("plugin", "--profile", DSH_PROFILE, "add", str(plugin_dir))
     from powercontext.cli.authorization import (
         configure_stored_authorization,
