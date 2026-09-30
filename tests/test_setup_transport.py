@@ -193,7 +193,7 @@ def test_all_setup_routes_persist_adapter_endpoint(host, bulk, endpoint, tmp_pat
     monkeypatch.setattr(hosts, "verify_host", lambda _host: None)
     if host not in {"claude-code", "openclaw"}:
         module = system if host == "codex" else importlib.import_module(f"powercontext.cli.{host}")
-        monkeypatch.setattr(module, f"run_{host}_diagnostics", lambda: {})
+        monkeypatch.setattr(module, f"run_{host}_diagnostics", lambda **_options: {})
     arguments = ["setup", "select", "--host", host, "--json"] if bulk else ["setup", host, "--json"]
     if endpoint.startswith("https:"):
         arguments.extend(["--server-url", endpoint])

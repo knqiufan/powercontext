@@ -844,7 +844,7 @@ def test_setup_checks_actual_installed_transport_before_saving_connection(
     monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("POWERCONTEXT_DSH_AUTHORIZATION", "Bearer new-token")
 
-    def install(*_args):
+    def install(*_args, **_kwargs):
         shutil.copytree(source, profile / "node_modules/powercontext-dsh")
         (profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": ["powercontext-dsh"]}}}))
         write_patch(profile, patch)
@@ -1043,3 +1043,44 @@ def test_unavailable_host_configuration_apis_give_recovery_guidance(dsh_native_a
         entry.write_text("export {}\n")
     with pytest.raises(ValueError, match="upgrade or reinstall DSH"):
         read_dsh_settings()
+
+
+def test_selected_profile_controls_setup_transport_and_preserves_other_profile(dsh_profile, tmp_path):
+    from powercontext.cli.dsh import dsh_executable
+    from powercontext.cli.dsh_runtime import DshProfile, DshTarget
+
+    # Exercise real DSH composition with disposable manifests, not Electron installation.
+    desktop = dsh_profile.parent / "desktop"
+    desktop.mkdir()
+    (desktop / "package.json").write_bytes((dsh_profile / "package.json").read_bytes())
+    write_patch(dsh_profile, "- id: powercontext-dsh\n  config:\n    baseUrl: https://web.example\n")
+    write_patch(desktop, "- id: powercontext-dsh\n  config:\n    baseUrl: https://desktop.example\n")
+    original = {p: p.read_bytes() for p in dsh_profile.parent.rglob("*") if p.is_file()}
+    target = DshTarget(DshProfile.DESKTOP, dsh_executable())
+    assert prepare_setup_transport("dsh", dsh_target=target).server_url == "https://desktop.example"
+    assert prepare_setup_transport("dsh").server_url == "https://web.example"
+    with pytest.raises(RuntimeError, match="baseUrl conflicts"):
+        prepare_setup_transport("dsh", dsh_target=target, server_url="https://web.example")
+    assert {p: p.read_bytes() for p in dsh_profile.parent.rglob("*") if p.is_file()} == original
+
+
+def test_desktop_registration_does_not_boot_and_requires_an_enabled_bundle(dsh_profile, tmp_path):
+    from powercontext.cli.dsh import dsh_executable, run_dsh_diagnostics
+    from powercontext.cli.dsh_runtime import DshProfile, DshTarget
+
+    desktop = dsh_profile.parent / "desktop"
+    desktop.mkdir()
+    manifest = desktop / "package.json"
+    manifest.write_text('{"dsh":{"profile":{"bundles":[]}}}')
+    target = DshTarget(DshProfile.DESKTOP, dsh_executable())
+    assert not run_dsh_diagnostics(target=target)["plugin"].ok
+
+    source = plugin_source(tmp_path)
+    installed = desktop / "node_modules/powercontext-dsh"
+    installed.mkdir(parents=True)
+    for name in ("package.json", "cordis.patch.yml"):
+        (installed / name).write_bytes((source / name).read_bytes())
+    manifest.write_text('{"dsh":{"profile":{"bundles":["powercontext-dsh"]}}}')
+    assert run_dsh_diagnostics(target=target)["plugin"].ok
+    write_patch(desktop, "- id: powercontext-dsh\n  disabled: true\n")
+    assert not run_dsh_diagnostics(target=target)["plugin"].ok
