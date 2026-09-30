@@ -1916,7 +1916,7 @@ def test_doctor_dsh_requires_the_installed_plugin(monkeypatch) -> None:
     import powercontext.cli.dsh as dsh_cli
 
     monkeypatch.setattr(dsh_cli, "which", lambda _name: "/usr/bin/dsh")
-    monkeypatch.setattr(dsh_cli, "_run_dsh", lambda *_args: "id: other-plugin\n")
+    monkeypatch.setattr(dsh_cli, "_run_dsh", lambda *_args, **_kwargs: "id: other-plugin\n")
 
     result = CliRunner().invoke(create_cli([doctor_app]), ["doctor", "dsh"])
 
