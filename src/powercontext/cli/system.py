@@ -1108,11 +1108,11 @@ def doctor_dsh(
     from powercontext.cli.dsh import run_dsh_diagnostics
 
     try:
-        target = resolve_dsh_target(profile, dsh_command) if profile == DshProfile.DESKTOP or dsh_command else None
+        target = resolve_dsh_target(profile, dsh_command)
     except SetupError as error:
         diagnostics = {"dsh": Diagnostic(status=DiagnosticStatus.FAILED, detail=str(error))}
     else:
-        diagnostics = run_dsh_diagnostics(**({"target": target} if target else {}))
+        diagnostics = run_dsh_diagnostics(target=target)
         add_transport_diagnostic(diagnostics, "dsh", dsh_target=target)
     _write_diagnostics(diagnostics, json_output=json_output)
     if not _diagnostics_ok(diagnostics):

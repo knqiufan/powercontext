@@ -557,3 +557,22 @@ def test_desktop_registration_does_not_boot_and_requires_an_enabled_bundle(dsh_p
     assert run_dsh_diagnostics(target=target)["plugin"].ok
     write_patch(desktop, "- id: powercontext-dsh\n  disabled: true\n")
     assert not run_dsh_diagnostics(target=target)["plugin"].ok
+
+
+def test_explicit_web_doctor_does_not_read_desktop_environment_profile(dsh_profile, monkeypatch):
+    import powercontext.cli.dsh as dsh
+    from powercontext.cli.system import doctor_app
+
+    desktop = dsh_profile.parent / "desktop"
+    desktop.mkdir()
+    (desktop / "package.json").write_bytes((dsh_profile / "package.json").read_bytes())
+    write_patch(
+        desktop,
+        "- insert:\n    - id: powercontext-dsh\n      name: powercontext-dsh\n"
+        "      config:\n        baseUrl: http://desktop.example\n",
+    )
+    monkeypatch.setenv("DSH_PROFILE", "desktop")
+    monkeypatch.setattr(dsh, "_run_dsh", lambda *_args, **_kwargs: "id: powercontext-dsh\n")
+    result = CliRunner().invoke(create_cli([doctor_app]), ["doctor", "dsh", "--profile", "web", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["ok"] is True
