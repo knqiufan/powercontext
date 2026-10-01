@@ -72,6 +72,14 @@ def install_dsh_plugin(
     except ValueError as error:
         raise SetupError(str(error)) from error
     _run_dsh("plugin", "--profile", DSH_PROFILE, "add", str(plugin_dir))
+    try:
+        settings = read_dsh_settings(profile=DSH_PROFILE, require_installed=True)
+        validate_dsh_setup_transport(settings, server_url, allow_insecure_http)
+    except ValueError as error:
+        raise SetupError(  # noqa: TRY003 - actionable host-specific readback failure.
+            f"DSH installation completed but its resulting configuration could not be validated: {error}. "
+            "Connection settings and credentials were not saved. Check the profile before restarting DSH."
+        ) from error
     from powercontext.cli.authorization import (
         configure_stored_authorization,
         setup_authorization_value,

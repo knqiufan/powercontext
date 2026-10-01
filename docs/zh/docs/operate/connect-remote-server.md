@@ -66,10 +66,15 @@ Codex Hook 特意读取已安装插件中的 `.mcp.json`，插件升级覆盖该
 只修改 Hook 的 URL 环境变量，不能视为宿主原生 MCP 的地址也已修改。
 
 DSH setup 保留已有的界面、模型及其他无关 `cordis.patch.yml` 自定义配置。它使用已安装 DSH 的原生解析和合成接口，
-检查 PowerContext 的 `baseUrl` 与 `allowInsecureHttp`，并在安装前用实际待安装 bundle 再次检查。
+检查 PowerContext 的 `baseUrl` 与 `allowInsecureHttp`，并在安装前用实际待安装 bundle 检查原生安装器最终会启用的
+完整 bundle 组合，包括旧版 DSH 会重新启用的已安装但未启用的依赖。检查保留原有 bundle 顺序，遵循所选 CLI 的启用规则。
 配置一致时允许安装；会覆盖所选地址或 HTTP 同意状态的设置，需要先对齐或移除。
 检查不会改写用户 patch、启动插件或执行 `!!js`。动态 PowerContext 连接字段、被禁用或不唯一的插件条目，
 以及无法读取或不兼容的 bundle 会明确报错；其他插件的动态配置不会因此阻止安装。
+
+安装后，setup 会再次读取实际已启用的配置，验证通过才保存连接设置或凭据。若结果无法验证或与所选连接配置冲突，
+setup 会失败并保留原有连接设置；请在重启前检查已改动的 DSH profile。这项读回检查不会回滚原生包安装。
+独立 doctor 只检查当前已启用的 bundle。
 
 配置检查需要 Node.js，以及提供原生配置合成接口的 npm/pnpm DSH 安装。
 独立 CLI 只能观察所选配置文件和自身环境，无法观察运行中 DSH 会话额外的 `--patch` 参数或环境；请在该会话内运行 `/pc doctor`。

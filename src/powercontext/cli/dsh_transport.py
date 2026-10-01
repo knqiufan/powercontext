@@ -27,7 +27,7 @@ from powercontext.client.transport_policy import normalize_client_url, parse_cli
 
 
 def read_dsh_settings(
-    *, profile: str = "web", candidate: Path | None = None, prospective: bool = False
+    *, profile: str = "web", candidate: Path | None = None, prospective: bool = False, require_installed: bool = False
 ) -> dict[str, Any]:
     """Compose the installed host's layers; optionally substitute the installation candidate."""
     from powercontext.cli.dsh import dsh_executable
@@ -38,12 +38,16 @@ def read_dsh_settings(
         raise ValueError("Cannot inspect an invalid DSH profile name")  # noqa: TRY003
     # An absent profile with no patches has no native transport override. The
     # candidate check always composes the host's default bundles before install.
-    if candidate is None and not any(
-        path.exists()
-        for path in (
-            home / "profiles" / profile / "package.json",
-            home / "profiles" / profile / "cordis.patch.yml",
-            home / "cordis.patch.yml",
+    if (
+        candidate is None
+        and not require_installed
+        and not any(
+            path.exists()
+            for path in (
+                home / "profiles" / profile / "package.json",
+                home / "profiles" / profile / "cordis.patch.yml",
+                home / "cordis.patch.yml",
+            )
         )
     ):
         return {}
@@ -63,6 +67,7 @@ def read_dsh_settings(
         profile,
         str(candidate) if candidate else "",
         str(prospective).lower(),
+        str(require_installed).lower(),
     ]
     try:
         result = subprocess.run(  # noqa: S603 - fixed helper and separate arguments, no shell.
