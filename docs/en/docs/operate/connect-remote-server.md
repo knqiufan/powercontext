@@ -71,10 +71,17 @@ that file. Do not change only a hook URL environment variable and assume the nat
 
 DSH setup preserves existing UI, model, and other unrelated `cordis.patch.yml` customizations. It uses the
 installed DSH's native parser and patch composition to check PowerContext's `baseUrl` and `allowInsecureHttp`,
-then checks the actual candidate bundle before installing it. Matching settings pass; an override that would
+then checks the actual candidate against the complete bundle stack the native installer will enable, including
+installed but inactive dependencies on DSH versions that reactivate them. Existing bundle order and the selected
+CLI's activation rules are preserved. Matching settings pass; an override that would
 undo the selected endpoint or HTTP consent must be aligned or removed. The check does not rewrite user patches,
 start plugins, or evaluate `!!js`. Dynamic PowerContext transport fields, disabled/ambiguous entries, and unreadable
 or incompatible bundles are reported explicitly. Unrelated dynamic plugin configuration does not block setup.
+
+After installation, setup reads the actual enabled configuration again before saving connection settings or
+credentials. If the result cannot be verified or disagrees with the selected transport, setup fails and leaves
+those settings unsaved; inspect the modified DSH profile before restarting. This readback does not roll back
+native package installation. Standalone doctor checks only currently enabled bundles.
 
 Configuration inspection requires Node.js and an npm/pnpm DSH installation exposing the native composition APIs.
 The CLI observes the selected configuration files and its own environment, not a running DSH session's extra

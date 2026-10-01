@@ -16,6 +16,7 @@
 
 import json
 import os
+import shutil
 from shutil import which
 from unittest.mock import Mock
 
@@ -77,8 +78,15 @@ def test_existing_customizations_allow_public_setup_and_preserve_files(dsh_profi
         dsh_profile,
         "- insert:\n    - id: ui\n      name: ui\n- id: ui\n  config:\n    theme: dark\n    title: 自定义界面\n    model: !!js process.env.MODEL\n",
     )
-    original = {path: path.read_bytes() for path in dsh_profile.iterdir()}
     source = plugin_source(tmp_path)
+    shutil.copytree(source, dsh_profile / "node_modules/powercontext-dsh")
+    (dsh_profile / "package.json").write_text(
+        json.dumps({
+            "dependencies": {"powercontext-dsh": f"link:{source.as_posix()}"},
+            "dsh": {"profile": {"bundles": ["powercontext-dsh"]}},
+        })
+    )
+    original = {path: path.read_bytes() for path in dsh_profile.iterdir() if path.is_file()}
     monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
     installer = Mock(return_value="id: powercontext-dsh\n")
     monkeypatch.setattr(dsh, "_run_dsh", installer)
@@ -89,7 +97,7 @@ def test_existing_customizations_allow_public_setup_and_preserve_files(dsh_profi
             json.loads((tmp_path / "clients.json").read_text())["hosts"]["dsh"]["server_url"] == "http://127.0.0.1:8000"
         )
     assert patch.read_bytes() == original[patch]
-    assert {path: path.read_bytes() for path in dsh_profile.iterdir()} == original
+    assert {path: path.read_bytes() for path in dsh_profile.iterdir() if path.is_file()} == original
 
 
 @pytest.mark.parametrize("relative", ["profiles/web/cordis.patch.yml", "cordis.patch.yml"])
@@ -226,3 +234,55 @@ def test_explicit_refusal_cannot_be_overridden_by_native_permission(monkeypatch)
         validate_dsh_setup_transport(
             {"baseUrl": "http://a.example", "allowInsecureHttp": True}, "http://a.example", False
         )
+
+
+def test_setup_checks_actual_installed_transport_before_saving_connection(dsh_profile, tmp_path, monkeypatch):
+    import powercontext.cli.dsh as dsh
+
+    source = plugin_source(tmp_path)
+    clients = tmp_path / "clients.json"
+    clients.write_text('{"version":1,"hosts":{"dsh":{"server_url":"https://saved.example"}}}')
+    original = clients.read_bytes()
+    monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
+
+    def install(*_args):
+        shutil.copytree(source, dsh_profile / "node_modules/powercontext-dsh")
+        (dsh_profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": ["powercontext-dsh"]}}}))
+        write_patch(dsh_profile, "- id: powercontext-dsh\n  config:\n    baseUrl: https://unexpected.example\n")
+        return ""
+
+    # Inject configuration drift at the native installation boundary. The native
+    # parser reads the resulting files; this does not simulate native add itself.
+    monkeypatch.setattr(dsh, "_run_dsh", install)
+    result = CliRunner().invoke(
+        create_cli([setup_app]),
+        ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+    )
+    assert result.exit_code == 1
+    assert "resulting configuration" in result.output
+    assert "baseUrl conflicts" in result.output
+    assert clients.read_bytes() == original
+
+
+def test_current_transport_does_not_activate_an_inactive_dependency(dsh_profile, tmp_path):
+    source = plugin_source(tmp_path)
+    shutil.copytree(source, dsh_profile / "node_modules/powercontext-dsh")
+    inactive = dsh_profile / "node_modules/transport-override"
+    inactive.mkdir()
+    (inactive / "package.json").write_text(
+        json.dumps({"name": "transport-override", "dsh": {"bundle": {"patch": "cordis.patch.yml"}}})
+    )
+    (inactive / "cordis.patch.yml").write_text(
+        "- id: powercontext-dsh\n  config:\n    baseUrl: https://inactive.example\n"
+    )
+    manifest = dsh_profile / "package.json"
+    manifest.write_text(
+        json.dumps({
+            "dependencies": {"powercontext-dsh": f"link:{source.as_posix()}", "transport-override": "1.0.0"},
+            "dsh": {"profile": {"bundles": ["powercontext-dsh"]}},
+        })
+    )
+    original = manifest.read_bytes()
+    assert read_dsh_settings(require_installed=True) == {}
+    assert resolve_host_transport("dsh") == ("http://127.0.0.1:8000", False)
+    assert manifest.read_bytes() == original
