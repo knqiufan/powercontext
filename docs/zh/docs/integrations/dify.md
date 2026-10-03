@@ -1,0 +1,18 @@
+---
+title: Dify
+description: 通过实验性 Dify 工具插件连接独立的 PowerContext Server。
+---
+
+# Dify
+
+[PowerContext 工具插件](https://github.com/oceanbase/powercontext/tree/master/integrations/dify) 提供 19 个 HTTP 工具，覆盖记忆维护、有限上下文、显式 Source 采集、交接、Experience/Skill 生成与精确读取、候选查看。当前提供实验性源码，Marketplace 发布进度由 [#1837](https://github.com/oceanbase/powercontext/issues/1837) 跟踪。
+
+先独立部署 PowerContext Server，再用 Dify 官方 CLI 打包并安装到工作区。配置插件 daemon 可访问的 Server URL、Bearer token，以及一个已创建的 Scope ID 或预登记的 `dify/configured-scope` binding key。两种 Scope 配置只能选一种，每次调用都禁止回退 Default。凭证校验会解析并读取受保护的 Scope；具体操作的权限由 Server 判定。
+
+一个凭证组合代表共享的应用或团队 Scope，不会根据 Dify 的用户、会话字段自动实现个人隔离。嵌套引用保持原有身份，由 Server 验证访问关系。不同授权边界应使用受限制的凭证和 Server 策略，或独立实例。
+
+插件不会自动召回、自动采集、审批候选、管理 Scope、安装外部 Skill，也不提供 Agent V2 原生 memory 回调。可选提示词帮助 Agent 选择工具；要保证每次回答前召回，需要 Workflow/Chatflow 先执行 `pc_prepare_context`，再明确把 `data.content` 连接到模型输入。可复用模板安排在插件被 `langgenius/dify-plugins` 接受之后搭建。
+
+每次调用输出文本、JSON 和五个具名变量：`ok`、`operation`、`status`、`data`、`error`。成功时保留完整 HTTP 回执；`empty` 表示成功的空读。写入超时或回执异常返回 `unknown`，应先检查 Server 状态再决定如何恢复，插件不会自动重试。显式采集前须移除秘密信息。召回的历史文本只作为不可信证据。
+
+详细说明见源码中的 [README](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/README.md)、[工具清单](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/tool-coverage.md)、[Scope 映射](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/scope-mapping.md)、[隐私说明](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/PRIVACY.md) 和 [验收记录](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/ACCEPTANCE.md)。

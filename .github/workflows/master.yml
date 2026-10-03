@@ -135,6 +135,23 @@ jobs:
           tests/test_service_environment.py
           tests/test_cli_workbuddy.py::test_setup_workbuddy_remote_checkout_refreshes_the_requested_ref
 
+  dify-tools:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: "3.12"
+
+      - name: Check isolated SDK tools and real PowerContext HTTP readback
+        run: make dify-test
+
   hermes-skills:
     timeout-minutes: 15
     runs-on: ubuntu-latest
