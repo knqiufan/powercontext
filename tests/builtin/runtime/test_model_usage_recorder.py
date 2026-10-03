@@ -153,57 +153,6 @@ def test_in_memory_usage_does_not_join_outer_rollback() -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("delay_phase", ["connection_wait", "write"])
-def test_business_rollback_and_usage_write_share_the_full_record_budget(
-    monkeypatch: pytest.MonkeyPatch, delay_phase: str
-) -> None:
-    async def scenario() -> None:
-        async with _database() as database:
-            loop = asyncio.get_running_loop()
-            clock = loop.time
-            elapsed = 0.0
-            monkeypatch.setattr(loop, "time", lambda: clock() + elapsed)
-            transaction = database._model_usage_transaction
-            entered = asyncio.Event()
-
-            @asynccontextmanager
-            async def waiting_transaction(timeout_seconds: float) -> AsyncIterator[AsyncConnection]:
-                nonlocal elapsed
-                entered.set()
-                async with transaction(timeout_seconds) as connection:
-                    if delay_phase == "write":
-                        elapsed = 2.0
-                    yield connection
-
-            monkeypatch.setattr(database, "_model_usage_transaction", waiting_transaction)
-            recorder = _ModelUsageRecorder(
-                database, StatisticsRepository(), write_timeout_seconds=4.0, flush_timeout_seconds=3.0
-            )
-            try:
-                with pytest.raises(ValueError, match="business rollback"):
-                    async with database.transaction() as connection:
-                        await connection.execute(update(SCOPES_TABLE).values(title="uncommitted"))
-                        _offer(recorder)
-                        await entered.wait()
-                        # Simulate scheduling delay before acquiring the real
-                        # shared connection or before SQL, without wall-clock
-                        # sleeps. Half the record's total budget remains.
-                        if delay_phase == "connection_wait":
-                            elapsed = 2.0
-                        raise ValueError("business rollback")  # noqa: TRY003
-                await recorder.flush()
-                rows = await _rows(database)
-                assert len(rows) == 1
-                assert rows[0].requests == 1
-                async with database.transaction() as connection:
-                    assert (await connection.execute(select(SCOPES_TABLE.c.title))).scalar_one() == "original"
-                await _assert_connection_restored(database)
-            finally:
-                await recorder.close()
-
-    asyncio.run(scenario())
-
-
 def test_long_shared_transaction_drops_usage_without_invalidating_memory() -> None:
     async def scenario() -> None:
         async with _database() as database:
@@ -257,8 +206,8 @@ def test_writer_lock_released_inside_the_budget_still_records(tmp_path: Path) ->
         path = tmp_path / "retry.db"
         config = SQLiteConfig(url=f"sqlite+aiosqlite:///{path}", busy_timeout_ms=5_000)
         async with _database(config) as database:
-            # A writer that lets go partway through the record's retry budget
-            # still yields a recorded usage row.
+            # One record's budget is spent in slices, so a writer that lets go
+            # partway through still yields a recorded usage row.
             recorder = _ModelUsageRecorder(database, StatisticsRepository(), write_timeout_seconds=2.0)
             holder = sqlite3.connect(path)
             try:

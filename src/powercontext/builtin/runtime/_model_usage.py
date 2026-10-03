@@ -34,8 +34,12 @@ from powercontext.builtin.statistics import ModelUsageOperation, ModelUsagePurpo
 
 _LOGGER = logging.getLogger(__name__)
 
-# A contended SQLite write upgrade usually returns at once. Back off between
-# rollback-safe failures while keeping every attempt inside the record's budget.
+# A contended attempt on SQLite usually returns at once: the transaction begins
+# deferred, and the write upgrade does not consult the busy handler. The budget
+# bounds the retry window, and the backoff interval bounds how many attempts fit
+# inside it; the slice below only caps a single attempt that does wait.
+_WRITE_ATTEMPT_SLICES = 4
+_MIN_WRITE_ATTEMPT_SECONDS = 0.02
 _RETRY_BACKOFF_SECONDS = 0.02
 
 
@@ -196,15 +200,17 @@ class _ModelUsageRecorder:
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._write_timeout_seconds
+        # A fixed slice per attempt rather than a re-sliced remainder, so one
+        # attempt that really does wait cannot consume the whole budget. Contended
+        # attempts normally return immediately, so the backoff interval, not this
+        # slice, is what decides how many attempts fit inside the deadline.
+        attempt_timeout = max(self._write_timeout_seconds / _WRITE_ATTEMPT_SLICES, _MIN_WRITE_ATTEMPT_SECONDS)
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 raise TimeoutError
             try:
-                # Connection waits and SQL share the record's full budget. An
-                # earlier attempt deadline would drop a slow successful write
-                # without using the time still available to this record.
-                async with self._database._model_usage_transaction(remaining) as connection:
+                async with self._database._model_usage_transaction(min(remaining, attempt_timeout)) as connection:
                     # Lock the Scope row on MySQL so delete cannot race the
                     # increment. SQLite ignores FOR UPDATE; its real snapshot
                     # makes a competing delete fail the write upgrade instead.
@@ -225,9 +231,8 @@ class _ModelUsageRecorder:
             except OperationalError as error:
                 if not is_transaction_contention(error):
                     raise
-                # Let the competing writer finish before retrying, including
-                # this wait in the same overall deadline.
-                await asyncio.sleep(min(_RETRY_BACKOFF_SECONDS, max(deadline - loop.time(), 0)))
+                # Let the competing writer finish before taking another slice.
+                await asyncio.sleep(min(_RETRY_BACKOFF_SECONDS, max(remaining, 0)))
             else:
                 return
 
