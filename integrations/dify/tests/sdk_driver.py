@@ -46,7 +46,12 @@ def invoke(registry, job):
         runtime=ToolRuntime(credentials=job["credentials"], user_id=None, session_id=None),
         session=object(),
     )
-    messages = list(entry.invoke(job.get("parameters", {})))
+    parameters = job.get("parameters", {})
+    if job.get("host_cast"):
+        from host_helpers import cast_parameters
+
+        parameters = cast_parameters(declaration, parameters)
+    messages = list(entry.invoke(parameters))
     envelope = next(message.message.json_object for message in messages if message.type.value == "json")
     variables = {
         message.message.variable_name: message.message.variable_value

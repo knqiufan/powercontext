@@ -23,6 +23,10 @@ On Windows set `PYTHONUTF8=1`, or invoke Python with `-X utf8`, because the pinn
 
 The generated contract is a closure of the 19 selected operations plus internal Scope resolution and protected Scope retrieval from `openapi/powercontext.yaml`. After an API change, regenerate with `generate_contract.py`, inspect the contract and declaration changes, and rerun the checks. This script does not modify Server models. Native objects/arrays and single JSON strings are accepted at the tool boundary; fields and complete receipts remain structurally validated.
 
+Nullable inputs use Dify `any` transport plus their exact `input_schema`, keeping null distinct from malformed objects. Workflow output schemas explicitly use Draft 7: `$ref` points to the canonical validation schema, while sibling `type`/`properties`/`items` supply the metadata Dify 1.17.1 reads directly. This preserves full response values, nullable fields and integer validation while allowing nested variable selection. Keep that schema dialect explicit when changing this generation code.
+
+CI checks out Dify 1.17.1 at `8387590ace4a094de812b7847fc6a4c3a27cd52b` and executes its parameter casting, model-schema builder and frontend output/selector functions. For the same local probes, use Node 22.19+ and set `POWERCONTEXT_DIFY_SOURCE` to an absolute checkout path for that commit before running the SDK and HTTP tests above. Without that setting, host-helper scenarios are skipped; ordinary SDK/HTTP tests still run. A sparse checkout needs the six files listed in the `dify-tools` CI checkout step. These probes do not launch Dify or its daemon. Deployment must also verify input-schema forwarding for Agent tools, since a daemon that drops `input_schema` cannot provide the required model-visible schemas.
+
 ## Usage and evidence
 
 - [Installation, credentials and tools](plugin/README.md)

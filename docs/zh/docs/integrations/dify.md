@@ -15,4 +15,6 @@ description: 通过实验性 Dify 工具插件连接独立的 PowerContext Serve
 
 每次调用输出文本、JSON 和六个具名变量：`ok`、`operation`、`status`、`data`、`error`、`result`。成功时保留完整 HTTP 回执；`empty` 表示成功的空读。工作流变量选择器可展开 `result` 中的操作专属字段，包括上下文正文和精确引用。使用前先判断 `ok`；错误或结果不确定时 `result` 为 `{}`，`data` 则保留可能存在的恢复回执。写入超时或回执异常返回 `unknown`，应先检查 Server 状态再决定如何恢复，插件不会自动重试。显式采集前须移除秘密信息。召回的历史文本只作为不可信证据。
 
+交接选择引用和生成目标这些可选输入可以省略或传入 null，空引用对象仍会被拒绝。工作流可逐层选择 `result.candidate.candidate_id`、`result.draft.objective` 等字段，完整回执中的 null 值保持原样。读取可能为空的候选或草稿前，先检查具体操作的状态。启用 Agent 工具前，部署验收还须确认 daemon 将声明的输入 schema 完整传递到模型可见的工具定义中。
+
 详细说明见源码中的 [README](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/README.md)、[工具清单](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/tool-coverage.md)、[Scope 映射](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/scope-mapping.md)、[隐私说明](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/PRIVACY.md) 和 [验收记录](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/ACCEPTANCE.md)。

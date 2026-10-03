@@ -105,6 +105,86 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        memory:
+          $ref: '#/definitions/Result/properties/memory'
+          type: object
+          properties:
+            family:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/family'
+              type: string
+            artifact_id:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/artifact_id'
+              type: string
+            revision:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/revision'
+              type: number
+        mode:
+          $ref: '#/definitions/Result/properties/mode'
+          type: string
+          enum: &id001
+          - fts
+          - vector
+          - hybrid
+        hits:
+          $ref: '#/definitions/Result/properties/hits'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/hits/items'
+            type: object
+            properties:
+              citation:
+                $ref: '#/definitions/Result/properties/hits/items/properties/citation'
+                type: object
+                properties:
+                  memory_ref:
+                    $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/memory_ref'
+                    type: object
+                    properties:
+                      family:
+                        $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/memory_ref/properties/family'
+                        type: string
+                      artifact_id:
+                        $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/memory_ref/properties/artifact_id'
+                        type: string
+                      revision:
+                        $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/memory_ref/properties/revision'
+                        type: number
+                  entry_id:
+                    $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/entry_id'
+                    type: string
+                  entry_version_id:
+                    $ref: '#/definitions/Result/properties/hits/items/properties/citation/properties/entry_version_id'
+                    type: string
+              text:
+                $ref: '#/definitions/Result/properties/hits/items/properties/text'
+                type: string
+              score:
+                $ref: '#/definitions/Result/properties/hits/items/properties/score'
+                type: number
+              matched_by:
+                $ref: '#/definitions/Result/properties/hits/items/properties/matched_by'
+                type: array
+                items:
+                  $ref: '#/definitions/Result/properties/hits/items/properties/matched_by/items'
+                  type: string
+                  enum: &id002
+                  - fts
+                  - vector
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -134,10 +214,7 @@ output_schema:
         mode:
           anyOf:
           - type: string
-            enum:
-            - fts
-            - vector
-            - hybrid
+            enum: *id001
           - type: 'null'
         hits:
           type: array
@@ -199,18 +276,9 @@ output_schema:
                 type: array
                 items:
                   type: string
-                  enum:
-                  - fts
-                  - vector
+                  enum: *id002
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_search.py

@@ -483,6 +483,165 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        generation:
+          $ref: '#/definitions/Result/properties/generation'
+          type: object
+          properties:
+            receipt:
+              $ref: '#/definitions/Result/properties/generation/anyOf/0/properties/receipt'
+              type: string
+          description: Transient Server-authenticated generation receipt. Preserve
+            it across finalize and commit. It grants no additional authority and is
+            never stored in the Artifact.
+        schema:
+          $ref: '#/definitions/Result/properties/schema'
+          type: string
+          enum: &id001
+          - powercontext.prepared-handoff.v1
+        scope_id:
+          $ref: '#/definitions/Result/properties/scope_id'
+          type: string
+        base:
+          $ref: '#/definitions/Result/properties/base'
+          type: object
+          properties:
+            family:
+              $ref: '#/definitions/Result/properties/base/anyOf/0/properties/family'
+              type: string
+            artifact_id:
+              $ref: '#/definitions/Result/properties/base/anyOf/0/properties/artifact_id'
+              type: string
+            revision:
+              $ref: '#/definitions/Result/properties/base/anyOf/0/properties/revision'
+              type: number
+        content:
+          $ref: '#/definitions/Result/properties/content'
+          type: object
+          properties:
+            generation:
+              $ref: '#/definitions/Result/properties/content/properties/generation'
+              type: object
+              properties:
+                scope_id:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/scope_id'
+                  type: string
+                prompt_key:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/prompt_key'
+                  type: string
+                  enum: &id002
+                  - handoff.generate
+                selection:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/selection'
+                  type: string
+                  enum: &id003
+                  - built_in
+                  - artifact
+                artifact:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/artifact'
+                  type: object
+                  properties:
+                    family:
+                      $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/artifact/anyOf/0/properties/family'
+                      type: string
+                    artifact_id:
+                      $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/artifact/anyOf/0/properties/artifact_id'
+                      type: string
+                    revision:
+                      $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/artifact/anyOf/0/properties/revision'
+                      type: number
+                definition_version:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/definition_version'
+                  type: string
+                builtin_version:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/builtin_version'
+                  type: string
+                compiled_digest:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/compiled_digest'
+                  type: string
+                original_draft_digest:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/original_draft_digest'
+                  type: string
+                edit_status:
+                  $ref: '#/definitions/Result/properties/content/properties/generation/anyOf/0/properties/edit_status'
+                  type: string
+                  enum: &id004
+                  - unchanged
+                  - edited
+              description: Server-derived, persisted generation origin. Raw copied
+                metadata is not accepted as verified input without a valid receipt.
+                Prompt references are configuration lineage, not factual citations.
+            schema:
+              $ref: '#/definitions/Result/properties/content/properties/schema'
+              type: string
+              enum: &id005
+              - powercontext.handoff.v1
+            objective:
+              $ref: '#/definitions/Result/properties/content/properties/objective'
+              type: string
+            state:
+              $ref: '#/definitions/Result/properties/content/properties/state'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/content/properties/state/items'
+                type: object
+                properties:
+                  text:
+                    $ref: '#/definitions/Result/properties/content/properties/state/items/properties/text'
+                    type: string
+                  citations:
+                    $ref: '#/definitions/Result/properties/content/properties/state/items/properties/citations'
+                    type: array
+                    items:
+                      $ref: '#/definitions/Result/properties/content/properties/state/items/properties/citations/items'
+                      type: object
+            disposition:
+              $ref: '#/definitions/Result/properties/content/properties/disposition'
+              type: string
+              enum: &id006
+              - continuable
+              - blocked
+              - complete
+            next_action:
+              $ref: '#/definitions/Result/properties/content/properties/next_action'
+              type: object
+              properties:
+                text:
+                  $ref: '#/definitions/Result/properties/content/properties/next_action/anyOf/0/properties/text'
+                  type: string
+                citations:
+                  $ref: '#/definitions/Result/properties/content/properties/next_action/anyOf/0/properties/citations'
+                  type: array
+                  items:
+                    $ref: '#/definitions/Result/properties/content/properties/next_action/anyOf/0/properties/citations/items'
+                    type: object
+            omissions:
+              $ref: '#/definitions/Result/properties/content/properties/omissions'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/content/properties/omissions/items'
+                type: object
+                properties:
+                  text:
+                    $ref: '#/definitions/Result/properties/content/properties/omissions/items/properties/text'
+                    type: string
+                  citation:
+                    $ref: '#/definitions/Result/properties/content/properties/omissions/items/properties/citation'
+                    type: object
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -503,8 +662,7 @@ output_schema:
           - type: 'null'
         schema:
           type: string
-          enum:
-          - powercontext.prepared-handoff.v1
+          enum: *id001
         scope_id:
           type: string
         base:
@@ -565,13 +723,10 @@ output_schema:
                     maxLength: 256
                   prompt_key:
                     type: string
-                    enum:
-                    - handoff.generate
+                    enum: *id002
                   selection:
                     type: string
-                    enum:
-                    - built_in
-                    - artifact
+                    enum: *id003
                   artifact:
                     anyOf:
                     - type: object
@@ -611,14 +766,11 @@ output_schema:
                     pattern: ^[0-9a-f]{64}$
                   edit_status:
                     type: string
-                    enum:
-                    - unchanged
-                    - edited
+                    enum: *id004
               - type: 'null'
             schema:
               type: string
-              enum:
-              - powercontext.handoff.v1
+              enum: *id005
             objective:
               type: string
               minLength: 1
@@ -756,10 +908,7 @@ output_schema:
                           memory: '#/components/schemas/HandoffMemoryCitation'
             disposition:
               type: string
-              enum:
-              - continuable
-              - blocked
-              - complete
+              enum: *id006
             next_action:
               anyOf:
               - type: object
@@ -1017,13 +1166,6 @@ output_schema:
                     - type: 'null'
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_handoff_finalize.py

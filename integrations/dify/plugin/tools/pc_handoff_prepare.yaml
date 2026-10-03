@@ -187,6 +187,83 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        generation:
+          $ref: '#/definitions/Result/properties/generation'
+          type: object
+          properties:
+            receipt:
+              $ref: '#/definitions/Result/properties/generation/anyOf/0/properties/receipt'
+              type: string
+          description: Transient Server-authenticated generation receipt. Preserve
+            it across finalize and commit. It grants no additional authority and is
+            never stored in the Artifact.
+        objective:
+          $ref: '#/definitions/Result/properties/objective'
+          type: string
+        state:
+          $ref: '#/definitions/Result/properties/state'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/state/items'
+            type: object
+            properties:
+              text:
+                $ref: '#/definitions/Result/properties/state/items/properties/text'
+                type: string
+              citations:
+                $ref: '#/definitions/Result/properties/state/items/properties/citations'
+                type: array
+                items:
+                  $ref: '#/definitions/Result/properties/state/items/properties/citations/items'
+                  type: object
+        disposition:
+          $ref: '#/definitions/Result/properties/disposition'
+          type: string
+          enum: &id001
+          - continuable
+          - blocked
+          - complete
+        next_action:
+          $ref: '#/definitions/Result/properties/next_action'
+          type: object
+          properties:
+            text:
+              $ref: '#/definitions/Result/properties/next_action/anyOf/0/properties/text'
+              type: string
+            citations:
+              $ref: '#/definitions/Result/properties/next_action/anyOf/0/properties/citations'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/next_action/anyOf/0/properties/citations/items'
+                type: object
+        omissions:
+          $ref: '#/definitions/Result/properties/omissions'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/omissions/items'
+            type: object
+            properties:
+              text:
+                $ref: '#/definitions/Result/properties/omissions/items/properties/text'
+                type: string
+              citation:
+                $ref: '#/definitions/Result/properties/omissions/items/properties/citation'
+                type: object
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -342,10 +419,7 @@ output_schema:
                       memory: '#/components/schemas/HandoffMemoryCitation'
         disposition:
           type: string
-          enum:
-          - continuable
-          - blocked
-          - complete
+          enum: *id001
         next_action:
           anyOf:
           - type: object
@@ -603,13 +677,6 @@ output_schema:
                 - type: 'null'
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_handoff_prepare.py

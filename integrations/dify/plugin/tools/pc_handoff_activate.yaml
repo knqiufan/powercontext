@@ -212,14 +212,116 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        status:
+          $ref: '#/definitions/Result/properties/status'
+          type: string
+          enum: &id001
+          - generated
+          - ignored
+        boundary_source:
+          $ref: '#/definitions/Result/properties/boundary_source'
+          type: object
+          properties:
+            name:
+              $ref: '#/definitions/Result/properties/boundary_source/properties/name'
+              type: string
+              description: Stable Source type.
+            source_id:
+              $ref: '#/definitions/Result/properties/boundary_source/properties/source_id'
+              type: string
+        previous_position:
+          $ref: '#/definitions/Result/properties/previous_position'
+          type: number
+        current_position:
+          $ref: '#/definitions/Result/properties/current_position'
+          type: number
+        draft:
+          $ref: '#/definitions/Result/properties/draft'
+          type: object
+          properties:
+            generation:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/generation'
+              type: object
+              properties:
+                receipt:
+                  $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/generation/anyOf/0/properties/receipt'
+                  type: string
+              description: Transient Server-authenticated generation receipt. Preserve
+                it across finalize and commit. It grants no additional authority and
+                is never stored in the Artifact.
+            objective:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/objective'
+              type: string
+            state:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/state'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/state/items'
+                type: object
+                properties:
+                  text:
+                    $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/state/items/properties/text'
+                    type: string
+                  citations:
+                    $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/state/items/properties/citations'
+                    type: array
+                    items:
+                      $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/state/items/properties/citations/items'
+                      type: object
+            disposition:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/disposition'
+              type: string
+              enum: &id002
+              - continuable
+              - blocked
+              - complete
+            next_action:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/next_action'
+              type: object
+              properties:
+                text:
+                  $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/next_action/anyOf/0/properties/text'
+                  type: string
+                citations:
+                  $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/next_action/anyOf/0/properties/citations'
+                  type: array
+                  items:
+                    $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/next_action/anyOf/0/properties/citations/items'
+                    type: object
+            omissions:
+              $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/omissions'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/omissions/items'
+                type: object
+                properties:
+                  text:
+                    $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/omissions/items/properties/text'
+                    type: string
+                  citation:
+                    $ref: '#/definitions/Result/properties/draft/anyOf/0/properties/omissions/items/properties/citation'
+                    type: object
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
         status:
           type: string
-          enum:
-          - generated
-          - ignored
+          enum: *id001
         boundary_source:
           type: object
           additionalProperties: false
@@ -401,10 +503,7 @@ output_schema:
                             memory: '#/components/schemas/HandoffMemoryCitation'
               disposition:
                 type: string
-                enum:
-                - continuable
-                - blocked
-                - complete
+                enum: *id002
               next_action:
                 anyOf:
                 - type: object
@@ -663,13 +762,6 @@ output_schema:
           - type: 'null'
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_handoff_activate.py

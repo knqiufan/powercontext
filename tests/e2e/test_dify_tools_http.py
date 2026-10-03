@@ -64,8 +64,8 @@ class SdkDriver:
         assert line, f"SDK test driver exited with {self.process.poll()}"
         return json.loads(line)
 
-    def call(self, name: str, scope_id: str, parameters: dict[str, Any]) -> dict[str, Any]:
-        result = self.batch([self.job(name, scope_id, parameters)])[0]
+    def call(self, name: str, scope_id: str, parameters: dict[str, Any], *, host_cast: bool = False) -> dict[str, Any]:
+        result = self.batch([{**self.job(name, scope_id, parameters), "host_cast": host_cast}])[0]
         assert result["ok"], json.dumps(result, ensure_ascii=False)
         self.called.add(name)
         return result["data"]
@@ -275,3 +275,45 @@ def test_sdk_concurrent_scopes_and_rejected_credentials(sdk_http) -> None:
         sdk.job("pc_search", "", {"query": "needle"}, binding_external_id="deployment:missing"),
     ])
     assert [result["error"]["code"] for result in results] == ["authentication_failed", "not_found"]
+
+
+@pytest.mark.skipif(not os.environ.get("POWERCONTEXT_DIFY_SOURCE"), reason="Set the pinned Dify source path")
+def test_host_cast_nullable_inputs_preserve_handoff_and_generation_readback(sdk_http) -> None:
+    sdk, _http, scope, _other = sdk_http
+    source = sdk.call(
+        "pc_capture_source", scope, {"source_id": "dify:nullable", "content": "Verified nullable host inputs."}
+    )["source"]
+    draft = sdk.call(
+        "pc_handoff_prepare",
+        scope,
+        {"objective": "Continue verified work.", "evidence": [{"kind": "source", "source_ref": source}]},
+    )
+    prepared = sdk.call("pc_handoff_finalize", scope, {"draft": draft})
+    committed = sdk.call("pc_handoff_commit", scope, {"handoff": prepared})
+    direct = sdk.call("pc_handoff_continue", scope, {"selection": "latest"})
+    for selection, handoff, revision in (
+        ("latest", None, None),
+        ("exact", None, committed["reference"]),
+        ("prepared", prepared, None),
+    ):
+        continued = sdk.call(
+            "pc_handoff_continue",
+            scope,
+            {"selection": selection, "prepared": handoff, "revision": revision},
+            host_cast=True,
+        )
+        assert continued["status"] == "resolved"
+        assert continued["content"] == direct["content"]
+
+    for tool in ("pc_experience_generate", "pc_skill_generate"):
+        parameters = {"source_refs": [source], "target": None, "reason": None}
+        if tool == "pc_skill_generate":
+            parameters["origin"] = "source"
+        generated = sdk.call(tool, scope, parameters, host_cast=True)
+        assert generated["status"] == "pending"
+        candidate = generated["candidate"]
+        inspected = sdk.call("pc_review_get", scope, {"candidate_id": candidate["candidate_id"]})
+        assert inspected["candidate_id"] == candidate["candidate_id"]
+        assert inspected["target"] is None
+    page = sdk.call("pc_review_list", scope, {"family": None, "cursor": None}, host_cast=True)
+    assert {candidate["family"] for candidate in page["candidates"]} == {"experience", "skill"}

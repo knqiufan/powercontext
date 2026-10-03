@@ -52,7 +52,7 @@ parameters:
   llm_description: Explicit evidence to retain; remove secrets and unrelated private
     content before capture.
 - name: metadata
-  type: object
+  type: any
   required: false
   form: llm
   label:
@@ -91,13 +91,46 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        status:
+          $ref: '#/definitions/Result/properties/status'
+          type: string
+          enum: &id001
+          - accepted
+        source:
+          $ref: '#/definitions/Result/properties/source'
+          type: object
+          properties:
+            name:
+              $ref: '#/definitions/Result/properties/source/properties/name'
+              type: string
+              description: Stable Source type.
+            source_id:
+              $ref: '#/definitions/Result/properties/source/properties/source_id'
+              type: string
+        position:
+          $ref: '#/definitions/Result/properties/position'
+          type: number
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
         status:
           type: string
-          enum:
-          - accepted
+          enum: *id001
         source:
           type: object
           additionalProperties: false
@@ -115,13 +148,6 @@ output_schema:
           minimum: 1
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_capture_source.py
