@@ -44,6 +44,12 @@ def isolated_client_connection_settings(tmp_path, monkeypatch, request):
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.getgroup("powercontext-dsh").addoption(
+        "--require-dsh-runtime",
+        action="store_true",
+        default=False,
+        help="Fail instead of skipping DSH configuration tests when a required runtime is unavailable.",
+    )
     zcode = parser.getgroup("zcode-host-acceptance")
     zcode.addoption("--run-zcode-acceptance", action="store_true", help="Run real ZCode CLI acceptance.")
     zcode.addoption(

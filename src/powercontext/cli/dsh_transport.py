@@ -23,6 +23,9 @@ from pathlib import Path
 from shutil import which
 from typing import Any
 
+import typer
+
+from powercontext.cli.dsh_runtime import dsh_home
 from powercontext.client.transport_policy import normalize_client_url, parse_client_boolean
 
 
@@ -33,7 +36,7 @@ def read_dsh_settings(
     from powercontext.cli.dsh import dsh_executable
     from powercontext.cli.system import SetupError
 
-    home = Path(os.environ.get("DSH_HOME", "").strip() or Path.home() / ".dsh").expanduser()
+    home = dsh_home()
     if Path(profile).name != profile or profile in {".", ".."} or "\\" in profile:
         raise ValueError("Cannot inspect an invalid DSH profile name")  # noqa: TRY003
     # An absent profile with no patches has no native transport override. The
@@ -83,6 +86,8 @@ def read_dsh_settings(
     settings = payload.get("settings")
     if result.returncode or not isinstance(settings, dict):
         raise ValueError("Cannot inspect DSH configuration")  # noqa: TRY003
+    for warning in payload.get("warnings", []):
+        typer.echo(f"WARNING: {warning}", err=True)
     return settings
 
 

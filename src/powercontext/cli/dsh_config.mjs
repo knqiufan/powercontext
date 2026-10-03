@@ -66,9 +66,13 @@ function installation(executable) {
 async function inspect(executable, home, profile, candidate, prospective, requireInstalled) {
   const anchor = installation(executable)
   const require = createRequire(anchor)
-  const boot = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href)
+  // These are the selected host's APIs, not dependencies of the plugin being installed.
+  // Resolving a different copy from PowerContext would inspect a different host contract.
+  let boot
+  try { boot = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href) }
+  catch { fail('Installed DSH cannot provide its dsh-app-boot configuration APIs; upgrade or reinstall DSH', anchor) }
   for (const name of ['readProfileManifest', 'resolveBundleDir', 'loadOverlayPatches', 'composeEntries']) {
-    if (typeof boot[name] !== 'function') fail('Installed DSH does not expose the required configuration APIs')
+    if (typeof boot[name] !== 'function') fail(`Installed DSH does not expose ${name}; upgrade or reinstall DSH`, anchor)
   }
   const dir = join(home, 'profiles', profile)
   const manifestPath = join(dir, 'package.json')
@@ -132,12 +136,19 @@ async function inspect(executable, home, profile, candidate, prospective, requir
   }
   const exemptions = typeof boot.readProfileVersionExemptions === 'function'
     ? read(dir, () => boot.readProfileVersionExemptions(dir)) : {}
-  function bundle(packageDir) {
+  const skippedBundles = []
+  function bundle(name, packageDir) {
     const file = join(packageDir, 'package.json')
     const metadata = read(file, () => boot.readProfileManifest('powercontext', packageDir))
     if (typeof boot.evaluatePluginCompatibility === 'function') {
       const issue = read(file, () => boot.evaluatePluginCompatibility(metadata, exemptions))
-      if (issue && !issue.exempted) fail('DSH would skip an incompatible bundle; resolve its version compatibility', file)
+      if (issue && !issue.exempted) {
+        if (name === plugin) fail('PowerContext is incompatible with the installed DSH; resolve its version compatibility', file)
+        // Native DSH omits incompatible bundle layers. Composing their patches after
+        // merely warning would validate transport settings the host will never use.
+        skippedBundles.push(`DSH skipped an incompatible third-party bundle; its patches were not applied: ${file}`)
+        return []
+      }
     }
     let files
     if (typeof boot.bundlePatchPaths === 'function') {
@@ -151,12 +162,12 @@ async function inspect(executable, home, profile, candidate, prospective, requir
     return files.flatMap(path => read(path, () => boot.loadOverlayPatches('powercontext', path)))
   }
   const layers = bundles.map(name => {
-    if (name === plugin && candidate) return bundle(candidateBundle)
+    if (name === plugin && candidate) return bundle(name, candidateBundle)
     const packageDir = read(manifestPath, () => boot.resolveBundleDir('powercontext', name, anchor, dir))
-    return bundle(packageDir)
+    return bundle(name, packageDir)
   })
   if (!bundles.includes(plugin)) {
-    if (candidate) layers.push(bundle(candidate))
+    if (candidate) layers.push(bundle(plugin, candidate))
     // Before materializing the source, expose the future plugin id to user
     // patches. The installer rechecks with the actual candidate before add.
     else if (prospective) layers.push([{ insert: [{ id: plugin, name: plugin, config: {} }] }])
@@ -198,13 +209,13 @@ async function inspect(executable, home, profile, candidate, prospective, requir
     }
     settings[key] = config[key]
   }
-  return settings
+  return { settings, warnings: skippedBundles }
 }
 
 try {
   const [executable, home, profile, candidate, prospective, requireInstalled] = process.argv.slice(2)
-  const settings = await inspect(resolve(executable), resolve(home), profile, candidate || undefined, prospective === 'true', requireInstalled === 'true')
-  process.stdout.write(JSON.stringify({ settings }))
+  const result = await inspect(resolve(executable), resolve(home), profile, candidate || undefined, prospective === 'true', requireInstalled === 'true')
+  process.stdout.write(JSON.stringify(result))
 } catch (error) {
   // Native parser messages and stacks can include credentials or whole YAML rows.
   process.stdout.write(JSON.stringify({ error: error instanceof InspectionError
