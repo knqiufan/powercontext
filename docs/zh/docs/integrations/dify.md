@@ -17,4 +17,6 @@ description: 通过实验性 Dify 工具插件连接独立的 PowerContext Serve
 
 交接选择引用和生成目标这些可选输入可以省略或传入 null，空引用对象仍会被拒绝。工作流可逐层选择 `result.candidate.candidate_id`、`result.draft.objective` 等字段，完整回执中的 null 值保持原样。读取可能为空的候选或草稿前，先检查具体操作的状态。启用 Agent 工具前，部署验收还须确认 daemon 将声明的输入 schema 完整传递到模型可见的工具定义中。
 
+`data` 和 `error` 保存封装对象或 null，变量选择器不会展开它们的子字段。下游节点引用具体响应字段时，使用 `result.*`。
+
 详细说明见源码中的 [README](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/README.md)、[工具清单](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/tool-coverage.md)、[Scope 映射](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/scope-mapping.md)、[隐私说明](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/PRIVACY.md) 和 [验收记录](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/ACCEPTANCE.md)。
