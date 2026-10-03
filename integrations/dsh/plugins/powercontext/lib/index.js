@@ -2848,7 +2848,7 @@ function storedAuthorization(env, baseUrl) {
 		const parsed = JSON.parse(readFileSync(path, "utf8"));
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return void 0;
 		const payload = parsed;
-		if (payload.version !== 1 || typeof payload.server_url !== "string" || stripSlash(payload.server_url) !== baseUrl) return void 0;
+		if (payload.version !== 1 || typeof payload.server_url !== "string" || normalizeServerUrl(payload.server_url, true) !== baseUrl) return void 0;
 		if (typeof payload.authorization !== "string") return void 0;
 		const authorization = payload.authorization;
 		return /^Bearer [^\s]+$/.test(authorization) ? authorization : void 0;
