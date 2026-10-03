@@ -34,9 +34,8 @@ from powercontext_dify.client import (
     schema_shape,
     validate,
 )
+from powercontext_dify.policy import HIDDEN_PARAMETERS, MEMORY_KINDS
 
-HIDDEN = {"scope_id", "tag_filter", "expected_revision", "max_bytes", "include_code", "assembly"}
-KINDS = {"decision", "constraint", "current-state", "task-outcome", "next-step", "agent-note"}
 SECRET_KEY = re.compile(
     r"(?i)^(api[_-]?key|api[_-]?token|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|private[_-]?key)$"
 )
@@ -61,7 +60,7 @@ def contains_secret(value):
 def request_for(operation: str, parameters: dict, connection: Connection, scope_id: str):
     reference = CONTRACT["operations"][operation]["request"]
     schema = CONTRACT["components"]["schemas"][reference["$ref"].rsplit("/", 1)[-1]]
-    allowed = set(schema["properties"]) - HIDDEN
+    allowed = set(schema["properties"]) - HIDDEN_PARAMETERS
     if set(parameters) - allowed:
         raise PluginError("invalid_request")
     request = deepcopy(parameters)
@@ -73,7 +72,7 @@ def request_for(operation: str, parameters: dict, connection: Connection, scope_
                 request[name] = decode_json(request[name])
             except ValueError as error:
                 raise PluginError("invalid_request") from error
-        if name not in HIDDEN and name not in request and "default" in definition:
+        if name not in HIDDEN_PARAMETERS and name not in request and "default" in definition:
             request[name] = deepcopy(definition["default"])
     if operation == "search_memory":
         if (
@@ -83,7 +82,7 @@ def request_for(operation: str, parameters: dict, connection: Connection, scope_
         ):
             raise PluginError("invalid_request")
     if operation in {"remember_memory", "revise_memory_entry"}:
-        if request.get("kind") not in KINDS:
+        if request.get("kind") not in MEMORY_KINDS:
             raise PluginError("invalid_request")
         text = request.get("text")
         if not isinstance(text, str) or not (normalized := unicodedata.normalize("NFC", text).strip()):

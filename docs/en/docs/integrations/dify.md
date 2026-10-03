@@ -17,4 +17,6 @@ Calls emit text, JSON and six named outputs: `ok`, `operation`, `status`, `data`
 
 Optional Handoff selection references and generation targets accept omission or null; empty reference objects are invalid. Workflow selectors can traverse `result.candidate.candidate_id` and `result.draft.objective` while complete response objects retain their null values. Check the operation's status before reading a nullable candidate or draft. Before using Agent tools, deployment acceptance must verify that the daemon retains the declared input schemas in model-visible tool definitions.
 
+`data` and `error` are nullable envelope values without expandable child schemas. Use `result.*` selectors for individual response fields in downstream nodes.
+
 See the source [README](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/README.md), [tool catalog](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/tool-coverage.md), [Scope mapping](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/scope-mapping.md), [privacy](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/PRIVACY.md) and [acceptance evidence](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/ACCEPTANCE.md).

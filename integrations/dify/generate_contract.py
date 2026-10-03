@@ -26,11 +26,11 @@ from typing import Any
 import yaml
 
 from catalog import TOOLS
+from plugin.powercontext_dify.policy import HIDDEN_PARAMETERS, MEMORY_KINDS
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 PLUGIN = HERE / "plugin"
-KINDS = ["decision", "constraint", "current-state", "task-outcome", "next-step", "agent-note"]
 PARAMETERS = {
     "query": ("查询", "Query for relevant retained evidence; not the Memory text to save."),
     "limit": ("结果数量", "Result count within this tool's documented limit."),
@@ -194,12 +194,12 @@ def build():
     for name, (operation_id, english, chinese) in TOOLS.items():
         request = schemas[operations[operation_id]["request"]["$ref"].rsplit("/", 1)[-1]]
         params = deepcopy(request["properties"])
-        for hidden in ("scope_id", "tag_filter", "expected_revision", "max_bytes", "include_code", "assembly"):
+        for hidden in HIDDEN_PARAMETERS:
             params.pop(hidden, None)
         if name == "pc_search":
             params["limit"].update(default=8, maximum=8)
         if "kind" in params:
-            params["kind"]["enum"] = KINDS
+            params["kind"]["enum"] = list(MEMORY_KINDS)
         if name == "pc_review_list":
             params["family"] = {"type": "string", "enum": ["experience", "skill"], "nullable": True}
         if name in {"pc_experience_generate", "pc_skill_generate"}:

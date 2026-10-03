@@ -188,6 +188,7 @@ pi-test: ## Install and test the Pi package.
 .PHONY: dify-test
 dify-test: ## Check the isolated Dify SDK plugin and real PowerContext HTTP/SQLite tools.
 	@uv sync --locked --project integrations/dify --python 3.12
+	@uv run --project integrations/dify python integrations/dify/generate_requirements.py --check
 	@uv run --project integrations/dify python -X utf8 integrations/dify/generate_contract.py --check
 	@uv run --project integrations/dify ruff check integrations/dify
 	@uv run --project integrations/dify ruff format --check integrations/dify

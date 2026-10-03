@@ -2,7 +2,7 @@
 
 ## Tested source and tools
 
-Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8a4c1aac59fca75662aca26d78748bfa29`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
+Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8a4c1aac59fca75662aca26d78748bfa29` with the model-usage prerequisite [#1838](https://github.com/oceanbase/powercontext/pull/1838) at `86811036b5f52266e9fe493147c26c595a9926c0`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
 
 | Component | Tested version / environment |
 | --- | --- |
@@ -19,7 +19,7 @@ Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8
 
 ## Passed local acceptance
 
-- 49 focused regressions cover registered SDK entries and official host helpers: exact catalog, hidden credential/Scope fields, native objects, input validation, UTF-8 limits, missing binding, credential read validation, malformed/oversized receipts, partial error receipts, transport failure, secret-bearing capture, sanitization and no automatic write retry. Named outputs are checked against their declared Draft 7 JSON schemas, and `result` must equal the complete successful response or `{}` on error/unknown. Ready and empty context responses retain their original text/null values; no-op candidate receipts retain `candidate=null`. Rendering metadata does not weaken nullable object or integer revision validation. Dify's official model-schema builder produces valid JSON schemas and preserves every declared structured/nullable input schema when supplied with the SDK declarations.
+- 56 focused regressions cover registered SDK entries and official host helpers: exact catalog, hidden credential/Scope fields, native objects, input validation, UTF-8 limits, missing binding, credential read validation, malformed/oversized receipts, partial error receipts, transport failure, secret-bearing capture, sanitization and no automatic write retry. All six server-controlled fields are rejected at the SDK boundary. The packaged requirements check accepts the locked dependency export and rejects a stale SDK constraint without changing the lock. Named outputs are checked against their declared Draft 7 JSON schemas, and `result` must equal the complete successful response or `{}` on error/unknown. Ready and empty context responses retain their original text/null values; no-op candidate receipts retain `candidate=null`. Rendering metadata does not weaken nullable object or integer revision validation. Dify's official model-schema builder produces valid JSON schemas and preserves every declared structured/nullable input schema when supplied with the SDK declarations.
 - The HTTP/SQLite tests invoke all 19 loaded tools. Memory write/list/search/prepare/get/revise/retire remains usable through exact citations; Source capture retains structured metadata and a Unicode Source ID.
 - Complete Handoff JSON passes prepare/finalize/temporary continue/commit/exact/latest readback. Full objects and references survive the SDK messages.
 - Each of the 19 declarations exposes `result` as an object with directly traversable operation-specific response properties. The automated probe executes Dify 1.17.1's official [getOutputVars](https://github.com/langgenius/dify/blob/1.17.1/web/app/components/workflow/nodes/tool/default.ts) and [getVarType](https://github.com/langgenius/dify/blob/1.17.1/web/app/components/workflow/nodes/_base/components/variable/utils.ts) helpers with a fixture node inventory: all 19 results have children, and 15 context/Memory/Handoff/candidate selectors resolve to their expected string/object/number types, including `candidate.candidate_id` and `draft.objective`. This checks output metadata parsing and selector resolution, not a rendered UI, actual workflow execution or daemon dispatch.
@@ -31,10 +31,10 @@ Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8
 - Official CLI packaging succeeds. Archive inspection finds 19 tool declarations, source, icon, privacy, README and routing references, with no credentials, virtual environments, tests or bytecode caches.
 - Website lint, tests, link validation and production static build pass; export validation checks 877 public pages and their internal links.
 
-Local package: `.artifacts/dify/powercontext-0.0.1.difypkg`, 100557 bytes. SHA-256:
+Local package: `.artifacts/dify/powercontext-0.0.1.difypkg`, 101219 bytes. SHA-256:
 
 ```text
-3ab6cad20af46f2278aeff67936363617ef5ee6437fdc893f6b0258c710ebb72
+305ae9bb0c00869c8b082555e84d44676dc20a79e9319e9ba068774185b46416
 ```
 
 The binary is an ignored local validation artifact, not a published Marketplace release. Match the package checksum to the exact reviewed source when preparing a submission.
@@ -49,6 +49,7 @@ uv run python scripts/generate_js_operations.py --check
 uv run python scripts/check_workflow_actions.py .github/workflows .github/actions
 uv run python scripts/generate_integration_manifest_docs.py --check
 uv run python -m pytest tests/test_integration_manifest.py tests/test_api_contract.py tests/test_js_operations.py
+uv run --project integrations/dify python integrations/dify/generate_requirements.py --check
 uv run --project integrations/dify python -X utf8 integrations/dify/generate_contract.py --check
 uv run --project integrations/dify ruff check integrations/dify
 uv run --project integrations/dify ruff format --check integrations/dify

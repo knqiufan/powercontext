@@ -10,6 +10,7 @@ From the PowerContext repository root:
 
 ```sh
 uv sync --locked --project integrations/dify --python 3.12
+uv run --project integrations/dify python integrations/dify/generate_requirements.py --check
 uv run --project integrations/dify python integrations/dify/generate_contract.py --check
 uv run --project integrations/dify ruff check integrations/dify
 uv run --project integrations/dify ruff format --check integrations/dify
@@ -20,6 +21,8 @@ dify plugin package integrations/dify/plugin -o .artifacts/dify/powercontext-0.0
 ```
 
 On Windows set `PYTHONUTF8=1`, or invoke Python with `-X utf8`, because the pinned SDK reads YAML with the process's default encoding. Install the root environment with `uv sync --locked` before the HTTP tests. `make dify-test` runs these source checks and HTTP tests; install the official Dify CLI separately for packaging. Packages, virtual environments and credentials must stay outside Git.
+
+After changing runtime dependencies, update `uv.lock` and run `generate_requirements.py` without `--check` to regenerate the daemon's packaged pins. The check exports the locked production dependency set with uv and compares the complete file, including platform markers. Declaration generation and SDK validation share the hidden-parameter and Memory-kind policy in `plugin/powercontext_dify/policy.py`.
 
 The generated contract is a closure of the 19 selected operations plus internal Scope resolution and protected Scope retrieval from `openapi/powercontext.yaml`. After an API change, regenerate with `generate_contract.py`, inspect the contract and declaration changes, and rerun the checks. This script does not modify Server models. Native objects/arrays and single JSON strings are accepted at the tool boundary; fields and complete receipts remain structurally validated.
 

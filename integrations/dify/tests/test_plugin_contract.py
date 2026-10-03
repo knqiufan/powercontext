@@ -83,13 +83,39 @@ def test_sdk_registers_exact_catalog_and_native_objects(registry):
     _, _, loaded = registry.tools_mapping["powercontext"]
     assert {name: entry.operation for name, (_, entry) in loaded.items()} == CONTRACT["tools"]
     for declaration, _ in loaded.values():
-        assert not {"scope_id", "api_token", "server_url", "max_bytes", "assembly"} & {
-            parameter.name for parameter in declaration.parameters
-        }
+        assert not {
+            "scope_id",
+            "tag_filter",
+            "expected_revision",
+            "max_bytes",
+            "include_code",
+            "assembly",
+            "api_token",
+            "server_url",
+        } & {parameter.name for parameter in declaration.parameters}
     draft = next(p for p in loaded["pc_handoff_finalize"][0].parameters if p.name == "draft")
     assert draft.type.value == "object"
     assert draft.input_schema is not None
     assert loaded["pc_remember"][0].description.human.zh_hans == "按明确保存意图写入整理后的记忆。"
+
+
+@pytest.mark.parametrize(
+    "tool,parameters,name,value",
+    [
+        ("pc_prepare_context", {"query": "scope"}, "scope_id", "scope-B"),
+        ("pc_prepare_context", {"query": "scope"}, "max_bytes", 1),
+        ("pc_prepare_context", {"query": "scope"}, "include_code", True),
+        ("pc_prepare_context", {"query": "scope"}, "assembly", {}),
+        ("pc_search", {"query": "scope"}, "tag_filter", {"tags": ["private"]}),
+        ("pc_remember", {"kind": "decision", "text": "Retain."}, "expected_revision", 1),
+    ],
+)
+def test_server_controlled_parameters_are_rejected_at_the_sdk_boundary(
+    registry, transport, tool, parameters, name, value
+):
+    transport(lambda _request: pytest.fail("Server-controlled input must not reach the operation"))
+    result = run(registry, tool, {**parameters, name: value})
+    assert result["error"]["code"] == "invalid_request"
 
 
 def test_workflow_results_expose_context_references_and_complete_handoffs(registry):
