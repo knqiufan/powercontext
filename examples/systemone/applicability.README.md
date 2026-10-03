@@ -89,9 +89,24 @@ These `.env_*` files are ignored by Git. Configure:
 | Setting | Value |
 | --- | --- |
 | `SYSTEMONE_PROVIDER` | `jev` or `laya` |
-| `SYSTEMONE_ENDPOINT` | Complete System One URL, including `/systemone` |
+| `SYSTEMONE_ENDPOINT` | Complete decision URL: OpenRouter `/api/alpha/decisions`, or Laya `/v1/systemone` |
 | `SYSTEMONE_MODEL` | Served model ID; prefer a provider-verified fixed version |
 | `SYSTEMONE_API_KEY` | Provider credential; leave empty only for a local unauthenticated Laya server |
+
+For Jev, the template selects OpenRouter and a versioned model ID. Fill in only the key in
+your local `.env_jev`; never commit it:
+
+```dotenv
+SYSTEMONE_PROVIDER=jev
+SYSTEMONE_ENDPOINT=https://openrouter.ai/api/alpha/decisions
+SYSTEMONE_MODEL=typesafe/jev-1.13
+SYSTEMONE_API_KEY=
+```
+
+The adapter posts `model`, `state` and a typed `choice` question with Bearer authentication.
+The three answers remain `yes`, `no` and `abstain`; a `noul` probability alone does not express
+the explicit unknown outcome required by this selector. OpenRouter's optional site attribution
+headers are unnecessary. See the [official Jev guide](https://openrouter.ai/blog/insights/what-is-jev/).
 
 ```text
 uv run --locked python -m examples.systemone.applicability_eval --env-file .env_jev

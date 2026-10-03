@@ -53,7 +53,8 @@ _OPERATION = "decision.evaluate"
 class SystemOneConfig(BaseModel):
     """Explicit deployment settings; credentials are never inherited from generation.
 
-    ``endpoint`` is the complete System One URL, including ``/systemone``.
+    ``endpoint`` is the complete decision URL: OpenRouter's ``/api/alpha/decisions``
+    for Jev, or the served ``/v1/systemone`` route for Laya. It is used verbatim.
     Local Laya may use unauthenticated loopback HTTP. Remote endpoints require HTTPS.
     ``max_request_bytes`` is a transport bound, not a tokenizer estimate.
     """

@@ -48,9 +48,24 @@ PreparedContext 仍不包含 Skill。
 | 配置 | 含义 |
 | --- | --- |
 | `SYSTEMONE_PROVIDER` | `jev` 或 `laya` |
-| `SYSTEMONE_ENDPOINT` | 包含 `/systemone` 的完整接口地址 |
+| `SYSTEMONE_ENDPOINT` | 完整决策接口地址：OpenRouter 使用 `/api/alpha/decisions`，Laya 使用 `/v1/systemone` |
 | `SYSTEMONE_MODEL` | 实际部署的模型 ID，优先使用服务方确认的固定版本 |
 | `SYSTEMONE_API_KEY` | 接口凭据，本地无认证 Laya 可以留空 |
+
+Jev 模板已配置 OpenRouter 和带版本号的模型 ID。在本地 `.env_jev` 中填写自己的
+OpenRouter key 即可，凭据不要提交到 Git：
+
+```dotenv
+SYSTEMONE_PROVIDER=jev
+SYSTEMONE_ENDPOINT=https://openrouter.ai/api/alpha/decisions
+SYSTEMONE_MODEL=typesafe/jev-1.13
+SYSTEMONE_API_KEY=
+```
+
+请求使用 Bearer 认证，JSON 包含 `model`、`state` 和 `questions`。选择器使用 `choice` 返回
+`yes`、`no`、`abstain`，分别表示适用、不适用和信息不足。单独的 `noul` 概率不能表达这里
+要求的第三种结果。可选的网站归属请求头不必配置。协议见
+[OpenRouter 官方说明](https://openrouter.ai/blog/insights/what-is-jev/)。
 
 ```text
 uv run --locked python -m examples.systemone.applicability_eval --env-file .env_jev

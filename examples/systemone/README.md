@@ -143,11 +143,18 @@ cp examples/systemone/server.env.example examples/systemone/.env.systemone
 | --- | --- |
 | `GENERATION_ENDPOINT` | Complete HTTP(S) Chat Completions URL, such as `https://your-provider.example/v1/chat/completions`; a host or `/v1` base URL is insufficient |
 | `GENERATION_MODEL`, `GENERATION_API_KEY` | Model and credential for generating both implementations |
-| `JEV_ENDPOINT`, `JEV_MODEL`, `JEV_API_KEY` | Optional Jev System One endpoint, model, and dedicated credential |
+| `JEV_ENDPOINT`, `JEV_MODEL`, `JEV_API_KEY` | Optional Jev decision endpoint, model, and dedicated OpenRouter credential |
 | `LAYA_ENDPOINT`, `LAYA_MODEL`, `LAYA_API_KEY` | Optional Laya endpoint, model, and service credential; an unauthenticated loopback service may use an empty key |
 | `LAYA_CHECKPOINT` | Local checkpoint directory matching the model served by Laya |
 
-The template uses `https://zenmux.ai/api/v1/systemone` and `typesafe/jev-latest` for Jev. Its Laya endpoint is `http://127.0.0.1:8891/v1/systemone`, with the `multilingual` model. Credentials are configured separately for each service; the generation credential is not reused for review.
+The template uses OpenRouter's `https://openrouter.ai/api/alpha/decisions` and `typesafe/jev-1.13` for Jev. Its Laya endpoint is `http://127.0.0.1:8891/v1/systemone`, with the `multilingual` model. Credentials are configured separately for each service; the generation credential is not reused for review.
+
+OpenRouter accepts the same `model`, `state`, and typed `questions` body used by this adapter.
+Requests send `Authorization: Bearer <key>` and `Content-Type: application/json`. The optional
+`HTTP-Referer` and `X-OpenRouter-Title` attribution headers are not required. The adapter reads
+`answers.decision.choice`, its probability distribution, and input/output token usage; additional
+response metadata such as `id`, `provider`, and `usage.cost` does not change the decision contract.
+See [OpenRouter's Jev guide](https://openrouter.ai/blog/insights/what-is-jev/).
 
 Start the local API:
 

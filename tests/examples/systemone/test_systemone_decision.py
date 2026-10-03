@@ -63,7 +63,7 @@ def _response(choice: Any = "yes", **answer_overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("outcome", list(DecisionOutcome))
-def test_choice_preserves_evidence_and_reports_portable_usage(outcome: DecisionOutcome) -> None:
+def test_openrouter_choice_preserves_evidence_and_reports_portable_usage(outcome: DecisionOutcome) -> None:
     request = DecisionRequest(
         decision_kind="memory.write-gate",
         question="是否已有完整验证?",
@@ -76,12 +76,20 @@ def test_choice_preserves_evidence_and_reports_portable_usage(outcome: DecisionO
         sent.append(incoming)
         return httpx.Response(
             200,
-            json={**_response(outcome, confidence=0.75), "usage": {"input_tokens": 17, "output_tokens": 3}},
+            json={
+                **_response(outcome, confidence=0.75),
+                "model": "typesafe/jev-1.13-20260917",
+                "id": "simulated-openrouter-decision",
+                "provider": "TypeSafe",
+                "usage": {"input_tokens": 17, "output_tokens": 3, "cost": 0.000000714},
+            },
         )
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            model = SystemOneDecisionModel(_config(), client)
+            model = SystemOneDecisionModel(
+                _config(endpoint="https://openrouter.ai/api/alpha/decisions", model="typesafe/jev-1.13"), client
+            )
             result = await model.evaluate(request)
 
         assert result.outcome is outcome
@@ -92,9 +100,12 @@ def test_choice_preserves_evidence_and_reports_portable_usage(outcome: DecisionO
 
     asyncio.run(scenario())
     assert len(sent) == 1
+    assert sent[0].method == "POST"
+    assert str(sent[0].url) == "https://openrouter.ai/api/alpha/decisions"
     assert sent[0].headers["authorization"] == "Bearer configured-test-key"
+    assert sent[0].headers["content-type"] == "application/json"
     body = json.loads(sent[0].content)
-    assert body["model"] == "jev-test"
+    assert body["model"] == "typesafe/jev-1.13"
     assert isinstance(body["state"], str)
     assert "是否已有完整验证?" in body["state"]
     assert json.loads(body["state"]) == {

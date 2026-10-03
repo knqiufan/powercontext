@@ -224,7 +224,11 @@ def test_paired_report_uses_same_actual_server_pool_and_marks_simulated_selectio
     tmp_path: Path,
 ) -> None:
     def provider(incoming: httpx.Request) -> httpx.Response:
+        assert incoming.method == "POST"
+        assert str(incoming.url) == "https://openrouter.ai/api/alpha/decisions"
+        assert incoming.headers["authorization"] == "Bearer test-key"
         body = json.loads(incoming.content)
+        assert body["model"] == "typesafe/jev-1.13"
         state = json.loads(body["state"])
         assert state["evidence"]
         return httpx.Response(
@@ -247,8 +251,8 @@ def test_paired_report_uses_same_actual_server_pool_and_marks_simulated_selectio
             model = SystemOneDecisionModel(
                 SystemOneConfig(
                     provider="jev",
-                    endpoint="https://provider.example/systemone",
-                    model="simulated-jev-v1",
+                    endpoint="https://openrouter.ai/api/alpha/decisions",
+                    model="typesafe/jev-1.13",
                     api_key=SecretStr("test-key"),
                 ),
                 http,
