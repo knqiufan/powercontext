@@ -31,7 +31,6 @@ from powercontext_dify.client import (
     Connection,
     PluginError,
     decode_json,
-    schema_shape,
     validate,
 )
 from powercontext_dify.policy import HIDDEN_PARAMETERS, MEMORY_KINDS
@@ -64,14 +63,19 @@ def request_for(operation: str, parameters: dict, connection: Connection, scope_
     if set(parameters) - allowed:
         raise PluginError("invalid_request")
     request = deepcopy(parameters)
-    if operation == "search_memory":
-        request.setdefault("limit", 8)
-    for name, definition in schema["properties"].items():
-        if name in request and isinstance(request[name], str) and schema_shape(definition) in {"object", "array"}:
+    # The default Dify daemon discards input_schema. JSON text survives its
+    # string cast without replacing null or malformed objects with {}.
+    for name in CONTRACT["json_parameters"][operation]:
+        if name in request:
+            if not isinstance(request[name], str):
+                raise PluginError("invalid_request")
             try:
                 request[name] = decode_json(request[name])
             except ValueError as error:
                 raise PluginError("invalid_request") from error
+    if operation == "search_memory":
+        request.setdefault("limit", 8)
+    for name, definition in schema["properties"].items():
         if name not in HIDDEN_PARAMETERS and name not in request and "default" in definition:
             request[name] = deepcopy(definition["default"])
     if operation == "search_memory":

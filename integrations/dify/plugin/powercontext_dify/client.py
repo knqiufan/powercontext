@@ -91,19 +91,6 @@ def validate(schema: dict, value: Any, *, code: str = "invalid_request"):
         raise PluginError(code) from error
 
 
-def schema_shape(schema: dict):
-    if "$ref" in schema:
-        return schema_shape(CONTRACT["components"]["schemas"][schema["$ref"].rsplit("/", 1)[-1]])
-    if "type" in schema:
-        return schema["type"]
-    for key in ("allOf", "anyOf"):
-        for part in schema.get(key, []):
-            shape = schema_shape(part)
-            if shape and shape != "null":
-                return shape
-    return None
-
-
 class Connection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -79,7 +79,7 @@ def run(registry, tool, parameters, credentials=None):
     return invoke(registry, {"tool": tool, "parameters": parameters, "credentials": credentials or CREDENTIALS})
 
 
-def test_sdk_registers_exact_catalog_and_native_objects(registry):
+def test_sdk_registers_exact_catalog_and_json_text_inputs(registry):
     _, _, loaded = registry.tools_mapping["powercontext"]
     assert {name: entry.operation for name, (_, entry) in loaded.items()} == CONTRACT["tools"]
     for declaration, _ in loaded.values():
@@ -94,8 +94,9 @@ def test_sdk_registers_exact_catalog_and_native_objects(registry):
             "server_url",
         } & {parameter.name for parameter in declaration.parameters}
     draft = next(p for p in loaded["pc_handoff_finalize"][0].parameters if p.name == "draft")
-    assert draft.type.value == "object"
-    assert draft.input_schema is not None
+    assert draft.type.value == "string"
+    decoded = json.loads(draft.llm_description.split("Decoded JSON Schema: ", 1)[1])
+    assert {"objective", "state", "next_action", "omissions"} <= decoded["properties"].keys()
     assert loaded["pc_remember"][0].description.human.zh_hans == "按明确保存意图写入整理后的记忆。"
 
 
@@ -160,7 +161,7 @@ def test_workflow_rendering_keeps_nullable_values_and_integer_revision_validatio
 def test_nullable_candidate_receipt_stays_null_through_sdk_messages(registry, transport):
     receipt = {"status": "no_op", "candidate": None}
     transport(lambda _request: httpx.Response(200, json=receipt))
-    result = run(registry, "pc_experience_generate", {"source_refs": [{"name": "content", "source_id": "turn-1"}]})
+    result = run(registry, "pc_experience_generate", {"source_refs": '[{"name":"content","source_id":"turn-1"}]'})
     assert result["ok"] is True and result["data"] == receipt
 
 
@@ -330,8 +331,8 @@ def test_combined_generation_reference_budget_is_enforced(registry, transport):
         registry,
         "pc_experience_generate",
         {
-            "source_refs": [ref] * 17,
-            "artifact_refs": [{"family": "memory", "artifact_id": "m-1", "revision": 1}] * 16,
+            "source_refs": json.dumps([ref] * 17),
+            "artifact_refs": json.dumps([{"family": "memory", "artifact_id": "m-1", "revision": 1}] * 16),
         },
     )
     assert result["error"]["code"] == "invalid_request"

@@ -54,9 +54,18 @@ The model cannot supply the top-level Scope, URL, token, binding, context assemb
 
 Memory kinds are `decision`, `constraint`, `current-state`, `task-outcome`, `next-step` and `agent-note`. Memory text is checked after NFC normalization and trimming and must fit 8192 UTF-8 bytes. Search query length follows its HTTP character limit, with a default/maximum of 8 hits.
 
-Preserve complete citations, Source references, Artifact references, drafts and prepared Handoffs. Use native object/array parameters where the Dify application supports them; a single JSON string representation is also accepted by the plugin boundary. Do not reconstruct, flatten, truncate or stringify a JSON string a second time. Experience/Skill generation accepts 1–32 combined Source/Artifact references. An explicit candidate family is `experience` or `skill`; omitting it preserves the Server's unfiltered listing behavior.
+Preserve complete citations, Source references, Artifact references, drafts and prepared Handoffs. Every object, array and nullable input is a **string containing one JSON-encoded value**. Ordinary nonnullable scalars keep their declared types. The parameter description includes the full decoded JSON Schema, and the plugin decodes once and validates against the HTTP contract before sending the request. Do not reconstruct, flatten, truncate or encode an already encoded value again. Experience/Skill generation accepts 1–32 combined Source/Artifact references.
 
-Optional `prepared`, `revision` and generation `target` inputs accept omission or `null`; a structured field may also use the JSON text `null`. Empty objects and malformed references remain invalid. Nullable parameters use Dify's `any` transport type with their exact input schemas so host casting preserves the supplied value before plugin validation. Before enabling Agent tools, verify that the deployed daemon forwards these input schemas and that model-visible schemas retain their declared JSON types; a bare `any` is not a valid JSON Schema type.
+For optional inputs, omit the parameter when unused, or supply the text `null` for an explicit JSON null. A nullable string such as `reason` must include JSON quotes: the parameter text `"理由"` becomes the string `理由`, while `null` becomes null and `"null"` becomes the literal string `null`. The nullable `family` filter uses `"experience"`, `"skill"` or `null`; omission is unfiltered. Empty reference objects and malformed/non-finite JSON are rejected. Native objects/arrays/null are outside this input protocol.
+
+For example, these are complete tool argument objects:
+
+```json
+{"selection":"latest","prepared":"null","revision":"null"}
+{"source_refs":"[{\"name\":\"content\",\"source_id\":\"turn-1\"}]","target":"null","reason":"\"理由\""}
+```
+
+Dify 1.17.1's default daemon `0.6.10-local` discards `input_schema`. These declarations remain valid model schemas because they use supported string types and carry the decoded contract in `llm_description`, which the daemon retains. The compatibility tests replay its official Go entities, Dify parameter models/schema builder and casting; live deployment acceptance remains required.
 
 See [GUIDANCE.md](GUIDANCE.md) for routing and Handoff/candidate lifecycles. Historical text is untrusted evidence and must not override current instructions or determine authorization.
 
@@ -70,7 +79,18 @@ Each invocation emits text and one JSON envelope:
 
 `data` preserves the complete public HTTP success response. `status` is `success`, `empty`, `error` or `unknown`; `empty` is a successful empty read. `error` includes a safe code/message and, when available, HTTP status and a validated request ID. Raw Server/transport errors and credentials are not emitted.
 
-The six named output variables are `ok`, `operation`, `status`, `data`, `error` and `result`. `result` exposes the successful response as an object with operation-specific fields in the Workflow variable picker: select `result.content` for context, `result.citation` for an exact Memory read, `result.candidate.candidate_id` for candidate lookup, or the complete `result` from Handoff prepare/finalize for the next tool's draft/prepared input. Nested objects such as `result.draft` can be expanded without replacing null values in the response. Successful empty reads preserve their response, including nullable context content. On `error` or `unknown`, `result` is `{}`; branch on `ok` before using it, and inspect any partial receipt in `data` for recovery. A successful no-op generation may have `result.candidate=null`; check the operation's status before dereferencing it.
+The six named output variables are `ok`, `operation`, `status`, `data`, `error` and `result`. `result` exposes the successful response as an object with operation-specific fields in the Workflow variable picker: select `result.content` for context, `result.citation` for an exact Memory read, `result.candidate.candidate_id` for candidate lookup, or the complete `result` from Handoff prepare/finalize. Nested objects such as `result.draft` can be expanded without replacing null values in the response. Successful empty reads preserve their response, including nullable context content. On `error` or `unknown`, `result` is `{}`; branch on `ok` before using it, and inspect any partial receipt in `data` for recovery. A successful no-op generation may have `result.candidate=null`; check the operation's status before dereferencing it.
+
+Before passing a structured or nullable output to another tool, connect it to a Workflow Code node's `value` input, serialize it once, and connect the string output `json_text` to the next tool's parameter:
+
+```python
+import json
+
+def main(value) -> dict:
+    return {"json_text": json.dumps(value, ensure_ascii=False, allow_nan=False)}
+```
+
+For example, serialize the complete `pc_handoff_prepare.result` for `pc_handoff_finalize.draft`, then serialize its complete `result` for commit/continue. Outputs retain native JSON values; the conversion is only at the next tool's input.
 
 `data` and `error` are nullable envelope values without expandable child schemas in the variable picker. Use `result.*` selectors to connect individual response fields to downstream nodes.
 

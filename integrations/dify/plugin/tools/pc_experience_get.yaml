@@ -27,37 +27,21 @@ description:
     task; ordinary questions do not require retrieval.
 parameters:
 - name: artifact
-  type: object
+  type: string
   required: true
   form: llm
   label:
     en_US: artifact
     zh_Hans: 精确 Artifact 引用
   human_description:
-    en_US: Complete approved Artifact reference, not a candidate ID.
-    zh_Hans: 精确 Artifact 引用；按工具契约保留完整值。
-  llm_description: Complete approved Artifact reference, not a candidate ID.
-  input_schema:
-    type: object
-    additionalProperties: false
-    required:
-    - family
-    - artifact_id
-    - revision
-    properties:
-      family:
-        type: string
-        minLength: 1
-        maxLength: 128
-        pattern: ^[\x21-\x7E]+$
-      artifact_id:
-        type: string
-        minLength: 1
-        maxLength: 128
-        pattern: ^[\x21-\x7E]+$
-      revision:
-        type: integer
-        minimum: 1
+    en_US: Complete approved Artifact reference, not a candidate ID. Supply one JSON-encoded
+      text value. Strings include JSON quotes; null is the text null. Omit unused
+      optional inputs and preserve every field.
+    zh_Hans: 精确 Artifact 引用；填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；可选参数不用时省略，保留所有字段。
+  llm_description: 'Complete approved Artifact reference, not a candidate ID. Pass
+    one JSON-encoded value as text, never a native object/array/null. Encode strings
+    with JSON quotes; use the text null for null; omit optional inputs when unused.
+    Decode exactly once and preserve every field. Decoded JSON Schema: {"type":"object","additionalProperties":false,"required":["family","artifact_id","revision"],"properties":{"family":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"artifact_id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"revision":{"type":"integer","minimum":1}}}'
 output_schema:
   type: object
   properties:
