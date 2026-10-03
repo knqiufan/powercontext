@@ -229,6 +229,75 @@ def test_unverifiable_relevant_configuration_is_redacted(dsh_profile, patch):
     assert path.read_text() == patch
 
 
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+@pytest.mark.parametrize("group", [{"group": True}, {"name": "@deepseek-ai/cordis-plugin-group"}])
+@pytest.mark.parametrize("nested", [False, True])
+def test_setup_rejects_duplicate_powercontext_inside_native_groups(
+    request, profile_fixture, group, nested, tmp_path, monkeypatch
+):
+    import powercontext.cli.dsh as dsh
+
+    profile = request.getfixturevalue(profile_fixture)
+    row = {
+        "id": "extra-group",
+        **group,
+        "config": [
+            {
+                "id": "powercontext-dsh",
+                "name": "powercontext-dsh",
+                "config": {"baseUrl": "https://unexpected.example"},
+            }
+        ],
+    }
+    if nested:
+        row = {"id": "outer-group", "group": True, "config": [row]}
+    patch = write_patch(profile, json.dumps([{"insert": [row]}]))
+    clients = tmp_path / "clients.json"
+    clients.write_text('{"version":1,"hosts":{"dsh":{"server_url":"https://saved.example"}}}')
+    original = {path: path.read_bytes() for path in (patch, clients)}
+    installer = Mock()
+    monkeypatch.setattr(dsh, "_run_dsh", installer)
+
+    with pytest.raises(ValueError, match="Multiple PowerContext entries"):
+        read_dsh_settings(prospective=True)
+    result = CliRunner().invoke(
+        create_cli([setup_app]), ["setup", "dsh", "--server-url", "https://selected.example", "--json"]
+    )
+    assert result.exit_code == 1
+    assert "Multiple PowerContext entries" in result.output
+    installer.assert_not_called()
+    assert {path: path.read_bytes() for path in original} == original
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+def test_a_single_powercontext_inside_a_named_group_is_inspected(request, profile_fixture, tmp_path):
+    request.getfixturevalue(profile_fixture)
+    source = plugin_source(tmp_path)
+    (source / "cordis.patch.yml").write_text(
+        json.dumps([
+            {
+                "insert": [
+                    {
+                        "id": "powercontext-group",
+                        "name": "@deepseek-ai/cordis-plugin-group",
+                        "config": [
+                            {
+                                "id": "powercontext-dsh",
+                                "name": "powercontext-dsh",
+                                "config": {"baseUrl": "https://selected.example", "allowInsecureHttp": False},
+                            }
+                        ],
+                    }
+                ]
+            }
+        ])
+    )
+    assert read_dsh_settings(candidate=source) == {
+        "baseUrl": "https://selected.example",
+        "allowInsecureHttp": False,
+    }
+
+
 def test_candidate_bundle_is_checked_before_install(dsh_profile, tmp_path, monkeypatch):
     import powercontext.cli.dsh as dsh
 
@@ -308,7 +377,29 @@ def test_explicit_refusal_cannot_be_overridden_by_native_permission(monkeypatch)
         )
 
 
-def test_setup_checks_actual_installed_transport_before_saving_connection(dsh_profile, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("patch", "reason"),
+    [
+        ("- id: powercontext-dsh\n  config:\n    baseUrl: https://unexpected.example\n", "baseUrl conflicts"),
+        (
+            json.dumps([
+                {
+                    "insert": [
+                        {
+                            "id": "extra-group",
+                            "name": "@deepseek-ai/cordis-plugin-group",
+                            "config": [{"id": "powercontext-dsh", "name": "powercontext-dsh", "config": {}}],
+                        }
+                    ]
+                }
+            ]),
+            "Multiple PowerContext entries",
+        ),
+    ],
+)
+def test_setup_checks_actual_installed_transport_before_saving_connection(
+    dsh_profile, tmp_path, monkeypatch, patch, reason
+):
     import powercontext.cli.dsh as dsh
 
     source = plugin_source(tmp_path)
@@ -320,7 +411,7 @@ def test_setup_checks_actual_installed_transport_before_saving_connection(dsh_pr
     def install(*_args):
         shutil.copytree(source, dsh_profile / "node_modules/powercontext-dsh")
         (dsh_profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": ["powercontext-dsh"]}}}))
-        write_patch(dsh_profile, "- id: powercontext-dsh\n  config:\n    baseUrl: https://unexpected.example\n")
+        write_patch(dsh_profile, patch)
         return ""
 
     # Inject configuration drift at the native installation boundary. The native
@@ -332,7 +423,7 @@ def test_setup_checks_actual_installed_transport_before_saving_connection(dsh_pr
     )
     assert result.exit_code == 1
     assert "resulting configuration" in result.output
-    assert "baseUrl conflicts" in result.output
+    assert reason in result.output
     assert clients.read_bytes() == original
 
 

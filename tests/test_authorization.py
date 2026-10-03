@@ -151,7 +151,16 @@ def test_clear_stored_authorization_is_idempotent(tmp_path: Path) -> None:
     assert clear_stored_authorization(path) == "not_configured"
 
 
-@pytest.mark.parametrize("configured", [None, "", "  ", "explicit"])
+@pytest.mark.parametrize(
+    "configured",
+    [
+        None,
+        "",
+        "  ",
+        "explicit",
+        pytest.param("explicit ", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX trailing-space directory")),
+    ],
+)
 def test_dsh_credentials_and_configuration_share_the_same_home(tmp_path, monkeypatch, configured):
     from powercontext.cli.dsh_transport import read_dsh_settings
 
@@ -160,8 +169,8 @@ def test_dsh_credentials_and_configuration_share_the_same_home(tmp_path, monkeyp
     if configured is None:
         monkeypatch.delenv("DSH_HOME", raising=False)
     else:
-        monkeypatch.setenv("DSH_HOME", f" {tmp_path / 'explicit'} " if configured == "explicit" else configured)
-    expected = tmp_path / "explicit" if configured == "explicit" else default_home
+        monkeypatch.setenv("DSH_HOME", str(tmp_path / configured) if configured.strip() else configured)
+    expected = tmp_path / configured if configured and configured.strip() else default_home
     # A cwd profile must not be mistaken for DSH_HOME when the environment is empty.
     unrelated = tmp_path / "profiles/web"
     unrelated.mkdir(parents=True)
@@ -171,6 +180,12 @@ def test_dsh_credentials_and_configuration_share_the_same_home(tmp_path, monkeyp
     write_stored_authorization(path, server_url="https://memory.example", value="test-token")
     assert read_stored_authorization(path, server_url="https://memory.example").status == "configured"
     assert read_dsh_settings() == {}
+
+
+@pytest.mark.parametrize("configured", ["relative ", " relative", " /data/dsh ", "/data/my dsh"])
+def test_dsh_credential_home_preserves_nonblank_path_whitespace(monkeypatch, configured):
+    monkeypatch.setenv("DSH_HOME", configured)
+    assert credential_path("dsh") == Path(configured).expanduser() / "powercontext/credentials.json"
 
 
 def test_setup_uses_host_specific_credentials_and_endpoints(monkeypatch) -> None:
