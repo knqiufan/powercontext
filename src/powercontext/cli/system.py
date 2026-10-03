@@ -1110,7 +1110,13 @@ def doctor_dsh(
     try:
         target = resolve_dsh_target(profile, dsh_command)
     except SetupError as error:
-        diagnostics = {"dsh": Diagnostic(status=DiagnosticStatus.FAILED, detail=str(error))}
+        diagnostics = {
+            "dsh": Diagnostic(status=DiagnosticStatus.FAILED, detail=str(error)),
+            "plugin": Diagnostic(
+                status=DiagnosticStatus.SKIPPED,
+                detail="not checked because the selected DeepSeek Harness profile is unavailable",
+            ),
+        }
     else:
         diagnostics = run_dsh_diagnostics(target=target)
         add_transport_diagnostic(diagnostics, "dsh", dsh_target=target)
