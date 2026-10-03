@@ -81,7 +81,9 @@ def dsh_config_boot(request):
         if result.returncode == 0:
             location = result.stdout
     if not location or not Path(location).is_file():
-        if request.config.getoption("--require-dsh-runtime"):
+        if request.config.getoption("--require-dsh-runtime") or request.config.getoption(
+            "--require-dsh-config-runtime"
+        ):
             pytest.fail("Required DSH configuration runtime is unavailable; install tests/config-runtime dependencies")
         pytest.skip("Native DSH compatibility tests require tests/config-runtime dependencies")
     return Path(location)

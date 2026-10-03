@@ -29,8 +29,20 @@ checks do not execute a 0.2 CLI installation or a Desktop host. They verify omit
 layers, rejected incompatible PowerContext bundles, and explicit version exemptions. The SDK continues to use
 its matched 0.1.2 runtime. Setup reads the selected installation's own configuration APIs, not this test copy.
 
+Run the native configuration regressions without installing a DSH CLI:
+
+```bash
+pnpm --dir integrations/dsh/plugins/powercontext/tests/config-runtime install --frozen-lockfile
+uv run pytest tests/test_dsh_transport.py --require-dsh-config-runtime
+```
+
+The Python 3.11–3.14 CI matrix installs this locked configuration package, resolves `DSH_TEST_CONFIG_BOOT`,
+and requires it while running the unit suite. Missing APIs fail instead of silently skipping their tests;
+tests that need the DSH CLI can still skip when that host is absent.
+
 Run `uv run pytest tests/test_dsh_transport.py --require-dsh-runtime` with `DSH_TEST_EXECUTABLE` selecting the
-installed DSH CLI. CI resolves both runtimes before running that command and fails if either is unavailable.
+installed DSH CLI. The `dsh-package` CI job resolves both runtimes before running that command and fails if
+either is unavailable.
 The file also retains ordinary Python transport-policy tests that require no DSH installation.
 
 These tests launch the real `dsh --profile sdk` subprocess and a real PowerContext Server with isolated homes.
