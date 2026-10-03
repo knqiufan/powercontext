@@ -103,6 +103,9 @@ uv run --locked python -m examples.systemone.applicability_eval --env-file .env_
 沿用现有 Codex 认证、配置和审批规则，没有绕过沙箱或审批。
 `--codex-timeout` 限制每次 CLI 运行，默认 180 秒。
 
+程序通过 `PATH` 查找 `codex`。如果 CLI 提示桌面应用中可用的模型不受支持，先检查
+`codex --version`；本机的 CLI 与桌面应用可能使用不同版本。
+
 这验证的是实际 CLI 和工具执行，上下文由宿主显式读取，没有验证原生 Skill 自动发现或发布。
 测试不会安装 Skill，也不会执行包内脚本。使用既有 `record_skill_usage` API 保存精确 Skill
 版本、包摘要和任务结果 Source。只有观察到读取上下文、生成代码和通过契约测试的命令，

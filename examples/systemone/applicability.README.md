@@ -149,6 +149,9 @@ the response field and generated annotations. It also checks that the generator,
 selected context have not changed. Existing Codex authentication/configuration and approval rules
 apply; no bypass flags are used. `--codex-timeout` bounds each CLI process (default 180 seconds).
 
+The runner finds `codex` on `PATH`. Check `codex --version` if a model that works in the desktop
+app is reported as unsupported by the CLI; the two installations can have different versions.
+
 This is real CLI/tool execution with explicit context loading, not native Skill discovery or
 publication. The runner never installs a package or executes package scripts. The existing
 `record_skill_usage` API records each selected exact Skill revision and package digest with an

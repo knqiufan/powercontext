@@ -117,6 +117,7 @@ def test_openrouter_choice_preserves_evidence_and_reports_portable_usage(outcome
     question = body["questions"]["decision"]
     assert question["type"] == "choice"
     assert set(question["criteria"]) == {"yes", "no", "abstain"}
+    assert request.question in question["instructions"]
     assert request.subject not in question["instructions"]
     assert request.evidence[1] not in question["instructions"]
 
@@ -233,6 +234,32 @@ def test_laya_uses_explicit_model_and_budget_without_requiring_a_key(endpoint: s
 def test_laya_rejects_plain_http_outside_loopback() -> None:
     with pytest.raises(ValidationError):
         _config(provider="laya", endpoint="http://192.0.2.1/v1/systemone", api_key="")
+
+
+def test_laya_does_not_send_a_question_that_would_be_truncated() -> None:
+    sent: list[httpx.Request] = []
+
+    def handler(incoming: httpx.Request) -> httpx.Response:
+        sent.append(incoming)
+        return httpx.Response(200, json=_response())
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = SystemOneDecisionModel(
+                _config(provider="laya", endpoint="http://127.0.0.1:8891/v1/systemone", api_key=""),
+                client,
+                laya_budget=LayaInputBudget(
+                    tokenize=lambda text: list(range(len(text.split()))),
+                    max_length=4096,
+                    head_max_length=256,
+                    mask_token="<mask>",  # noqa: S106 - Tokenizer vocabulary, not a credential.
+                ),
+            )
+            with pytest.raises(InferenceConfigurationError, match=r"instructions.*head budget"):
+                await model.evaluate(DecisionRequest("artifact.applicability", "condition " * 256, "evidence"))
+        assert sent == []
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("provider", ["jev", "laya"])
