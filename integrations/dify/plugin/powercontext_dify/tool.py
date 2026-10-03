@@ -180,3 +180,5 @@ class PowerContextTool(Tool):
         yield self.create_json_message(outcome)
         for key, value in outcome.items():
             yield self.create_variable_message(key, value)
+        # Dify's variable picker expands a plain object schema, unlike nullable envelope data.
+        yield self.create_variable_message("result", outcome["data"] if outcome["ok"] else {})

@@ -104,12 +104,113 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        memory:
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - family
+            - artifact_id
+            - revision
+            properties:
+              family:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              artifact_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              revision:
+                type: integer
+                minimum: 1
+          - type: 'null'
+        mode:
+          anyOf:
+          - type: string
+            enum:
+            - fts
+            - vector
+            - hybrid
+          - type: 'null'
+        hits:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - citation
+            - text
+            - score
+            - matched_by
+            properties:
+              citation:
+                type: object
+                additionalProperties: false
+                required:
+                - memory_ref
+                - entry_id
+                - entry_version_id
+                properties:
+                  memory_ref:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - family
+                    - artifact_id
+                    - revision
+                    properties:
+                      family:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                        pattern: ^[\x21-\x7E]+$
+                      artifact_id:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                        pattern: ^[\x21-\x7E]+$
+                      revision:
+                        type: integer
+                        minimum: 1
+                  entry_id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                    pattern: ^[\x21-\x7E]+$
+                  entry_version_id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                    pattern: ^[\x21-\x7E]+$
+              text:
+                type: string
+              score:
+                type: number
+                minimum: 0
+                maximum: 1
+              matched_by:
+                type: array
+                items:
+                  type: string
+                  enum:
+                  - fts
+                  - vector
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_search.py

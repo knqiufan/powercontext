@@ -59,12 +59,35 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        schema:
+          type: string
+          enum:
+          - powercontext.prepared-context.v1
+        status:
+          type: string
+          enum:
+          - ready
+          - empty
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+        content_bytes:
+          type: integer
+          minimum: 0
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_prepare_context.py

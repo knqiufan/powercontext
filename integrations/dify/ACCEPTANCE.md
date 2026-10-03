@@ -13,14 +13,16 @@ Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8
 | SDK and Server Python | CPython 3.12.13, Windows amd64 |
 | HTTP backend | Real uvicorn/FastAPI Server with a disposable SQLite database |
 | Generation | Deterministic injected Handoff/Experience/Skill generators |
+| Workflow output metadata | Dify 1.17.1 official frontend helpers executed offline with generated declarations |
 | Dify application / plugin daemon | Not run; no test deployment available |
 | Live model / Marketplace | Not run |
 
 ## Passed local acceptance
 
-- 38 focused regressions invoke registered SDK entries: exact catalog, hidden credential/Scope fields, native objects, input validation, UTF-8 limits, missing binding, credential read validation, malformed/oversized receipts, partial error receipts, transport failure, secret-bearing capture, sanitization and no automatic write retry.
+- 41 focused regressions invoke registered SDK entries: exact catalog, hidden credential/Scope fields, native objects, input validation, UTF-8 limits, missing binding, credential read validation, malformed/oversized receipts, partial error receipts, transport failure, secret-bearing capture, sanitization and no automatic write retry. Named outputs are checked against their declared JSON schemas, and `result` must equal the complete successful response or `{}` on error/unknown. Ready and empty context responses retain their original text/null values.
 - The HTTP/SQLite tests invoke all 19 loaded tools. Memory write/list/search/prepare/get/revise/retire remains usable through exact citations; Source capture retains structured metadata and a Unicode Source ID.
 - Complete Handoff JSON passes prepare/finalize/temporary continue/commit/exact/latest readback. Full objects and references survive the SDK messages.
+- Each of the 19 declarations exposes `result` as an object with inlined operation-specific response properties. An offline probe executes Dify 1.17.1's official [getOutputVars](https://github.com/langgenius/dify/blob/1.17.1/web/app/components/workflow/nodes/tool/default.ts) and [getVarType](https://github.com/langgenius/dify/blob/1.17.1/web/app/components/workflow/nodes/_base/components/variable/utils.ts) helpers with a fixture node inventory: all 19 results have children, and six context/Memory/Handoff selectors resolve to their expected string/object types. This checks output metadata parsing and selector resolution, not a rendered UI, actual workflow execution or daemon dispatch.
 - Generation produces pending candidates; candidate list/get work; an administrator approves through the separate HTTP administration interface, after which Experience/Skill exact reads work.
 - Separate SDK greenlets overlap Scope A/B reads and wrong-token/missing-binding calls. There is no event-loop nesting or mutable shared credential/Scope state. This is SDK concurrency, not plugin-daemon acceptance.
 - Scope A/B searches do not expose another Scope's unique test entry. Tests use a shared administrator token and establish scoped filtering, not production multi-user authorization. Restricted-principal and nested cross-Scope authorization still require deployment evidence.
@@ -28,10 +30,10 @@ Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8
 - Official CLI packaging succeeds. Archive inspection finds 19 tool declarations, source, icon, privacy, README and routing references, with no credentials, virtual environments, tests or bytecode caches.
 - Website lint, tests, link validation and production static build pass; export validation checks 877 public pages and their internal links.
 
-Local package: `.artifacts/dify/powercontext-0.0.1.difypkg`, 73889 bytes. SHA-256:
+Local package: `.artifacts/dify/powercontext-0.0.1.difypkg`, 91679 bytes. SHA-256:
 
 ```text
-8664fa23fd6c558e39573b07c21f1a2e2d1bf89c983f01335bd8f7719d35d0b4
+82535f18c0af4e54386e5491e23f7df7318cc01950df8691cdc85cbe0fa74dab
 ```
 
 The binary is an ignored local validation artifact, not a published Marketplace release. Match the package checksum to the exact reviewed source when preparing a submission.
@@ -76,6 +78,6 @@ Record Dify, plugin-daemon, SDK, CLI, Python, Server SHA, package checksum and m
 
 ## Deferred templates
 
-After plugin-repository acceptance, build and export `recall-before-answer.yml`, `explicit-remember.yml`, `handoff-transfer.yml` and `generate-candidate.yml` under `integrations/dify/workflows/`. Reimport into clean applications, rebind credentials and validate variable wiring and error branches. Recall ordering requires the trace to show preparation before the model and actual inclusion of `data.content` in model input.
+After plugin-repository acceptance, build and export `recall-before-answer.yml`, `explicit-remember.yml`, `handoff-transfer.yml` and `generate-candidate.yml` under `integrations/dify/workflows/`. Reimport into clean applications, rebind credentials and validate variable wiring and empty/error branches. Recall ordering requires the trace to show preparation before the model and actual inclusion of `result.content` in model input.
 
 Template development is a later milestone in [tracking issue #1837](https://github.com/oceanbase/powercontext/issues/1837); it is not a prerequisite for starting this source review, but plugin deployment acceptance remains a publication prerequisite.

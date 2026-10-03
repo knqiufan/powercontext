@@ -167,12 +167,429 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+          - pending
+          - no_op
+        candidate:
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - candidate_id
+            - version
+            - family
+            - status
+            - proposal
+            - source_refs
+            - artifact_refs
+            - target
+            - reason
+            - result_artifact
+            - decision_reason
+            properties:
+              memory_citations:
+                type: array
+                maxItems: 32
+                default: []
+                description: Exact Memory entry provenance; non-empty only for Experience.
+                  Counted toward the combined evidence bound.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - memory_ref
+                  - entry_id
+                  - entry_version_id
+                  properties:
+                    memory_ref:
+                      type: object
+                      additionalProperties: false
+                      required:
+                      - family
+                      - artifact_id
+                      - revision
+                      properties:
+                        family:
+                          type: string
+                          minLength: 1
+                          maxLength: 128
+                          pattern: ^[\x21-\x7E]+$
+                        artifact_id:
+                          type: string
+                          minLength: 1
+                          maxLength: 128
+                          pattern: ^[\x21-\x7E]+$
+                        revision:
+                          type: integer
+                          minimum: 1
+                    entry_id:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    entry_version_id:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+              permissions:
+                anyOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - can_revise
+                  - can_approve
+                  - can_reject
+                  properties:
+                    can_revise:
+                      type: boolean
+                    can_approve:
+                      type: boolean
+                    can_reject:
+                      type: boolean
+                  description: Current Principal permissions in enforced mode; advisory
+                    and checked again on mutation.
+                - type: 'null'
+              candidate_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              version:
+                type: integer
+                minimum: 1
+              family:
+                type: string
+                enum:
+                - experience
+                - skill
+                - profile
+              status:
+                type: string
+                enum:
+                - pending
+                - approved
+                - rejected
+              proposal:
+                oneOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - situation
+                  - action
+                  - outcome
+                  - lesson
+                  properties:
+                    situation:
+                      type: string
+                      minLength: 1
+                      maxLength: 8000
+                      pattern: .*\S.*
+                    action:
+                      type: string
+                      minLength: 1
+                      maxLength: 8000
+                      pattern: .*\S.*
+                    outcome:
+                      type: string
+                      minLength: 1
+                      maxLength: 8000
+                      pattern: .*\S.*
+                    lesson:
+                      type: string
+                      minLength: 1
+                      maxLength: 8000
+                      pattern: .*\S.*
+                    failure:
+                      anyOf:
+                      - type: object
+                        additionalProperties: false
+                        required:
+                        - signature
+                        - repair_surface
+                        - verification
+                        properties:
+                          signature:
+                            type: object
+                            additionalProperties: false
+                            required:
+                            - recall_cue
+                            properties:
+                              recall_cue:
+                                type: string
+                                minLength: 1
+                                maxLength: 512
+                                pattern: .*\S.*
+                              symptom:
+                                anyOf:
+                                - type: string
+                                  minLength: 1
+                                  maxLength: 8000
+                                  pattern: .*\S.*
+                                - type: 'null'
+                          repair_surface:
+                            type: string
+                            enum:
+                            - experience_content
+                            - working_state
+                            - recall_policy
+                            - acceptance_check
+                          verification:
+                            type: object
+                            additionalProperties: false
+                            required:
+                            - condition
+                            - check_subject
+                            properties:
+                              condition:
+                                type: string
+                                minLength: 1
+                                maxLength: 8000
+                                pattern: .*\S.*
+                              check_subject:
+                                type: string
+                                minLength: 1
+                                maxLength: 512
+                                pattern: .*\S.*
+                      - type: 'null'
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - name
+                  - description
+                  - instructions
+                  - validation
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^\S(?:.*\S)?$
+                    description:
+                      type: string
+                      minLength: 1
+                      maxLength: 2000
+                      pattern: ^\S(?:.*\S)?$
+                    instructions:
+                      type: string
+                      maxLength: 131072
+                    validation:
+                      type: array
+                      maxItems: 32
+                      items:
+                        type: string
+                        minLength: 1
+                        maxLength: 2000
+                        pattern: ^\S(?:.*\S)?$
+                    package:
+                      anyOf:
+                      - type: object
+                        additionalProperties: false
+                        required:
+                        - tree_digest
+                        - archive_digest
+                        - file_count
+                        - uncompressed_size
+                        - archive_size
+                        properties:
+                          tree_digest:
+                            type: string
+                            pattern: ^[0-9a-f]{64}$
+                          archive_digest:
+                            type: string
+                            pattern: ^[0-9a-f]{64}$
+                          file_count:
+                            type: integer
+                            minimum: 1
+                            maximum: 256
+                          uncompressed_size:
+                            type: integer
+                            minimum: 1
+                            maximum: 4194304
+                          archive_size:
+                            type: integer
+                            minimum: 1
+                            maximum: 5242880
+                      - type: 'null'
+                    license:
+                      anyOf:
+                      - type: string
+                        minLength: 1
+                        maxLength: 512
+                      - type: 'null'
+                    compatibility:
+                      anyOf:
+                      - type: string
+                        minLength: 1
+                        maxLength: 500
+                      - type: 'null'
+                    metadata:
+                      type: object
+                      maxProperties: 64
+                      additionalProperties:
+                        type: string
+                    allowed_tools:
+                      anyOf:
+                      - type: string
+                        minLength: 1
+                        maxLength: 2000
+                      - type: 'null'
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - schema
+                  - content
+                  - source_window
+                  - generator_id
+                  - generator_version
+                  - created_at
+                  properties:
+                    schema:
+                      type: string
+                      enum:
+                      - powercontext.profile-candidate.v1
+                    content:
+                      type: string
+                      minLength: 1
+                    source_window:
+                      type: object
+                      additionalProperties: false
+                      required:
+                      - after
+                      - through
+                      properties:
+                        after:
+                          type: integer
+                          minimum: 0
+                        through:
+                          type: integer
+                          minimum: 0
+                    generator_id:
+                      type: string
+                      minLength: 1
+                    generator_version:
+                      type: string
+                      minLength: 1
+                    created_at:
+                      type: string
+                      format: date-time
+              source_refs:
+                type: array
+                maxItems: 32
+                description: Exact Source evidence. Counted with artifact_refs toward
+                  a combined maximum of 32 references.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - name
+                  - source_id
+                  properties:
+                    name:
+                      type: string
+                      description: Stable Source type.
+                    source_id:
+                      type: string
+              artifact_refs:
+                type: array
+                maxItems: 32
+                description: Exact Artifact evidence. Counted with source_refs toward
+                  a combined maximum of 32 references.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - family
+                  - artifact_id
+                  - revision
+                  properties:
+                    family:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    artifact_id:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    revision:
+                      type: integer
+                      minimum: 1
+              target:
+                anyOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - family
+                  - artifact_id
+                  - revision
+                  properties:
+                    family:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    artifact_id:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    revision:
+                      type: integer
+                      minimum: 1
+                - type: 'null'
+              reason:
+                anyOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2000
+                - type: 'null'
+              result_artifact:
+                anyOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                  - family
+                  - artifact_id
+                  - revision
+                  properties:
+                    family:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    artifact_id:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[\x21-\x7E]+$
+                    revision:
+                      type: integer
+                      minimum: 1
+                - type: 'null'
+              decision_reason:
+                anyOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2000
+                - type: 'null'
+          - type: 'null'
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_experience_generate.py

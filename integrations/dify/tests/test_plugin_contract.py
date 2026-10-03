@@ -24,6 +24,7 @@ import pytest
 from dify_plugin import DifyPluginEnv
 from dify_plugin.core.plugin_registration import PluginRegistration
 from dify_plugin.errors.tool import ToolProviderCredentialValidationError
+from jsonschema import Draft7Validator
 from powercontext_dify.client import CONTRACT
 from sdk_driver import PLUGIN, invoke
 
@@ -89,6 +90,41 @@ def test_sdk_registers_exact_catalog_and_native_objects(registry):
     assert draft.type.value == "object"
     assert draft.input_schema is not None
     assert loaded["pc_remember"][0].description.human.zh_hans == "按明确保存意图写入整理后的记忆。"
+
+
+def test_workflow_results_expose_context_references_and_complete_handoffs(registry):
+    _, _, loaded = registry.tools_mapping["powercontext"]
+    for declaration, _ in loaded.values():
+        result = declaration.output_schema["properties"]["result"]
+        assert result["type"] == "object"
+        assert result["properties"]
+        # A workflow must also be able to route an unsuccessful call with an empty result.
+        Draft7Validator(result).validate({})
+    context = loaded["pc_prepare_context"][0].output_schema["properties"]["result"]
+    content = Draft7Validator(context["properties"]["content"])
+    content.validate("已保留的上下文")
+    content.validate(None)
+    memory = loaded["pc_memory_get"][0].output_schema["properties"]["result"]
+    assert {"memory_ref", "entry_id", "entry_version_id"} <= memory["properties"]["citation"]["properties"].keys()
+    draft = loaded["pc_handoff_prepare"][0].output_schema["properties"]["result"]
+    assert {"objective", "state", "disposition", "next_action", "omissions"} <= draft["properties"].keys()
+    prepared = loaded["pc_handoff_finalize"][0].output_schema["properties"]["result"]
+    assert {"schema", "scope_id", "base", "content"} <= prepared["properties"].keys()
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_context_workflow_output_preserves_success_and_empty_content(registry, transport, empty):
+    body = {
+        "schema": "powercontext.prepared-context.v1",
+        "status": "empty" if empty else "ready",
+        "content": None if empty else "已保留的上下文",
+        "content_bytes": 0 if empty else len("已保留的上下文".encode()),
+    }
+    transport(lambda _request: httpx.Response(200, json=body))
+    result = run(registry, "pc_prepare_context", {"query": "scope"})
+    assert result["ok"] is True
+    assert result["status"] == ("empty" if empty else "success")
+    assert result["data"] == body
 
 
 @pytest.mark.parametrize("body", [None, {}, [], "not-json"])

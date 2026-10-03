@@ -99,12 +99,107 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        citation:
+          type: object
+          additionalProperties: false
+          required:
+          - memory_ref
+          - entry_id
+          - entry_version_id
+          properties:
+            memory_ref:
+              type: object
+              additionalProperties: false
+              required:
+              - family
+              - artifact_id
+              - revision
+              properties:
+                family:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[\x21-\x7E]+$
+                artifact_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[\x21-\x7E]+$
+                revision:
+                  type: integer
+                  minimum: 1
+            entry_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[\x21-\x7E]+$
+            entry_version_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[\x21-\x7E]+$
+        version:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+        text:
+          type: string
+        state:
+          type: string
+          enum:
+          - active
+          - inactive
+        source_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - name
+            - source_id
+            properties:
+              name:
+                type: string
+                description: Stable Source type.
+              source_id:
+                type: string
+        artifact_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - family
+            - artifact_id
+            - revision
+            properties:
+              family:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              artifact_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              revision:
+                type: integer
+                minimum: 1
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_memory_get.py

@@ -28,6 +28,7 @@ import gevent
 from dify_plugin import DifyPluginEnv
 from dify_plugin.core.plugin_registration import PluginRegistration
 from dify_plugin.entities.tool import ToolRuntime
+from jsonschema import Draft7Validator
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 
@@ -40,7 +41,7 @@ def registration():
 
 def invoke(registry, job):
     _, _, tools = registry.tools_mapping["powercontext"]
-    _, implementation = tools[job["tool"]]
+    declaration, implementation = tools[job["tool"]]
     entry = implementation(
         runtime=ToolRuntime(credentials=job["credentials"], user_id=None, session_id=None),
         session=object(),
@@ -52,7 +53,8 @@ def invoke(registry, job):
         for message in messages
         if message.type.value == "variable"
     }
-    assert variables == envelope
+    assert variables == {**envelope, "result": envelope["data"] if envelope["ok"] else {}}
+    Draft7Validator(declaration.output_schema).validate(variables)
     return envelope
 
 
