@@ -60,13 +60,15 @@ See [GUIDANCE.md](GUIDANCE.md) for routing and Handoff/candidate lifecycles. His
 
 ## Outputs and failure handling
 
-Each invocation emits text, one JSON envelope and the same five named output variables:
+Each invocation emits text and one JSON envelope:
 
 ```json
 {"ok": true, "operation": "search_memory", "status": "empty", "data": {"hits": []}, "error": null}
 ```
 
 `data` preserves the complete public HTTP success response. `status` is `success`, `empty`, `error` or `unknown`; `empty` is a successful empty read. `error` includes a safe code/message and, when available, HTTP status and a validated request ID. Raw Server/transport errors and credentials are not emitted.
+
+The six named output variables are `ok`, `operation`, `status`, `data`, `error` and `result`. `result` exposes the successful response as an object with operation-specific fields in the Workflow variable picker: select `result.content` for context, `result.citation` for an exact Memory read, or the complete `result` from Handoff prepare/finalize for the next tool's draft/prepared input. Successful empty reads preserve their response, including nullable context content. On `error` or `unknown`, `result` is `{}`; branch on `ok` before using it, and inspect any partial receipt in `data` for recovery.
 
 A write with a timeout, malformed receipt or uncertain Server failure returns `ok=false,status=unknown`. It is never automatically retried. Inspect Server state and any preserved exact resource receipt before choosing a recovery operation. A known explicit rejection returns `error`. The transport caps the complete decoded response at 4 MiB and reports overflow without silently truncating objects.
 
@@ -76,6 +78,6 @@ This plugin performs explicit capture only. Detected secret-bearing content/meta
 
 For optional Agent use, enable the required tools and add the short routing instructions in [GUIDANCE.md](GUIDANCE.md). Prompt instructions guide model choices; they do not guarantee recall before every answer or replace trusted write controls.
 
-For guaranteed recall ordering, a later Workflow/Chatflow template must execute `pc_prepare_context` before the LLM/Agent node and explicitly connect `data.content` to that node's context. Test the error branch and verify the model received the context in the run trace. Reusable DSL templates are scheduled after the plugin is accepted into `langgenius/dify-plugins`; they are tracked separately in [PowerContext #1837](https://github.com/oceanbase/powercontext/issues/1837).
+For guaranteed recall ordering, a later Workflow/Chatflow template must execute `pc_prepare_context` before the LLM/Agent node and explicitly connect `result.content` to that node's context. Test the empty/error branches and verify the model received the context in the run trace. Reusable DSL templates are scheduled after the plugin is accepted into `langgenius/dify-plugins`; they are tracked separately in [PowerContext #1837](https://github.com/oceanbase/powercontext/issues/1837).
 
 The installable identity is `knqiufan/powercontext` 0.0.1. Publisher ownership and the relationship to the existing `oceanbase/powermem` Marketplace package require coordination before public submission.

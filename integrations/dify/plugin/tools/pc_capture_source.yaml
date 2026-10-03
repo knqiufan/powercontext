@@ -90,12 +90,38 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+          - accepted
+        source:
+          type: object
+          additionalProperties: false
+          required:
+          - name
+          - source_id
+          properties:
+            name:
+              type: string
+              description: Stable Source type.
+            source_id:
+              type: string
+        position:
+          type: integer
+          minimum: 1
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_capture_source.py

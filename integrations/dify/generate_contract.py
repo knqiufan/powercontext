@@ -21,6 +21,7 @@ import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -75,7 +76,7 @@ PARAMETERS = {
     "cursor": ("分页游标", "Complete next_cursor from the previous candidate page; do not invent or rewrite it."),
     "candidate_id": ("候选 ID", "Exact candidate ID returned by generation or candidate listing."),
 }
-OUTPUT = {
+OUTPUT: dict[str, Any] = {
     "type": "object",
     "properties": {
         "ok": {"type": "boolean"},
@@ -199,6 +200,14 @@ def build():
                 if source in schema:
                     param[target] = schema[source]
             parameters.append(param)
+        (response,) = operations[operation_id]["responses"].values()
+        result_schema = json_schema(inline(response))
+        # Failure branches emit {}, while successful calls preserve the entire validated response.
+        result_schema.pop("required", None)
+        result_schema["description"] = "Complete successful HTTP response; empty object on error or unknown outcome."
+        output_schema = deepcopy(OUTPUT)
+        output_schema["properties"]["result"] = result_schema
+        output_schema["required"].append("result")
         definition = {
             "identity": {"name": name, "author": "knqiufan", "label": {"en_US": name, "zh_Hans": name}},
             "description": {
@@ -207,7 +216,7 @@ def build():
                 " ordinary questions do not require retrieval.",
             },
             "parameters": parameters,
-            "output_schema": OUTPUT,
+            "output_schema": output_schema,
             "extra": {"python": {"source": f"tools/{name}.py"}},
         }
         outputs[PLUGIN / f"tools/{name}.yaml"] = header + yaml.safe_dump(

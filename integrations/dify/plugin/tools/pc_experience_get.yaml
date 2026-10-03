@@ -80,12 +80,203 @@ output_schema:
       type:
       - object
       - 'null'
+    result:
+      type: object
+      additionalProperties: false
+      properties:
+        memory_citations:
+          type: array
+          maxItems: 32
+          default: []
+          description: Exact Memory entry provenance; non-empty only for Experience.
+            Counted toward the combined evidence bound.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - memory_ref
+            - entry_id
+            - entry_version_id
+            properties:
+              memory_ref:
+                type: object
+                additionalProperties: false
+                required:
+                - family
+                - artifact_id
+                - revision
+                properties:
+                  family:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                    pattern: ^[\x21-\x7E]+$
+                  artifact_id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                    pattern: ^[\x21-\x7E]+$
+                  revision:
+                    type: integer
+                    minimum: 1
+              entry_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              entry_version_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+        artifact:
+          type: object
+          additionalProperties: false
+          required:
+          - family
+          - artifact_id
+          - revision
+          properties:
+            family:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[\x21-\x7E]+$
+            artifact_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[\x21-\x7E]+$
+            revision:
+              type: integer
+              minimum: 1
+        content:
+          type: object
+          additionalProperties: false
+          required:
+          - situation
+          - action
+          - outcome
+          - lesson
+          properties:
+            situation:
+              type: string
+              minLength: 1
+              maxLength: 8000
+              pattern: .*\S.*
+            action:
+              type: string
+              minLength: 1
+              maxLength: 8000
+              pattern: .*\S.*
+            outcome:
+              type: string
+              minLength: 1
+              maxLength: 8000
+              pattern: .*\S.*
+            lesson:
+              type: string
+              minLength: 1
+              maxLength: 8000
+              pattern: .*\S.*
+            failure:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                required:
+                - signature
+                - repair_surface
+                - verification
+                properties:
+                  signature:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - recall_cue
+                    properties:
+                      recall_cue:
+                        type: string
+                        minLength: 1
+                        maxLength: 512
+                        pattern: .*\S.*
+                      symptom:
+                        anyOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 8000
+                          pattern: .*\S.*
+                        - type: 'null'
+                  repair_surface:
+                    type: string
+                    enum:
+                    - experience_content
+                    - working_state
+                    - recall_policy
+                    - acceptance_check
+                  verification:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - condition
+                    - check_subject
+                    properties:
+                      condition:
+                        type: string
+                        minLength: 1
+                        maxLength: 8000
+                        pattern: .*\S.*
+                      check_subject:
+                        type: string
+                        minLength: 1
+                        maxLength: 512
+                        pattern: .*\S.*
+              - type: 'null'
+        source_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - name
+            - source_id
+            properties:
+              name:
+                type: string
+                description: Stable Source type.
+              source_id:
+                type: string
+        artifact_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - family
+            - artifact_id
+            - revision
+            properties:
+              family:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              artifact_id:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[\x21-\x7E]+$
+              revision:
+                type: integer
+                minimum: 1
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
   required:
   - ok
   - operation
   - status
   - data
   - error
+  - result
 extra:
   python:
     source: tools/pc_experience_get.py

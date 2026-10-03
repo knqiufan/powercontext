@@ -30,7 +30,7 @@ The administrator supplies Scope/binding, Server URL/token, context assembly and
 
 Native objects/arrays or one JSON string are accepted for structured fields, including nullable exact references. Unknown fields, non-finite JSON numbers and malformed references fail before the operation request. Generation permits a combined 1–32 Source/Artifact references. Review's explicit family is experience/skill; an omitted filter is unfiltered.
 
-Success preserves the entire public response, including pagination, citations, statuses and exact revision references. Each SDK invocation emits the same envelope as text, JSON and named outputs. Empty reads are success; uncertain writes are unknown and are not retried. Responses over the 4 MiB transport cap fail without truncation.
+Success preserves the entire public response, including pagination, citations, statuses and exact revision references. Each SDK invocation emits the same envelope as text, JSON and five corresponding named outputs. A sixth named output, `result`, exposes the successful response with operation-specific properties for Workflow selection; it is `{}` on error/unknown, while `data` retains any partial recovery receipt. Branch on `ok` before using `result`. Empty reads are success; uncertain writes are unknown and are not retried. Responses over the 4 MiB transport cap fail without truncation.
 
 ## Evidence
 

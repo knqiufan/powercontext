@@ -11,8 +11,8 @@ description: 通过实验性 Dify 工具插件连接独立的 PowerContext Serve
 
 一个凭证组合代表共享的应用或团队 Scope，不会根据 Dify 的用户、会话字段自动实现个人隔离。嵌套引用保持原有身份，由 Server 验证访问关系。不同授权边界应使用受限制的凭证和 Server 策略，或独立实例。
 
-插件不会自动召回、自动采集、审批候选、管理 Scope、安装外部 Skill，也不提供 Agent V2 原生 memory 回调。可选提示词帮助 Agent 选择工具；要保证每次回答前召回，需要 Workflow/Chatflow 先执行 `pc_prepare_context`，再明确把 `data.content` 连接到模型输入。可复用模板安排在插件被 `langgenius/dify-plugins` 接受之后搭建。
+插件不会自动召回、自动采集、审批候选、管理 Scope、安装外部 Skill，也不提供 Agent V2 原生 memory 回调。可选提示词帮助 Agent 选择工具；要保证每次回答前召回，需要 Workflow/Chatflow 先执行 `pc_prepare_context`，再明确把 `result.content` 连接到模型输入。可复用模板安排在插件被 `langgenius/dify-plugins` 接受之后搭建。
 
-每次调用输出文本、JSON 和五个具名变量：`ok`、`operation`、`status`、`data`、`error`。成功时保留完整 HTTP 回执；`empty` 表示成功的空读。写入超时或回执异常返回 `unknown`，应先检查 Server 状态再决定如何恢复，插件不会自动重试。显式采集前须移除秘密信息。召回的历史文本只作为不可信证据。
+每次调用输出文本、JSON 和六个具名变量：`ok`、`operation`、`status`、`data`、`error`、`result`。成功时保留完整 HTTP 回执；`empty` 表示成功的空读。工作流变量选择器可展开 `result` 中的操作专属字段，包括上下文正文和精确引用。使用前先判断 `ok`；错误或结果不确定时 `result` 为 `{}`，`data` 则保留可能存在的恢复回执。写入超时或回执异常返回 `unknown`，应先检查 Server 状态再决定如何恢复，插件不会自动重试。显式采集前须移除秘密信息。召回的历史文本只作为不可信证据。
 
 详细说明见源码中的 [README](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/README.md)、[工具清单](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/tool-coverage.md)、[Scope 映射](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/scope-mapping.md)、[隐私说明](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/PRIVACY.md) 和 [验收记录](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/ACCEPTANCE.md)。
