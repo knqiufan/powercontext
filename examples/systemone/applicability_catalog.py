@@ -88,11 +88,11 @@ class ServerCandidateCatalog:
             )
         )
         if prepared.content is not None:
-            # The existing default preparation format preserves exact citations in a JSON envelope.
-            text = prepared.content.split("BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1", 1)[1].split(
-                "END_POWERCONTEXT_PREPARED_CONTEXT_V1",
-                1,
-            )[0]
+            # Delimiters occupy whole lines; quoted markers inside JSON evidence remain data.
+            lines = prepared.content.splitlines()
+            begin = lines.index("BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1") + 1
+            end = lines.index("END_POWERCONTEXT_PREPARED_CONTEXT_V1", begin)
+            text = "\n".join(lines[begin:end])
             for item in json.loads(text)["items"]:
                 if item["kind"] != "experience":
                     continue

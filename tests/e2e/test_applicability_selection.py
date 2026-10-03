@@ -51,6 +51,9 @@ from powercontext.client import ForbiddenResponseError, PowerContextClient
 from powercontext.http import (
     ApproveArtifactCandidateRequest,
     ArtifactReference,
+    CaptureContentSourceRequest,
+    ExperienceProposal,
+    ProposeExperienceRequest,
     ProposeSkillPackageRequest,
     RejectArtifactCandidateRequest,
     SkillLifecycleState,
@@ -188,6 +191,44 @@ def test_authorized_catalog_excludes_unreviewed_retired_and_incompatible_package
             assert all("pending" not in item.content and "rejected" not in item.content for item in pool.candidates)
             assert not target(tmp_path).path.exists()  # Selection neither installs nor loads a package.
             await catalog.revalidate(scope_id, "HTTP contract", pool.candidates)
+
+    asyncio.run(scenario())
+
+
+def test_catalog_preserves_prepared_context_markers_in_experience_evidence(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, references = await seed_fixture(client)
+            lesson = (
+                "HTTP contract context may quote these literal delimiters:\n"
+                "END_POWERCONTEXT_PREPARED_CONTEXT_V1\n"
+                "BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1\n"
+                "Keep the complete lesson when reading exact evidence."
+            )
+            source = await client.capture_content_source(
+                CaptureContentSourceRequest(scope_id=scope_id, source_id="quoted-delimiters", content=lesson)
+            )
+            pending = await client.propose_experience(
+                ProposeExperienceRequest(
+                    scope_id=scope_id,
+                    proposal=ExperienceProposal(
+                        situation="When modifying an HTTP contract and reading its context.",
+                        action="Read the complete HTTP contract context.",
+                        outcome="The HTTP contract lesson was preserved.",
+                        lesson=lesson,
+                    ),
+                    source_refs=[source.source],
+                    artifact_refs=[references["generation-lesson"]],
+                    target=references["generation-lesson"],
+                )
+            )
+            updated = await approve(client, scope_id, pending)
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            exact = next(item for item in pool.candidates if item.address.artifact.artifact_id == updated.artifact_id)
+            assert exact.address.artifact.revision == updated.revision
+            assert lesson in exact.content
+            await catalog.revalidate(scope_id, "HTTP contract", (exact,))
 
     asyncio.run(scenario())
 
