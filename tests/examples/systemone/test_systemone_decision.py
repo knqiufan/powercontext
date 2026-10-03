@@ -107,10 +107,8 @@ def test_openrouter_choice_preserves_evidence_and_reports_portable_usage(outcome
     body = json.loads(sent[0].content)
     assert body["model"] == "typesafe/jev-1.13"
     assert isinstance(body["state"], str)
-    assert "是否已有完整验证?" in body["state"]
     assert json.loads(body["state"]) == {
         "decision_kind": request.decision_kind,
-        "question": request.question,
         "subject": request.subject,
         "evidence": list(request.evidence),
     }

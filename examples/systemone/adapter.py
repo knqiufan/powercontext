@@ -131,7 +131,6 @@ class SystemOneDecisionModel:
         state = json.dumps(
             {
                 "decision_kind": request.decision_kind,
-                "question": request.question,
                 "subject": request.subject,
                 "evidence": request.evidence,
             },

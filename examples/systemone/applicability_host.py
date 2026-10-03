@@ -25,6 +25,7 @@ import ast
 import asyncio
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -182,12 +183,26 @@ def _invoke_codex(directory: Path, task: str, timeout: int) -> tuple[int | None,
         str(directory),
         "-",
     ]
+    # A standalone CLI must not route its tools through the parent desktop task's
+    # connection or reuse that task's session identity. Keep auth, proxy and config.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "CODEX_APP_TOOLS_PIPE_PATH",
+            "CODEX_THREAD_ID",
+            "CODEX_SESSION_ID",
+            "CODEX_TASK_WORKSPACE_VERIFYING_IDENTITY",
+        }
+    }
     try:
         process = subprocess.run(  # noqa: S603 - fixed CLI arguments; the task is passed through stdin.
             command,
             input=prompt,
             text=True,
             encoding="utf-8",
+            env=environment,
             capture_output=True,
             timeout=timeout,
             check=False,

@@ -151,6 +151,8 @@ apply; no bypass flags are used. `--codex-timeout` bounds each CLI process (defa
 
 The runner finds `codex` on `PATH`. Check `codex --version` if a model that works in the desktop
 app is reported as unsupported by the CLI; the two installations can have different versions.
+The CLI subprocess uses its own tool connection and session identity while retaining the
+existing authentication, proxy, configuration and approval settings.
 
 This is real CLI/tool execution with explicit context loading, not native Skill discovery or
 publication. The runner never installs a package or executes package scripts. The existing

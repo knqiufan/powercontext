@@ -59,7 +59,7 @@ async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
 
 The caller supplies a question, the subject being assessed, and its evidence. The caller receives a `yes`, `no`, or `abstain` result with provider attribution and usage metadata. Jev-specific request and response handling stays inside `SystemOneDecisionModel`:
 
-1. Serialize `decision_kind`, `question`, `subject`, and `evidence` into the System One `state`, preserving the supplied text.
+1. Serialize `decision_kind`, `subject`, and `evidence` into the System One `state`, preserving the supplied text.
 2. Put the caller's question in the typed question's `instructions` and send explicit `yes`, `no`, and `abstain` criteria to the configured endpoint. The subject and evidence remain data in `state`.
 3. Validate the response and map it to `DecisionResult`.
 

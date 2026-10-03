@@ -105,6 +105,7 @@ uv run --locked python -m examples.systemone.applicability_eval --env-file .env_
 
 程序通过 `PATH` 查找 `codex`。如果 CLI 提示桌面应用中可用的模型不受支持，先检查
 `codex --version`；本机的 CLI 与桌面应用可能使用不同版本。
+CLI 子进程使用自己的工具连接和会话标识，保留现有认证、代理、配置和审批设置。
 
 这验证的是实际 CLI 和工具执行，上下文由宿主显式读取，没有验证原生 Skill 自动发现或发布。
 测试不会安装 Skill，也不会执行包内脚本。使用既有 `record_skill_usage` API 保存精确 Skill
