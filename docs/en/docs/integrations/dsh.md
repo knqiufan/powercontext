@@ -40,6 +40,11 @@ repeating that command does not update a moving branch. A broken checkout is rep
 
 Existing UI and model patches can remain in place. Setup checks the composed PowerContext connection settings;
 see [remote connection configuration](../operate/connect-remote-server.md) for conflicts and dynamic configuration limits.
+The check includes children of both `group: true` groups and groups named `@deepseek-ai/cordis-plugin-group`;
+multiple PowerContext entries are rejected before installation and during the installed-configuration check.
+
+An unset, empty, or whitespace-only `DSH_HOME` selects `~/.dsh`. A nonblank path keeps its leading and trailing
+spaces. These rules apply to configuration inspection, stored credentials, and plugin dependency lookup.
 
 ## Start the Server and the host
 

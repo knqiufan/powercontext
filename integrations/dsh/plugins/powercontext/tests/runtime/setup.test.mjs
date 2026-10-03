@@ -21,6 +21,70 @@ import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { installIntoHome, setupFixture } from './setup-fixture.mjs'
 
+test('setup rejects duplicate PowerContext entries in a native named group', { timeout: 240000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pc-dsh-setup-group-'))
+  try {
+    const fixture = setupFixture(home)
+    await fixture.native(['plugin', '--profile', 'web', 'add',
+      join(fixture.root, 'integrations/dsh/plugins/powercontext')])
+    writeFileSync(fixture.patch, '- id: powercontext-dsh\n  disabled: false\n')
+    writeFileSync(fixture.homePatch, JSON.stringify([{ insert: [{
+      id: 'extra-group', name: '@deepseek-ai/cordis-plugin-group', config: [{
+        id: 'powercontext-dsh', name: 'powercontext-dsh',
+        config: { baseUrl: 'https://unexpected.example' },
+      }],
+    }] }]))
+    writeFileSync(fixture.clients, JSON.stringify({ version: 1, hosts: {
+      dsh: { server_url: 'https://saved.example', allow_insecure_http: false },
+    } }))
+    const dump = await fixture.native(['--profile', 'web', '--dump-config'])
+    assert.match(dump, /@deepseek-ai\/cordis-plugin-group/)
+    assert.equal((dump.match(/\bid: powercontext-dsh\b/g) ?? []).length, 2)
+    const paths = [join(fixture.profile, 'package.json'), fixture.patch, fixture.homePatch, fixture.clients]
+    const before = paths.map(path => readFileSync(path))
+    await assert.rejects(fixture.cli(['setup', 'dsh', '--source', fixture.root,
+      '--server-url', 'https://selected.example', '--json']), error => {
+      assert.equal(error.code, 1)
+      assert.match(error.stderr, /Multiple PowerContext entries/)
+      return true
+    })
+    for (const [index, path] of paths.entries()) assert.deepEqual(readFileSync(path), before[index])
+  } finally {
+    assert.equal(dirname(resolve(home)), resolve(tmpdir()))
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('setup preserves a trailing-space DSH home and URL-bound credentials', {
+  timeout: 240000, skip: process.platform === 'win32',
+}, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pc-dsh-setup-home-'))
+  try {
+    const fixture = setupFixture(home, { dshHome: join(home, 'installed-dsh ') })
+    fixture.env.POWERCONTEXT_DSH_AUTHORIZATION = 'Bearer test-token'
+    await fixture.native(['--profile', 'web', '--dump-default-config'])
+    writeFileSync(fixture.patch, '- id: agent-default-model\n  name: "@deepseek-ai/dsh-agent-default-model"\n')
+    const patch = readFileSync(fixture.patch)
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = JSON.parse(await fixture.cli(['setup', 'dsh', '--source', fixture.root,
+        '--server-url', 'https://selected.example', '--json']))
+      assert.equal(result.plugin, 'powercontext-dsh')
+      assert.deepEqual(JSON.parse(readFileSync(fixture.clients, 'utf8')).hosts.dsh, {
+        server_url: 'https://selected.example', allow_insecure_http: false,
+      })
+      assert.deepEqual(JSON.parse(readFileSync(join(fixture.env.DSH_HOME, 'powercontext/credentials.json'), 'utf8')), {
+        version: 1, server_url: 'https://selected.example', authorization: 'Bearer test-token',
+      })
+      const dump = await fixture.native(['--profile', 'web', '--dump-config'])
+      assert.match(dump, /id: powercontext-dsh/)
+      assert.deepEqual(readFileSync(fixture.patch), patch)
+    }
+  } finally {
+    assert.equal(dirname(resolve(home)), resolve(tmpdir()))
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
 test('setup and repeated setup preserve an existing customized DSH profile', { timeout: 240000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), 'pc-dsh-setup-'))
   try {

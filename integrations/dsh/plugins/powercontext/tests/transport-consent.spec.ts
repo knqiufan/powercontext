@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -46,6 +46,16 @@ beforeEach(() => {
 afterEach(() => rmSync(directory, { recursive: true, force: true }))
 
 describe('dsh transport consent', () => {
+  it.skipIf(process.platform === 'win32')('reads saved credentials from a home ending in a space', () => {
+    const home = join(directory, 'dsh ')
+    const credentials = join(home, 'powercontext', 'credentials.json')
+    mkdirSync(join(home, 'powercontext'), { recursive: true })
+    writeFileSync(credentials, JSON.stringify({
+      version: 1, server_url: 'https://memory.example', authorization: 'Bearer test-token',
+    }), { mode: 0o600 })
+    expect(resolve({ DSH_HOME: home }, { baseUrl: 'https://memory.example' }).authorization).toBe('Bearer test-token')
+  })
+
   it('rejects non-boolean consent from direct JavaScript callers', () => {
     expect(() => new PowerContextClient({
       baseUrl: remote, requestTimeoutMs: 1000,

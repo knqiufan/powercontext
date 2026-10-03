@@ -189,7 +189,9 @@ async function inspect(executable, home, profile, candidate, prospective, requir
         }
         matches.push(row)
       }
-      if (row.group && Array.isArray(row.config)) visit(row.config, unavailable)
+      if ((row.group || row.name === '@deepseek-ai/cordis-plugin-group') && Array.isArray(row.config)) {
+        visit(row.config, unavailable)
+      }
     }
   }
   visit(rows)

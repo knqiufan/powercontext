@@ -22,7 +22,7 @@ import { promisify } from 'node:util'
 import { defaultPowerContextRoot } from '../../scripts/e2e-server.mjs'
 import { dshBin } from './fixture.mjs'
 
-export function setupFixture(home) {
+export function setupFixture(home, { dshHome = join(home, 'installed-dsh') } = {}) {
   const bin = join(home, 'bin')
   mkdirSync(bin)
   const windows = process.platform === 'win32'
@@ -36,7 +36,7 @@ export function setupFixture(home) {
   const inherited = Object.fromEntries(Object.entries(process.env)
     .filter(([key]) => !key.toUpperCase().startsWith('POWERCONTEXT_') && !key.toUpperCase().startsWith('DSH_')))
   const env = {
-    ...inherited, CI: 'true', DSH_HOME: join(home, 'installed-dsh'),
+    ...inherited, CI: 'true', DSH_HOME: dshHome,
     POWERCONTEXT_HOME: join(home, 'installed-powercontext'),
     POWERCONTEXT_CLIENT_CONFIG_FILE: join(home, 'clients.json'),
     PATH: bin + delimiter + process.env.PATH, DSH_TELEMETRY_DISABLED: '1',
@@ -46,7 +46,7 @@ export function setupFixture(home) {
     ['run', '--project', root, '--no-sync', 'powercontext', ...args], options)).stdout
   const native = async args => (await promisify(execFile)(process.execPath, [dshBin, ...args], options)).stdout
   const profile = join(env.DSH_HOME, 'profiles/web')
-  return { root, cli, native, profile, patch: join(profile, 'cordis.patch.yml'),
+  return { root, cli, native, env, profile, patch: join(profile, 'cordis.patch.yml'),
     homePatch: join(env.DSH_HOME, 'cordis.patch.yml'), clients: env.POWERCONTEXT_CLIENT_CONFIG_FILE }
 }
 

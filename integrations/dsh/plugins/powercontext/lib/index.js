@@ -2841,7 +2841,8 @@ function contextAssembly(raw, fallback) {
 	return structuredClone(value);
 }
 function storedAuthorization(env, baseUrl) {
-	const path = join(env.DSH_HOME?.trim() || join(homedir(), ".dsh"), "powercontext", "credentials.json");
+	const configuredHome = env.DSH_HOME;
+	const path = join(configuredHome?.trim() ? configuredHome : join(homedir(), ".dsh"), "powercontext", "credentials.json");
 	try {
 		if (process.platform !== "win32" && (statSync(path).mode & 63) !== 0) return void 0;
 		const parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -2882,7 +2883,8 @@ function resolveConfig(config = {}, env = process.env) {
 //#endregion
 //#region src/peers.ts
 function profileNodeModulesDir(env = process.env) {
-	return join(env.DSH_HOME?.trim() || join(homedir(), ".dsh"), "profiles", env.DSH_PROFILE?.trim() || "web", "node_modules");
+	const configuredHome = env.DSH_HOME;
+	return join(configuredHome?.trim() ? configuredHome : join(homedir(), ".dsh"), "profiles", env.DSH_PROFILE?.trim() || "web", "node_modules");
 }
 function profileModulesAnchor(env = process.env) {
 	return join(profileNodeModulesDir(env), "powercontext-dsh-resolver.cjs");

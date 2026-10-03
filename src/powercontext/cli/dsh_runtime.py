@@ -22,4 +22,5 @@ from pathlib import Path
 
 def dsh_home() -> Path:
     """Use the same home for profile configuration and URL-bound credentials."""
-    return Path(os.environ.get("DSH_HOME", "").strip() or Path.home() / ".dsh").expanduser()
+    configured = os.environ.get("DSH_HOME", "")
+    return Path(configured if configured.strip() else Path.home() / ".dsh").expanduser()
