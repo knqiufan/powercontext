@@ -57,6 +57,13 @@ that installed package's distributable files into the SDK profile. The Server an
 A separate setup acceptance installs twice into an existing Web profile with a non-empty, unrelated model patch,
 checks registration through the real CLI, and verifies the patch is preserved. Run it independently with
 `node --test setup.test.mjs`; it does not require an SDK conversation or external model service.
+The native include regression starts a minimal real DSH profile with a recording plugin. It confirms that
+named groups and nested relative YAML/JSON includes, with include-local patches, load two endpoint configurations;
+public setup then rejects those entries while preserving the saved endpoint and credentials.
+Replacing the extra PowerContext entry with UI/model configuration allows setup and a subsequent real host
+startup; include files retain their original bytes and the native host evaluates the model expression.
+The Python configuration tests also cover installed readback after an injected installation change; that injection is
+not a real native installation race.
 A test-only loopback adapter invokes the real host command service because the pinned SDK protocol only exposes
 prompts. It verifies `/pc doctor` with an environment URL overriding an unusable patch URL, preserves health when
 Scope authentication fails, and confirms that Doctor makes no capture or flush requests.

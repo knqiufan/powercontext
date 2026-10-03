@@ -18,8 +18,8 @@
 // Never call loadProfile/prepareProfile: those initialize or rewrite host files.
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, extname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const plugin = 'powercontext-dsh'
 class InspectionError extends Error {
@@ -35,6 +35,7 @@ function read(location, action) {
     fail('Cannot read or compose DSH configuration', location)
   }
 }
+function isExpression(value) { return value && typeof value === 'object' && '__jsExpr' in value }
 
 function installation(executable) {
   const real = realpathSync(executable)
@@ -68,8 +69,11 @@ async function inspect(executable, home, profile, candidate, prospective, requir
   const require = createRequire(anchor)
   // These are the selected host's APIs, not dependencies of the plugin being installed.
   // Resolving a different copy from PowerContext would inspect a different host contract.
-  let boot
-  try { boot = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href) }
+  let boot, bootPath
+  try {
+    bootPath = require.resolve('@deepseek-ai/dsh-app-boot')
+    boot = await import(pathToFileURL(bootPath).href)
+  }
   catch { fail('Installed DSH cannot provide its dsh-app-boot configuration APIs; upgrade or reinstall DSH', anchor) }
   for (const name of ['readProfileManifest', 'resolveBundleDir', 'loadOverlayPatches', 'composeEntries']) {
     if (typeof boot[name] !== 'function') fail(`Installed DSH does not expose ${name}; upgrade or reinstall DSH`, anchor)
@@ -180,21 +184,90 @@ async function inspect(executable, home, profile, candidate, prospective, requir
   const rows = read(dir, () => boot.composeEntries(layers, warning => warnings.push(warning)))
   if (warnings.some(warning => warning.includes(plugin))) fail('A PowerContext patch could not be applied', dir)
   const matches = []
-  function visit(entries, disabled = false) {
+  let includeApi, includeYaml
+  const includeStack = new Set()
+  async function includeEntries(config, baseUrl, location) {
+    if (!config || typeof config !== 'object' || Array.isArray(config) || '__jsExpr' in config
+      || typeof config.path !== 'string' || !config.path) {
+      fail('Native DSH include path must be static before setup', location)
+    }
+    const file = read(location, () => fileURLToPath(new URL(config.path, baseUrl)))
+    if (!['.yaml', '.yml', '.json'].includes(extname(file))) {
+      fail('Native DSH includes must use readable YAML or JSON files before setup', location)
+    }
+    if (!existsSync(file)) {
+      // Do not let Include.initial create a tree after preflight accepted it.
+      fail('Native DSH include file must exist before setup; materialize it first', file)
+    }
+    const canonical = read(file, () => realpathSync(file))
+    if (includeStack.has(canonical)) fail('Native DSH include tree contains a cycle', file)
+    if (config.patches != null && !Array.isArray(config.patches)) {
+      fail('Native DSH include patches must be a static list before setup', file)
+    }
+    // Include is an EntryGroup: the native Loader passes its config through
+    // without interpolating !!js. Require static patch structure while keeping
+    // ordinary plugin config expressions for the owning plugin to evaluate.
+    for (const patch of config.patches ?? []) {
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch) || isExpression(patch)
+        || [patch.id, patch.name, patch.group].some(isExpression)
+        || (patch.insert != null && !Array.isArray(patch.insert))) {
+        fail('Native DSH include patch structure must be static before setup', file)
+      }
+    }
+    if (!includeApi) {
+      try {
+        const nativeRequire = createRequire(bootPath)
+        const includePath = nativeRequire.resolve('@deepseek-ai/cordis-plugin-include')
+        includeApi = await import(pathToFileURL(includePath).href)
+        includeYaml = createRequire(includePath)('js-yaml')
+      } catch {
+        fail('Installed DSH cannot provide its native include inspection APIs; upgrade or reinstall DSH', location)
+      }
+      if (typeof includeApi.applyEntryPatches !== 'function' || !includeApi.entryListSchema) {
+        fail('Installed DSH cannot provide its native include inspection APIs; upgrade or reinstall DSH', location)
+      }
+    }
+    const entries = read(file, () => {
+      const text = readFileSync(file, 'utf8')
+      const data = extname(file) === '.json' ? JSON.parse(text)
+        : includeYaml.load(text, { schema: includeApi.entryListSchema })
+      if (!Array.isArray(data)) fail('Native DSH include file must contain an entry list', file)
+      // Include patches target this tree, not the outer profile's entries.
+      return includeApi.applyEntryPatches(data, config.patches, () => {})
+    })
+    return { entries, file, canonical, baseUrl: new URL('.', pathToFileURL(file)).href }
+  }
+  async function visit(entries, disabled = false, conditional = false,
+    baseUrl = pathToFileURL(dir + '/').href, location = dir) {
     for (const row of entries) {
-      const unavailable = disabled || (row.disabled != null && row.disabled !== false)
+      if (!row || typeof row !== 'object' || Array.isArray(row) || '__jsExpr' in row) {
+        fail('DSH plugin entries must be static mappings before setup', location)
+      }
+      if ([row.id, row.name, row.group].some(isExpression)) {
+        fail('DSH plugin identity must be static before setup', location)
+      }
+      const dynamicDisabled = isExpression(row.disabled)
+      const conditionalEntry = conditional || dynamicDisabled
+      const unavailable = disabled || (!dynamicDisabled && Boolean(row.disabled))
       if (row.id === plugin || row.name === plugin) {
-        if (row.id !== plugin || row.name !== plugin || unavailable) {
-          fail('PowerContext is renamed, disabled, or conditionally enabled in DSH', dir)
+        if (row.id !== plugin || row.name !== plugin || unavailable || conditionalEntry) {
+          fail('PowerContext is renamed, disabled, or conditionally enabled in DSH', location)
         }
         matches.push(row)
       }
-      if ((row.group || row.name === '@deepseek-ai/cordis-plugin-group') && Array.isArray(row.config)) {
-        visit(row.config, unavailable)
+      if (row.name === '@deepseek-ai/cordis-plugin-include' || row.name === 'cordis:include') {
+        if (unavailable && !conditionalEntry) continue
+        const tree = await includeEntries(row.config, baseUrl, location)
+        includeStack.add(tree.canonical)
+        try { await visit(tree.entries, unavailable, conditionalEntry, tree.baseUrl, tree.file) }
+        finally { includeStack.delete(tree.canonical) }
+      } else if (row.group || row.name === '@deepseek-ai/cordis-plugin-group') {
+        if (!Array.isArray(row.config)) fail('DSH group children must be a static entry list before setup', location)
+        await visit(row.config, unavailable, conditionalEntry, baseUrl, location)
       }
     }
   }
-  visit(rows)
+  await visit(rows)
   if (matches.length > 1) fail('Multiple PowerContext entries make the DSH transport ambiguous', dir)
   if (!matches.length && (requireInstalled || candidate || prospective || bundles.includes(plugin))) {
     fail('The composed DSH profile does not contain PowerContext', dir)

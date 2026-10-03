@@ -42,6 +42,11 @@ Existing UI and model patches can remain in place. Setup checks the composed Pow
 see [remote connection configuration](../operate/connect-remote-server.md) for conflicts and dynamic configuration limits.
 The check includes children of both `group: true` groups and groups named `@deepseek-ai/cordis-plugin-group`;
 multiple PowerContext entries are rejected before installation and during the installed-configuration check.
+Native `@deepseek-ai/cordis-plugin-include` and `cordis:include` trees are checked with the selected host's
+YAML/JSON parser and include patches. Relative paths start at the profile directory; nested includes resolve
+from their containing file's directory. Unrelated UI/model expressions remain unevaluated during setup.
+Enabled include files must already exist. Cycles, unsupported file types or URLs, dynamic paths or patch structure,
+and unverifiable group children fail before connection settings or credentials are saved.
 
 An unset, empty, or whitespace-only `DSH_HOME` selects `~/.dsh`. A nonblank path keeps its leading and trailing
 spaces. These rules apply to configuration inspection, stored credentials, and plugin dependency lookup.

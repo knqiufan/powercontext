@@ -42,6 +42,10 @@ powercontext setup dsh --source ./powercontext-dsh-dev
 冲突处理及动态配置限制见[远程连接配置](../operate/connect-remote-server.md)。
 检查会遍历 `group: true` 分组及名称为 `@deepseek-ai/cordis-plugin-group` 的分组内的子项；
 安装前检查和安装后复查都会拒绝多个 PowerContext 条目。
+原生 `@deepseek-ai/cordis-plugin-include` 和 `cordis:include` 配置树使用所选宿主的 YAML/JSON 解析器及
+include patches 检查。相对路径从 profile 目录解析，嵌套 include 从所在文件的目录解析。
+setup 不求值无关的界面和模型表达式。启用的 include 文件必须已存在；循环引用、不支持的文件类型或 URL、
+动态路径或 patch 结构、无法验证的分组子项，都会在保存连接设置或凭据前报错。
 
 `DSH_HOME` 未设置、为空或仅包含空白时使用 `~/.dsh`；非空路径保留开头和末尾的空格。
 配置检查、凭据保存与读取、插件依赖查找都遵循这两条规则。

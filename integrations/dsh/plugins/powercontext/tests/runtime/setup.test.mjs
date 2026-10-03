@@ -19,7 +19,103 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { installIntoHome, setupFixture } from './setup-fixture.mjs'
+
+test('setup validates native include trees observed by a real DSH startup', { timeout: 240000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pc-dsh-setup-include-'))
+  try {
+    const fixture = setupFixture(home)
+    const source = join(home, 'recording-powercontext')
+    mkdirSync(join(source, 'lib'), { recursive: true })
+    writeFileSync(join(source, 'package.json'), JSON.stringify({
+      name: 'powercontext-dsh', version: '1.0.0', type: 'module', main: './lib/index.js',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }))
+    const recording = join(home, 'received.jsonl')
+    writeFileSync(join(source, 'lib/index.js'),
+      "import { appendFileSync } from 'node:fs'; export const name = 'powercontext-dsh'; "
+      + "export function apply(ctx, config) { appendFileSync(process.env.DSH_INCLUDE_RECORDING, JSON.stringify(config) + '\\n'); }\n")
+    writeFileSync(join(source, 'cordis.patch.yml'), JSON.stringify([{ insert: [{
+      id: 'powercontext-dsh', name: 'powercontext-dsh', config: { baseUrl: 'https://selected.example' },
+    }] }]))
+    mkdirSync(fixture.profile, { recursive: true })
+    writeFileSync(join(fixture.profile, 'package.json'), JSON.stringify({
+      private: true, dsh: { profile: { bundles: [], patchReload: 'startup' } },
+    }))
+    await fixture.native(['plugin', '--profile', 'web', 'add', source])
+    const directory = join(fixture.profile, 'custom files')
+    mkdirSync(directory)
+    const included = join(directory, 'nested.json')
+    writeFileSync(included, JSON.stringify([{ id: 'powercontext-dsh', name: 'powercontext-dsh', config: {} }]))
+    const outer = join(directory, 'outer.yml')
+    writeFileSync(outer, JSON.stringify([{
+      id: 'nested', name: '@deepseek-ai/cordis-plugin-include', config: {
+        path: './nested.json', patches: [{ id: 'powercontext-dsh', config: { baseUrl: 'https://unexpected.example' } }],
+      },
+    }]))
+    writeFileSync(fixture.patch, JSON.stringify([{ insert: [{
+      id: 'extra-group', name: '@deepseek-ai/cordis-plugin-group', config: [{
+        id: 'included', name: '@deepseek-ai/cordis-plugin-include', config: { path: './custom files/outer.yml' },
+      }],
+    }] }]))
+    fixture.env.DSH_INCLUDE_RECORDING = recording
+    await fixture.native(['--profile', 'web'])
+    const received = readFileSync(recording, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(received.map(config => config.baseUrl).sort(), [
+      'https://selected.example', 'https://unexpected.example',
+    ])
+    writeFileSync(fixture.clients, JSON.stringify({ version: 1, hosts: {
+      dsh: { server_url: 'https://saved.example', allow_insecure_http: false },
+    } }))
+    const credentials = join(fixture.env.DSH_HOME, 'powercontext/credentials.json')
+    mkdirSync(dirname(credentials), { recursive: true })
+    writeFileSync(credentials, JSON.stringify({ version: 1, server_url: 'https://saved.example', authorization: 'saved-token' }))
+    fixture.env.POWERCONTEXT_DSH_AUTHORIZATION = 'Bearer new-token'
+    const paths = [join(fixture.profile, 'package.json'), fixture.patch, outer, included, fixture.clients, credentials]
+    const before = paths.map(path => readFileSync(path))
+    await assert.rejects(fixture.cli(['setup', 'dsh', '--source', source,
+      '--server-url', 'https://selected.example', '--json']), error => {
+      assert.equal(error.code, 1)
+      assert.match(error.stderr, /Multiple PowerContext entries/)
+      return true
+    })
+    for (const [index, path] of paths.entries()) assert.deepEqual(readFileSync(path), before[index])
+
+    const uiPlugin = join(home, 'ui-fixture.mjs')
+    const uiRecording = join(home, 'ui.json')
+    writeFileSync(uiPlugin, "import { writeFileSync } from 'node:fs'; "
+      + "export function apply(ctx, config) { writeFileSync(process.env.DSH_UI_RECORDING, JSON.stringify(config)); }\n")
+    writeFileSync(included, JSON.stringify([{
+      id: 'ui-fixture', name: pathToFileURL(uiPlugin).href, config: {},
+    }]))
+    writeFileSync(outer, JSON.stringify([{
+      id: 'nested', name: '@deepseek-ai/cordis-plugin-include', config: {
+        path: './nested.json', patches: [{ id: 'ui-fixture', config: {
+          theme: 'dark', model: { __jsExpr: "'configured-model'" },
+        } }],
+      },
+    }]))
+    const includePaths = [fixture.patch, outer, included]
+    const includeBefore = includePaths.map(path => readFileSync(path))
+    const result = JSON.parse(await fixture.cli(['setup', 'dsh', '--source', source,
+      '--server-url', 'https://selected.example', '--json']))
+    assert.equal(result.plugin, 'powercontext-dsh')
+    assert.equal(JSON.parse(readFileSync(fixture.clients, 'utf8')).hosts.dsh.server_url, 'https://selected.example')
+    assert.equal(JSON.parse(readFileSync(credentials, 'utf8')).authorization, 'Bearer new-token')
+    for (const [index, path] of includePaths.entries()) assert.deepEqual(readFileSync(path), includeBefore[index])
+    writeFileSync(recording, '')
+    fixture.env.DSH_UI_RECORDING = uiRecording
+    await fixture.native(['--profile', 'web'])
+    assert.deepEqual(readFileSync(recording, 'utf8').trim().split('\n').map(line => JSON.parse(line)), [
+      { baseUrl: 'https://selected.example' },
+    ])
+    assert.deepEqual(JSON.parse(readFileSync(uiRecording, 'utf8')), { theme: 'dark', model: 'configured-model' })
+  } finally {
+    assert.equal(dirname(resolve(home)), resolve(tmpdir()))
+    rmSync(home, { recursive: true, force: true })
+  }
+})
 
 test('setup rejects duplicate PowerContext entries in a native named group', { timeout: 240000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), 'pc-dsh-setup-group-'))

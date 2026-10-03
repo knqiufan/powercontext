@@ -108,8 +108,7 @@ def dsh_native_api_profile(dsh_config_boot, tmp_path, monkeypatch):
     )
     boot = package.parent / "dsh-app-boot"
     boot.mkdir()
-    (boot / "package.json").write_text(json.dumps({"type": "module", "main": "index.js"}))
-    (boot / "index.js").write_text(f"export * from {json.dumps(dsh_config_boot.as_uri())}\n")
+    (boot / "package.json").write_text(json.dumps({"type": "module", "main": str(dsh_config_boot)}))
     executable = carrier / "dsh"
     executable.write_text("// Configuration inspection fixture; not an executable host.\n")
     monkeypatch.setattr(dsh, "dsh_executable", lambda: str(executable))
@@ -298,6 +297,375 @@ def test_a_single_powercontext_inside_a_named_group_is_inspected(request, profil
         "baseUrl": "https://selected.example",
         "allowInsecureHttp": False,
     }
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_setup_rejects_powercontext_in_native_include_trees(request, profile_fixture, nested, tmp_path, monkeypatch):
+    from powercontext.cli import dsh
+    from powercontext.cli.authorization import credential_path, write_stored_authorization
+
+    profile = request.getfixturevalue(profile_fixture)
+    directory = profile / "custom files"
+    directory.mkdir()
+    included = directory / "entries.json"
+    powercontext = {
+        "id": "powercontext-dsh",
+        "name": "powercontext-dsh",
+        "config": {
+            "baseUrl": "https://unexpected.example",
+        },
+    }
+    included.write_text(json.dumps([powercontext] if not nested else []))
+    row = {
+        "id": "custom-include",
+        "name": "@deepseek-ai/cordis-plugin-include",
+        "config": {
+            "path": "./custom files/entries.json",
+        },
+    }
+    if nested:
+        # Resolve the second include from its containing file, and apply its
+        # own insert patch before looking through the named group it creates.
+        outer = directory / "outer.yml"
+        outer.write_text(
+            json.dumps([
+                {
+                    "id": "inner-include",
+                    "name": "cordis:include",
+                    "config": {
+                        "path": "./entries.json",
+                        "patches": [
+                            {
+                                "insert": [
+                                    {
+                                        "id": "included-group",
+                                        "name": "@deepseek-ai/cordis-plugin-group",
+                                        "config": [powercontext],
+                                    }
+                                ]
+                            }
+                        ],
+                    },
+                }
+            ])
+        )
+        row["config"]["path"] = "./custom files/outer.yml"
+        row = {"id": "outer-group", "group": True, "config": [row]}
+    patch = write_patch(profile, json.dumps([{"insert": [row]}]))
+    clients = tmp_path / "clients.json"
+    clients.write_text('{"version":1,"hosts":{"dsh":{"server_url":"https://saved.example"}}}')
+    credentials = credential_path("dsh")
+    write_stored_authorization(credentials, server_url="https://saved.example", value="saved-token")
+    original = {path: path.read_bytes() for path in (patch, included, clients, credentials)}
+    installer = Mock()
+    monkeypatch.setattr(dsh, "_run_dsh", installer)
+    monkeypatch.setenv("POWERCONTEXT_DSH_AUTHORIZATION", "Bearer new-secret-token")
+
+    with pytest.raises(ValueError, match="Multiple PowerContext entries"):
+        read_dsh_settings(prospective=True)
+    result = CliRunner().invoke(
+        create_cli([setup_app]), ["setup", "dsh", "--server-url", "https://selected.example", "--json"]
+    )
+    assert result.exit_code == 1
+    assert "Multiple PowerContext entries" in result.output
+    assert "secret-token" not in result.output
+    installer.assert_not_called()
+    assert {path: path.read_bytes() for path in original} == original
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+def test_setup_preserves_static_native_ui_includes_and_unevaluated_model_expressions(
+    request, profile_fixture, tmp_path, monkeypatch
+):
+    from powercontext.cli import dsh
+
+    profile = request.getfixturevalue(profile_fixture)
+    source = plugin_source(tmp_path)
+    shutil.copytree(source, profile / "node_modules/powercontext-dsh")
+    (profile / "package.json").write_text(
+        json.dumps({
+            "dependencies": {"powercontext-dsh": f"link:{source.as_posix()}"},
+            "dsh": {"profile": {"bundles": ["powercontext-dsh"]}},
+        })
+    )
+    directory = profile / "custom files"
+    directory.mkdir()
+    (directory / "ui.yml").write_text(
+        "- id: ui\n  name: ui\n  config:\n    title: 自定义界面\n"
+        "    model: !!js (() => { throw new Error('secret-value') })()\n",
+        encoding="utf-8",
+    )
+    (directory / "outer.json").write_text(
+        json.dumps([
+            {
+                "id": "nested-include",
+                "name": "@deepseek-ai/cordis-plugin-include",
+                "config": {
+                    "path": "./ui.yml",
+                    "patches": [{"id": "ui", "disabled": False}],
+                },
+            }
+        ])
+    )
+    # All outer layers resolve include paths from the profile root, even when
+    # the include itself comes from the home-level patch file.
+    write_patch(
+        profile.parent.parent,
+        json.dumps([
+            {
+                "insert": [
+                    {
+                        "id": "ui-group",
+                        "name": "@deepseek-ai/cordis-plugin-group",
+                        "config": [
+                            {
+                                "id": "ui-include",
+                                "name": "cordis:include",
+                                "config": {"path": "./custom files/outer.json"},
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]),
+    )
+    original = {path: path.read_bytes() for path in profile.parent.parent.rglob("*") if path.is_file()}
+    monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(dsh, "_run_dsh", Mock(return_value="id: powercontext-dsh\n"))
+    for _ in range(2):
+        result = CliRunner().invoke(
+            create_cli([setup_app]),
+            ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+        )
+        assert result.exit_code == 0, result.output
+        assert read_dsh_settings(require_installed=True) == {}
+        assert json.loads((tmp_path / "clients.json").read_text())["hosts"]["dsh"]["server_url"] == (
+            "https://selected.example"
+        )
+    assert {path: path.read_bytes() for path in original} == original
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+def test_installed_native_include_patches_define_powercontext_transport(request, profile_fixture, tmp_path):
+    profile = request.getfixturevalue(profile_fixture)
+    included = profile / "transport.yml"
+    included.write_text(
+        "- id: powercontext-dsh\n  name: powercontext-dsh\n  config:\n    baseUrl: https://unexpected.example\n"
+    )
+    source = plugin_source(tmp_path)
+    (source / "cordis.patch.yml").write_text(
+        json.dumps([
+            {
+                "insert": [
+                    {
+                        "id": "transport-include",
+                        "name": "@deepseek-ai/cordis-plugin-include",
+                        "config": {
+                            "path": included.as_uri(),
+                            "patches": [
+                                {
+                                    "id": "powercontext-dsh",
+                                    "config": {
+                                        "baseUrl": "http://selected.example",
+                                        "allowInsecureHttp": True,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ])
+    )
+    shutil.copytree(source, profile / "node_modules/powercontext-dsh")
+    (profile / "package.json").write_text(
+        json.dumps({
+            "dependencies": {"powercontext-dsh": f"link:{source.as_posix()}"},
+            "dsh": {"profile": {"bundles": ["powercontext-dsh"]}},
+        })
+    )
+    settings = {"baseUrl": "http://selected.example", "allowInsecureHttp": True}
+    assert read_dsh_settings(candidate=source) == settings
+    assert read_dsh_settings(require_installed=True) == settings
+    assert prepare_setup_transport("dsh", server_url="http://selected.example", json_output=True).allow_insecure_http
+    with pytest.raises(ValueError, match="HTTP consent"):
+        validate_dsh_setup_transport(settings, "http://selected.example", False)
+    bundle_patch = source / "cordis.patch.yml"
+    patches = json.loads(bundle_patch.read_text())
+    patches[0]["insert"].append({**patches[0]["insert"][0], "id": "second-include"})
+    bundle_patch.write_text(json.dumps(patches))
+    with pytest.raises(ValueError, match="Multiple PowerContext entries"):
+        read_dsh_settings(candidate=source)
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+@pytest.mark.parametrize("parent", [False, True])
+@pytest.mark.parametrize("conditional", [False, True])
+def test_native_include_checks_inherited_and_conditional_activation(request, profile_fixture, parent, conditional):
+    profile = request.getfixturevalue(profile_fixture)
+    (profile / "included.json").write_text(
+        json.dumps([
+            {
+                "id": "powercontext-dsh",
+                "name": "powercontext-dsh",
+                "config": {},
+            }
+        ])
+    )
+    disabled = {"__jsExpr": "false"} if conditional else True
+    row = {
+        "id": "included",
+        "name": "@deepseek-ai/cordis-plugin-include",
+        "config": {
+            "path": "./included.json",
+        },
+    }
+    if parent:
+        row = {"id": "named-group", "name": "@deepseek-ai/cordis-plugin-group", "config": [row]}
+    row = {**row, "disabled": disabled}
+    write_patch(profile, json.dumps([{"insert": [row]}]))
+    if conditional:
+        with pytest.raises(ValueError, match="conditionally enabled"):
+            read_dsh_settings(prospective=True)
+    else:
+        assert read_dsh_settings(prospective=True) == {}
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "dynamic-path",
+        "dynamic-patches",
+        "dynamic-target",
+        "remote",
+        "initial",
+        "cycle",
+        "dynamic-tree",
+    ],
+)
+def test_unverifiable_native_include_trees_fail_without_writes_or_expression_evaluation(
+    request, profile_fixture, case, tmp_path, monkeypatch
+):
+    from powercontext.cli import dsh
+
+    profile = request.getfixturevalue(profile_fixture)
+    path = profile / "included.yml"
+    path.write_text("[]\n")
+    config = {"path": "./included.yml"}
+    if case == "dynamic-path":
+        config["path"] = {"__jsExpr": "(() => { throw new Error('secret-value') })()"}
+    elif case == "dynamic-patches":
+        config["patches"] = {"__jsExpr": "process.env.SECRET"}
+    elif case == "dynamic-target":
+        config["patches"] = [{"id": {"__jsExpr": "process.env.SECRET"}, "config": {}}]
+    elif case == "remote":
+        config["path"] = "https://example.test/secret-value.yml"
+    elif case == "initial":
+        path.unlink()
+        config["initial"] = []
+    elif case == "cycle":
+        (profile / "nested").mkdir()
+        path.write_text(
+            json.dumps([
+                {
+                    "id": "cycle",
+                    "name": "cordis:include",
+                    "config": {
+                        "path": "./nested/../included.yml",
+                    },
+                }
+            ])
+        )
+    elif case == "dynamic-tree":
+        path.write_text("- id: dynamic-group\n  group: true\n  config: !!js process.env.SECRET\n")
+    patch = write_patch(
+        profile,
+        json.dumps([
+            {
+                "insert": [
+                    {
+                        "id": "included",
+                        "name": "@deepseek-ai/cordis-plugin-include",
+                        "config": config,
+                    }
+                ]
+            }
+        ]),
+    )
+    original = {file: file.read_bytes() for file in profile.rglob("*") if file.is_file()}
+    installer = Mock()
+    monkeypatch.setattr(dsh, "_run_dsh", installer)
+    result = CliRunner().invoke(
+        create_cli([setup_app]), ["setup", "dsh", "--server-url", "https://selected.example", "--json"]
+    )
+    assert result.exit_code == 1
+    assert "secret-value" not in result.output
+    installer.assert_not_called()
+    assert not (tmp_path / "clients.json").exists()
+    assert not (profile.parent.parent / "powercontext/credentials.json").exists()
+    assert patch.exists()
+    assert {file: file.read_bytes() for file in original} == original
+    assert path.exists() is (case != "initial")
+
+
+@pytest.mark.parametrize("profile_fixture", ["dsh_profile", "dsh_native_api_profile"])
+def test_postinstall_include_drift_preserves_saved_connection_and_credentials(
+    request, profile_fixture, tmp_path, monkeypatch
+):
+    from powercontext.cli import dsh
+    from powercontext.cli.authorization import credential_path, write_stored_authorization
+
+    profile = request.getfixturevalue(profile_fixture)
+    source = plugin_source(tmp_path)
+    clients = tmp_path / "clients.json"
+    clients.write_text('{"version":1,"hosts":{"dsh":{"server_url":"https://saved.example"}}}')
+    credentials = credential_path("dsh")
+    write_stored_authorization(credentials, server_url="https://saved.example", value="saved-token")
+    original = {path: path.read_bytes() for path in (clients, credentials)}
+    monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("POWERCONTEXT_DSH_AUTHORIZATION", "Bearer new-secret-token")
+
+    def install(*_args):
+        shutil.copytree(source, profile / "node_modules/powercontext-dsh")
+        (profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": ["powercontext-dsh"]}}}))
+        (profile / "included.json").write_text(
+            json.dumps([
+                {
+                    "id": "powercontext-dsh",
+                    "name": "powercontext-dsh",
+                    "config": {"baseUrl": "https://unexpected.example"},
+                }
+            ])
+        )
+        write_patch(
+            profile,
+            json.dumps([
+                {
+                    "insert": [
+                        {
+                            "id": "drift-include",
+                            "name": "cordis:include",
+                            "config": {"path": "./included.json"},
+                        }
+                    ]
+                }
+            ]),
+        )
+        return ""
+
+    # Actual native parsing follows an injected change at the installation boundary.
+    monkeypatch.setattr(dsh, "_run_dsh", install)
+    result = CliRunner().invoke(
+        create_cli([setup_app]),
+        ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+    )
+    assert result.exit_code == 1
+    assert "resulting configuration" in result.output
+    assert "Multiple PowerContext entries" in result.output
+    assert "secret-token" not in result.output
+    assert {path: path.read_bytes() for path in original} == original
 
 
 def test_candidate_bundle_is_checked_before_install(dsh_profile, tmp_path, monkeypatch):
@@ -602,10 +970,10 @@ def test_version_exemption_keeps_third_party_transport_overrides(dsh_native_api_
 
 @pytest.mark.parametrize("available", ["module", "missing"])
 def test_unavailable_host_configuration_apis_give_recovery_guidance(dsh_native_api_profile, tmp_path, available):
-    entry = tmp_path / "carrier/node_modules/@deepseek-ai/dsh-app-boot/index.js"
+    package = tmp_path / "carrier/node_modules/@deepseek-ai/dsh-app-boot"
+    (package / "package.json").write_text(json.dumps({"type": "module", "main": "index.js"}))
+    entry = package / "index.js"
     if available == "module":
         entry.write_text("export {}\n")
-    else:
-        entry.unlink()
     with pytest.raises(ValueError, match="upgrade or reinstall DSH"):
         read_dsh_settings()
