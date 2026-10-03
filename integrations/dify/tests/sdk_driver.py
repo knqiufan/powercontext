@@ -48,9 +48,9 @@ def invoke(registry, job):
     )
     parameters = job.get("parameters", {})
     if job.get("host_cast"):
-        from host_helpers import cast_parameters
+        from host_helpers import cast_parameters, daemon_tools
 
-        parameters = cast_parameters(declaration, parameters)
+        parameters = cast_parameters(daemon_tools(registry)[job["tool"]], parameters)
     messages = list(entry.invoke(parameters))
     envelope = next(message.message.json_object for message in messages if message.type.value == "json")
     variables = {

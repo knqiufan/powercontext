@@ -161,16 +161,34 @@ jobs:
             api/core/entities/parameter_entities.py
             api/core/plugin/entities/parameters.py
             api/core/tools/__base/tool.py
+            api/core/tools/entities/common_entities.py
+            api/core/tools/entities/tool_entities.py
+            docker/docker-compose.yaml
             web/app/components/workflow/nodes/tool/default.ts
             web/app/components/workflow/nodes/tool/output-schema-utils.ts
             web/app/components/workflow/nodes/_base/components/variable/utils.ts
 
+      - name: Check out the default Dify plugin daemon entities
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: langgenius/dify-plugin-daemon
+          ref: 1310a18b2f6bc6f18768a0a6265484830891433c # 0.6.10 (Dify 1.17.1 compose default)
+          path: .artifacts/dify-daemon
+          persist-credentials: false
+
+      - name: Set up Go for daemon entity serialization
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .artifacts/dify-daemon/go.mod
+          cache-dependency-path: .artifacts/dify-daemon/go.sum
+
       - name: Set up project tools
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
 
-      - name: Check host casting, Workflow selectors, SDK tools and HTTP readback
+      - name: Check daemon serialization, host casting, Workflow selectors and SDK HTTP readback
         env:
           POWERCONTEXT_DIFY_SOURCE: ${{ github.workspace }}/.artifacts/dify-host
+          POWERCONTEXT_DIFY_DAEMON_SOURCE: ${{ github.workspace }}/.artifacts/dify-daemon
         run: make dify-test
 
   hermes-skills:

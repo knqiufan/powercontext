@@ -48,6 +48,9 @@ class SdkDriver:
         return {
             "tool": name,
             "parameters": parameters,
+            "host_cast": bool(
+                os.environ.get("POWERCONTEXT_DIFY_SOURCE") and os.environ.get("POWERCONTEXT_DIFY_DAEMON_SOURCE")
+            ),
             "credentials": {
                 "server_url": self.server_url,
                 "api_token": TOKEN,
@@ -64,8 +67,13 @@ class SdkDriver:
         assert line, f"SDK test driver exited with {self.process.poll()}"
         return json.loads(line)
 
-    def call(self, name: str, scope_id: str, parameters: dict[str, Any], *, host_cast: bool = False) -> dict[str, Any]:
-        result = self.batch([{**self.job(name, scope_id, parameters), "host_cast": host_cast}])[0]
+    def call(
+        self, name: str, scope_id: str, parameters: dict[str, Any], *, host_cast: bool | None = None
+    ) -> dict[str, Any]:
+        job = self.job(name, scope_id, parameters)
+        if host_cast is not None:
+            job["host_cast"] = host_cast
+        result = self.batch([job])[0]
         assert result["ok"], json.dumps(result, ensure_ascii=False)
         self.called.add(name)
         return result["data"]
@@ -149,7 +157,7 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
     sdk, http, a, b = sdk_http
     remembered = sdk.call("pc_remember", a, {"kind": "decision", "text": "中文固定范围验收: use scoped HTTP."})
     citation = remembered["entry"]["citation"]
-    assert sdk.call("pc_memory_get", a, {"citation": citation})["text"].startswith("中文")
+    assert sdk.call("pc_memory_get", a, {"citation": json.dumps(citation)})["text"].startswith("中文")
     assert sdk.call("pc_memory_list", a, {})["entries"]
     assert sdk.call("pc_search", a, {"query": "中文固定范围验收", "mode": "fts"})["hits"]
     context = sdk.call("pc_prepare_context", a, {"query": "中文固定范围验收"})
@@ -160,12 +168,12 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
         "pc_memory_revise",
         a,
         {
-            "citation": citation,
+            "citation": json.dumps(citation),
             "kind": "constraint",
             "text": "中文固定范围验收: Scope credentials stay fixed.",
         },
     )
-    assert sdk.call("pc_memory_get", a, {"citation": revised["entry"]["citation"]})["kind"] == "constraint"
+    assert sdk.call("pc_memory_get", a, {"citation": json.dumps(revised["entry"]["citation"])})["kind"] == "constraint"
 
     captured = sdk.call(
         "pc_capture_source",
@@ -182,7 +190,7 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
         "pc_handoff_activate",
         a,
         {
-            "boundary_source": source,
+            "boundary_source": json.dumps(source),
             "objective": "Continue the verified integration.",
         },
     )
@@ -192,7 +200,7 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
         a,
         {
             "objective": "Transfer the integration state.",
-            "evidence": evidence,
+            "evidence": json.dumps(evidence),
         },
     )
     prepared = sdk.call("pc_handoff_finalize", a, {"draft": json.dumps(draft, ensure_ascii=False)})
@@ -205,8 +213,8 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
         },
     )
     assert temporary["status"] == "resolved"
-    committed = sdk.call("pc_handoff_commit", a, {"handoff": prepared})
-    exact = sdk.call("pc_handoff_continue", a, {"selection": "exact", "revision": committed["reference"]})
+    committed = sdk.call("pc_handoff_commit", a, {"handoff": json.dumps(prepared)})
+    exact = sdk.call("pc_handoff_continue", a, {"selection": "exact", "revision": json.dumps(committed["reference"])})
     latest = sdk.call("pc_handoff_continue", a, {"selection": "latest"})
     assert exact["content"] == latest["content"]
     assert "中文交接状态" in json.dumps(exact, ensure_ascii=False)
@@ -216,7 +224,7 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
     assert generated["status"] == "pending"
     inspected = sdk.call("pc_review_get", a, {"candidate_id": candidate["candidate_id"]})
     assert inspected["candidate_id"] == candidate["candidate_id"]
-    page = sdk.call("pc_review_list", a, {"family": "experience"})
+    page = sdk.call("pc_review_list", a, {"family": '"experience"'})
     assert candidate["candidate_id"] in {item["candidate_id"] for item in page["candidates"]}
 
     # Approval belongs to the administrator, not to the 19-tool plugin.
@@ -230,14 +238,14 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
     )
     assert approved.status_code == 200, approved.text
     experience_ref = approved.json()["result_artifact"]
-    experience = sdk.call("pc_experience_get", a, {"artifact": experience_ref})
+    experience = sdk.call("pc_experience_get", a, {"artifact": json.dumps(experience_ref)})
     assert experience["artifact"] == experience_ref
     skill_candidate = sdk.call(
         "pc_skill_generate",
         a,
         {
             "origin": "experience",
-            "artifact_refs": [experience_ref],
+            "artifact_refs": json.dumps([experience_ref]),
         },
     )["candidate"]
     approved = http.post(
@@ -253,8 +261,8 @@ def test_all_19_sdk_tools_preserve_memory_handoff_and_candidate_readback(sdk_htt
     skill = sdk.call("pc_skill_get", a, {"artifact": json.dumps(skill_ref)})
     assert skill["artifact"] == skill_ref
 
-    retirement = sdk.call("pc_memory_retire", a, {"citation": revised["entry"]["citation"]})
-    retired = sdk.call("pc_memory_get", a, {"citation": retirement["entry"]["citation"]})
+    retirement = sdk.call("pc_memory_retire", a, {"citation": json.dumps(revised["entry"]["citation"])})
+    retired = sdk.call("pc_memory_get", a, {"citation": json.dumps(retirement["entry"]["citation"])})
     assert retired["state"] == "inactive"
     assert sdk.call("pc_search", b, {"query": "中文固定范围验收", "mode": "fts"})["hits"] == []
     catalog = json.loads((DIFY / "plugin/powercontext_dify/contract.json").read_text(encoding="utf-8"))["tools"]
@@ -277,7 +285,10 @@ def test_sdk_concurrent_scopes_and_rejected_credentials(sdk_http) -> None:
     assert [result["error"]["code"] for result in results] == ["authentication_failed", "not_found"]
 
 
-@pytest.mark.skipif(not os.environ.get("POWERCONTEXT_DIFY_SOURCE"), reason="Set the pinned Dify source path")
+@pytest.mark.skipif(
+    not (os.environ.get("POWERCONTEXT_DIFY_SOURCE") and os.environ.get("POWERCONTEXT_DIFY_DAEMON_SOURCE")),
+    reason="Set the pinned Dify and daemon source paths",
+)
 def test_host_cast_nullable_inputs_preserve_handoff_and_generation_readback(sdk_http) -> None:
     sdk, _http, scope, _other = sdk_http
     source = sdk.call(
@@ -286,10 +297,10 @@ def test_host_cast_nullable_inputs_preserve_handoff_and_generation_readback(sdk_
     draft = sdk.call(
         "pc_handoff_prepare",
         scope,
-        {"objective": "Continue verified work.", "evidence": [{"kind": "source", "source_ref": source}]},
+        {"objective": "Continue verified work.", "evidence": json.dumps([{"kind": "source", "source_ref": source}])},
     )
-    prepared = sdk.call("pc_handoff_finalize", scope, {"draft": draft})
-    committed = sdk.call("pc_handoff_commit", scope, {"handoff": prepared})
+    prepared = sdk.call("pc_handoff_finalize", scope, {"draft": json.dumps(draft)})
+    committed = sdk.call("pc_handoff_commit", scope, {"handoff": json.dumps(prepared)})
     direct = sdk.call("pc_handoff_continue", scope, {"selection": "latest"})
     for selection, handoff, revision in (
         ("latest", None, None),
@@ -299,14 +310,14 @@ def test_host_cast_nullable_inputs_preserve_handoff_and_generation_readback(sdk_
         continued = sdk.call(
             "pc_handoff_continue",
             scope,
-            {"selection": selection, "prepared": handoff, "revision": revision},
+            {"selection": selection, "prepared": json.dumps(handoff), "revision": json.dumps(revision)},
             host_cast=True,
         )
         assert continued["status"] == "resolved"
         assert continued["content"] == direct["content"]
 
     for tool in ("pc_experience_generate", "pc_skill_generate"):
-        parameters = {"source_refs": [source], "target": None, "reason": None}
+        parameters = {"source_refs": json.dumps([source]), "target": "null", "reason": "null"}
         if tool == "pc_skill_generate":
             parameters["origin"] = "source"
         generated = sdk.call(tool, scope, parameters, host_cast=True)
@@ -315,5 +326,5 @@ def test_host_cast_nullable_inputs_preserve_handoff_and_generation_readback(sdk_
         inspected = sdk.call("pc_review_get", scope, {"candidate_id": candidate["candidate_id"]})
         assert inspected["candidate_id"] == candidate["candidate_id"]
         assert inspected["target"] is None
-    page = sdk.call("pc_review_list", scope, {"family": None, "cursor": None}, host_cast=True)
+    page = sdk.call("pc_review_list", scope, {"family": "null", "cursor": "null"}, host_cast=True)
     assert {candidate["family"] for candidate in page["candidates"]} == {"experience", "skill"}

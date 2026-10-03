@@ -187,9 +187,10 @@ def build():
         "api_version": spec["info"]["version"],
         "operations": operations,
         "tools": {name: values[0] for name, values in TOOLS.items()},
+        "json_parameters": {},
         "components": {"schemas": {name: json_schema(schemas[name]) for name in sorted(used)}},
     }
-    outputs = {PLUGIN / "powercontext_dify/contract.json": json.dumps(contract, ensure_ascii=False, indent=2) + "\n"}
+    outputs = {}
     header = "\n".join(Path(__file__).read_text(encoding="utf-8").splitlines()[:13]) + "\n\n"
     for name, (operation_id, english, chinese) in TOOLS.items():
         request = schemas[operations[operation_id]["request"]["$ref"].rsplit("/", 1)[-1]]
@@ -206,32 +207,55 @@ def build():
             for key in ("source_refs", "artifact_refs"):
                 params[key]["default"] = []
         parameters = []
+        json_parameters = []
         for key, schema in params.items():
             resolved = inline(schema)
             kind = resolved.get("type", "string")
             enum = resolved.get("enum")
             chinese_label, description = PARAMETERS[key]
+            human_description = description
+            encoded = kind in {"object", "array"} or resolved.get("nullable")
+            if encoded:
+                json_parameters.append(key)
+                human_description += (
+                    " Supply one JSON-encoded text value. Strings include JSON quotes; null is the text null."
+                    " Omit unused optional inputs and preserve every field."
+                )
+                description += (
+                    " Pass one JSON-encoded value as text, never a native object/array/null."
+                    " Encode strings with JSON quotes; use the text null for null; omit optional inputs when unused."
+                    " Decode exactly once and preserve every field. Decoded JSON Schema: "
+                    + json.dumps(json_schema(resolved), ensure_ascii=False, separators=(",", ":"))
+                )
             param = {
                 "name": key,
-                "type": "select" if enum else {"integer": "number"}.get(kind, kind),
+                "type": "string" if encoded else "select" if enum else {"integer": "number"}.get(kind, kind),
                 "required": key in request.get("required", []) and "default" not in schema,
                 "form": "llm",
                 "label": {"en_US": key, "zh_Hans": chinese_label},
-                "human_description": {"en_US": description, "zh_Hans": f"{chinese_label}；按工具契约保留完整值。"},
+                "human_description": {
+                    "en_US": human_description,
+                    "zh_Hans": f"{chinese_label}；"
+                    + (
+                        "填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；"
+                        "可选参数不用时省略，保留所有字段。"
+                        if encoded
+                        else "按工具契约保留完整值。"
+                    ),
+                },
                 "llm_description": description,
             }
-            if enum:
+            if enum and not encoded:
                 param["options"] = [{"value": item, "label": {"en_US": item, "zh_Hans": item}} for item in enum]
-            if resolved.get("nullable"):
-                # OBJECT casts null/invalid strings to {}; ANY preserves them for
-                # the adapter's public-contract validation and JSON decoding.
-                param["type"] = "any"
-            if kind in {"object", "array"} or resolved.get("nullable"):
-                param["input_schema"] = json_schema(resolved)
             for source, target in (("default", "default"), ("minimum", "min"), ("maximum", "max")):
                 if source in schema:
-                    param[target] = schema[source]
+                    param[target] = (
+                        json.dumps(schema[source], ensure_ascii=False)
+                        if encoded and source == "default"
+                        else schema[source]
+                    )
             parameters.append(param)
+        contract["json_parameters"][operation_id] = json_parameters
         (response,) = operations[operation_id]["responses"].values()
         result_schema = json_schema(inline(response))
         # Failure branches emit {}, while successful calls preserve the entire validated response.
@@ -263,6 +287,7 @@ def build():
             f"class {class_name}(tool.PowerContextTool):\n"
             f'    operation = "{operation_id}"\n'
         )
+    outputs[PLUGIN / "powercontext_dify/contract.json"] = json.dumps(contract, ensure_ascii=False, indent=2) + "\n"
     return outputs
 
 

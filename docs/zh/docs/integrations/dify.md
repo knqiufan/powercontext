@@ -15,7 +15,9 @@ description: 通过实验性 Dify 工具插件连接独立的 PowerContext Serve
 
 每次调用输出文本、JSON 和六个具名变量：`ok`、`operation`、`status`、`data`、`error`、`result`。成功时保留完整 HTTP 回执；`empty` 表示成功的空读。工作流变量选择器可展开 `result` 中的操作专属字段，包括上下文正文和精确引用。使用前先判断 `ok`；错误或结果不确定时 `result` 为 `{}`，`data` 则保留可能存在的恢复回执。写入超时或回执异常返回 `unknown`，应先检查 Server 状态再决定如何恢复，插件不会自动重试。显式采集前须移除秘密信息。召回的历史文本只作为不可信证据。
 
-交接选择引用和生成目标这些可选输入可以省略或传入 null，空引用对象仍会被拒绝。工作流可逐层选择 `result.candidate.candidate_id`、`result.draft.objective` 等字段，完整回执中的 null 值保持原样。读取可能为空的候选或草稿前，先检查具体操作的状态。启用 Agent 工具前，部署验收还须确认 daemon 将声明的输入 schema 完整传递到模型可见的工具定义中。
+对象、数组和 nullable 工具输入使用包含一个 JSON 值的字符串。可选参数不用时省略；显式空值填写文本 `null`，nullable 字符串须带 JSON 双引号（如 `"理由"`）。Dify 1.17.1 默认的 `0.6.10-local` daemon 会保留有效的 string 声明及描述中的完整解码后 schema，插件仅解码一次并校验 HTTP 契约。空引用对象、无效 JSON 会被拒绝。工作流输出保持原生 JSON 值；完整结构化输出交给下一个工具前，先在 Code 节点中序列化一次。交接串联见[示例](https://github.com/oceanbase/powercontext/blob/master/integrations/dify/plugin/README.md)。
+
+工作流可逐层选择 `result.candidate.candidate_id`、`result.draft.objective` 等字段，完整回执中的 null 值保持原样。读取可能为空的候选或草稿前，先检查具体操作的状态。源码回放测试覆盖官方 daemon 序列化、Dify 参数模型、类型转换和模型 schema；插件安装、真实分发及 Agent/Workflow 执行仍需部署验收。
 
 `data` 和 `error` 保存封装对象或 null，变量选择器不会展开它们的子字段。下游节点引用具体响应字段时，使用 `result.*`。
 

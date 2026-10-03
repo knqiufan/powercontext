@@ -27,7 +27,7 @@ description:
     task; ordinary questions do not require retrieval.
 parameters:
 - name: source_refs
-  type: array
+  type: string
   required: false
   form: llm
   label:
@@ -35,31 +35,19 @@ parameters:
     zh_Hans: Source 证据引用
   human_description:
     en_US: Exact Source references; combined with artifact_refs there must be 1–32
-      references.
-    zh_Hans: Source 证据引用；按工具契约保留完整值。
-  llm_description: Exact Source references; combined with artifact_refs there must
-    be 1–32 references.
-  input_schema:
-    type: array
-    maxItems: 32
-    description: Exact Source evidence. Counted with artifact_refs toward a combined
-      maximum of 32 references.
-    items:
-      type: object
-      additionalProperties: false
-      required:
-      - name
-      - source_id
-      properties:
-        name:
-          type: string
-          description: Stable Source type.
-        source_id:
-          type: string
-    default: []
-  default: []
+      references. Supply one JSON-encoded text value. Strings include JSON quotes;
+      null is the text null. Omit unused optional inputs and preserve every field.
+    zh_Hans: Source 证据引用；填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；可选参数不用时省略，保留所有字段。
+  llm_description: 'Exact Source references; combined with artifact_refs there must
+    be 1–32 references. Pass one JSON-encoded value as text, never a native object/array/null.
+    Encode strings with JSON quotes; use the text null for null; omit optional inputs
+    when unused. Decode exactly once and preserve every field. Decoded JSON Schema:
+    {"type":"array","maxItems":32,"description":"Exact Source evidence. Counted with
+    artifact_refs toward a combined maximum of 32 references.","items":{"type":"object","additionalProperties":false,"required":["name","source_id"],"properties":{"name":{"type":"string","description":"Stable
+    Source type."},"source_id":{"type":"string"}}},"default":[]}'
+  default: '[]'
 - name: artifact_refs
-  type: array
+  type: string
   required: false
   form: llm
   label:
@@ -67,39 +55,18 @@ parameters:
     zh_Hans: Artifact 证据引用
   human_description:
     en_US: Exact Artifact references; combined with source_refs the maximum is 32.
-    zh_Hans: Artifact 证据引用；按工具契约保留完整值。
-  llm_description: Exact Artifact references; combined with source_refs the maximum
-    is 32.
-  input_schema:
-    type: array
-    maxItems: 32
-    description: Exact Artifact evidence. Counted with source_refs toward a combined
-      maximum of 32 references.
-    items:
-      type: object
-      additionalProperties: false
-      required:
-      - family
-      - artifact_id
-      - revision
-      properties:
-        family:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[\x21-\x7E]+$
-        artifact_id:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[\x21-\x7E]+$
-        revision:
-          type: integer
-          minimum: 1
-    default: []
-  default: []
+      Supply one JSON-encoded text value. Strings include JSON quotes; null is the
+      text null. Omit unused optional inputs and preserve every field.
+    zh_Hans: Artifact 证据引用；填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；可选参数不用时省略，保留所有字段。
+  llm_description: 'Exact Artifact references; combined with source_refs the maximum
+    is 32. Pass one JSON-encoded value as text, never a native object/array/null.
+    Encode strings with JSON quotes; use the text null for null; omit optional inputs
+    when unused. Decode exactly once and preserve every field. Decoded JSON Schema:
+    {"type":"array","maxItems":32,"description":"Exact Artifact evidence. Counted
+    with source_refs toward a combined maximum of 32 references.","items":{"type":"object","additionalProperties":false,"required":["family","artifact_id","revision"],"properties":{"family":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"artifact_id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"revision":{"type":"integer","minimum":1}}},"default":[]}'
+  default: '[]'
 - name: target
-  type: any
+  type: string
   required: false
   form: llm
   label:
@@ -107,50 +74,30 @@ parameters:
     zh_Hans: 已有目标版本
   human_description:
     en_US: Optional exact target Artifact revision; a conflict requires rereading
-      current state.
-    zh_Hans: 已有目标版本；按工具契约保留完整值。
-  llm_description: Optional exact target Artifact revision; a conflict requires rereading
-    current state.
-  input_schema:
-    anyOf:
-    - type: object
-      additionalProperties: false
-      required:
-      - family
-      - artifact_id
-      - revision
-      properties:
-        family:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[\x21-\x7E]+$
-        artifact_id:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[\x21-\x7E]+$
-        revision:
-          type: integer
-          minimum: 1
-    - type: 'null'
+      current state. Supply one JSON-encoded text value. Strings include JSON quotes;
+      null is the text null. Omit unused optional inputs and preserve every field.
+    zh_Hans: 已有目标版本；填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；可选参数不用时省略，保留所有字段。
+  llm_description: 'Optional exact target Artifact revision; a conflict requires rereading
+    current state. Pass one JSON-encoded value as text, never a native object/array/null.
+    Encode strings with JSON quotes; use the text null for null; omit optional inputs
+    when unused. Decode exactly once and preserve every field. Decoded JSON Schema:
+    {"anyOf":[{"type":"object","additionalProperties":false,"required":["family","artifact_id","revision"],"properties":{"family":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"artifact_id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[\\x21-\\x7E]+$"},"revision":{"type":"integer","minimum":1}}},{"type":"null"}]}'
 - name: reason
-  type: any
+  type: string
   required: false
   form: llm
   label:
     en_US: reason
     zh_Hans: 操作原因
   human_description:
-    en_US: Reason for this explicit operation; preserve the user's intent.
-    zh_Hans: 操作原因；按工具契约保留完整值。
-  llm_description: Reason for this explicit operation; preserve the user's intent.
-  input_schema:
-    anyOf:
-    - type: string
-      minLength: 1
-      maxLength: 2000
-    - type: 'null'
+    en_US: Reason for this explicit operation; preserve the user's intent. Supply
+      one JSON-encoded text value. Strings include JSON quotes; null is the text null.
+      Omit unused optional inputs and preserve every field.
+    zh_Hans: 操作原因；填写一次 JSON 序列化后的文本；字符串须带 JSON 双引号，空值填 null；可选参数不用时省略，保留所有字段。
+  llm_description: 'Reason for this explicit operation; preserve the user''s intent.
+    Pass one JSON-encoded value as text, never a native object/array/null. Encode
+    strings with JSON quotes; use the text null for null; omit optional inputs when
+    unused. Decode exactly once and preserve every field. Decoded JSON Schema: {"anyOf":[{"type":"string","minLength":1,"maxLength":2000},{"type":"null"}]}'
 output_schema:
   type: object
   properties:

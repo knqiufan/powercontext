@@ -274,6 +274,68 @@
     "pc_review_list": "list_artifact_candidates",
     "pc_review_get": "get_artifact_candidate"
   },
+  "json_parameters": {
+    "search_memory": [],
+    "list_memory_entries": [],
+    "get_memory_entry": [
+      "citation"
+    ],
+    "remember_memory": [
+      "reason"
+    ],
+    "revise_memory_entry": [
+      "citation",
+      "reason"
+    ],
+    "retire_memory_entry": [
+      "citation",
+      "reason"
+    ],
+    "prepare_context": [],
+    "capture_content_source": [
+      "metadata"
+    ],
+    "activate_handoff": [
+      "boundary_source",
+      "evidence"
+    ],
+    "prepare_handoff": [
+      "evidence"
+    ],
+    "finalize_handoff": [
+      "draft"
+    ],
+    "commit_handoff": [
+      "handoff"
+    ],
+    "continue_handoff": [
+      "prepared",
+      "revision"
+    ],
+    "generate_experience": [
+      "source_refs",
+      "artifact_refs",
+      "target",
+      "reason"
+    ],
+    "get_experience": [
+      "artifact"
+    ],
+    "generate_skill": [
+      "source_refs",
+      "artifact_refs",
+      "target",
+      "reason"
+    ],
+    "get_skill": [
+      "artifact"
+    ],
+    "list_artifact_candidates": [
+      "family",
+      "cursor"
+    ],
+    "get_artifact_candidate": []
+  },
   "components": {
     "schemas": {
       "ActivateHandoffRequest": {
