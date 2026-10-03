@@ -17,6 +17,8 @@
 import json
 import os
 import shutil
+import subprocess
+from pathlib import Path
 from shutil import which
 from unittest.mock import Mock
 
@@ -31,12 +33,14 @@ from powercontext.cli.transport import prepare_setup_transport
 
 
 @pytest.fixture
-def dsh_profile(tmp_path, monkeypatch):
+def dsh_profile(tmp_path, monkeypatch, request):
     """Use a real installed DSH parser, with an entirely disposable profile."""
     import powercontext.cli.dsh as dsh
 
     executable = os.environ.get("DSH_TEST_EXECUTABLE") or which("dsh.cmd" if os.name == "nt" else "dsh")
     if not executable:
+        if request.config.getoption("--require-dsh-runtime"):
+            pytest.fail("Required DSH runtime is unavailable; set DSH_TEST_EXECUTABLE")
         pytest.skip("Native DSH composition requires DSH; set DSH_TEST_EXECUTABLE to select a runtime")
     monkeypatch.setattr(dsh, "dsh_executable", lambda: executable)
     for key in list(os.environ):
@@ -45,6 +49,74 @@ def dsh_profile(tmp_path, monkeypatch):
     monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "clients.json"))
     monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
     monkeypatch.chdir(tmp_path)
+    profile = tmp_path / "dsh/profiles/web"
+    profile.mkdir(parents=True)
+    (profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": []}}}))
+    return profile
+
+
+@pytest.fixture(scope="session")
+def dsh_config_boot(request):
+    """Resolve the pinned native configuration API package independently of the legacy SDK."""
+    location = os.environ.get("DSH_TEST_CONFIG_BOOT")
+    if location is None and (node := which("node")):
+        manifest = (
+            Path(__file__).resolve().parents[1]
+            / "integrations/dsh/plugins/powercontext/tests/config-runtime/package.json"
+        )
+        result = subprocess.run(
+            [
+                node,
+                "--input-type=module",
+                "-e",
+                "import { createRequire } from 'node:module'; "
+                "process.stdout.write(createRequire(process.argv[1]).resolve('@deepseek-ai/dsh-app-boot'))",
+                str(manifest),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            location = result.stdout
+    if not location or not Path(location).is_file():
+        if request.config.getoption("--require-dsh-runtime"):
+            pytest.fail("Required DSH configuration runtime is unavailable; install tests/config-runtime dependencies")
+        pytest.skip("Native DSH compatibility tests require tests/config-runtime dependencies")
+    return Path(location)
+
+
+@pytest.fixture
+def dsh_native_api_profile(dsh_config_boot, tmp_path, monkeypatch):
+    """Use native 0.2 configuration APIs with a synthetic carrier and disposable profile."""
+    import powercontext.cli.dsh as dsh
+
+    carrier = tmp_path / "carrier"
+    package = carrier / "node_modules/@deepseek-ai/dsh"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text(
+        json.dumps({
+            "name": "@deepseek-ai/dsh",
+            "dependencies": {
+                "@deepseek-ai/dsh-app-boot": "0.2.0-rc.2",
+                "@deepseek-ai/dsh-plugin-manager": "0.2.0-rc.2",
+            },
+        })
+    )
+    boot = package.parent / "dsh-app-boot"
+    boot.mkdir()
+    (boot / "package.json").write_text(json.dumps({"type": "module", "main": "index.js"}))
+    (boot / "index.js").write_text(f"export * from {json.dumps(dsh_config_boot.as_uri())}\n")
+    executable = carrier / "dsh"
+    executable.write_text("// Configuration inspection fixture; not an executable host.\n")
+    monkeypatch.setattr(dsh, "dsh_executable", lambda: str(executable))
+    for key in list(os.environ):
+        if key.startswith("POWERCONTEXT_") or key == "DSH_PROFILE":
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "clients.json"))
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
     profile = tmp_path / "dsh/profiles/web"
     profile.mkdir(parents=True)
     (profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": []}}}))
@@ -286,3 +358,161 @@ def test_current_transport_does_not_activate_an_inactive_dependency(dsh_profile,
     assert read_dsh_settings(require_installed=True) == {}
     assert resolve_host_transport("dsh") == ("http://127.0.0.1:8000", False)
     assert manifest.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("settings", "arguments", "reason"),
+    [
+        ({"baseUrl": "https://native.example"}, ["--server-url", "https://selected.example"], "baseUrl conflicts"),
+        ({"baseUrl": "http://remote.example"}, [], "Remote HTTP"),
+        (
+            {"baseUrl": "http://remote.example", "allowInsecureHttp": False},
+            ["--allow-insecure-http"],
+            "HTTP consent",
+        ),
+        (
+            {"baseUrl": "https://selected.example", "allowInsecureHttp": True},
+            ["--no-allow-insecure-http"],
+            "HTTP consent",
+        ),
+    ],
+)
+def test_setup_transport_refusal_preserves_saved_state_without_a_native_runtime(
+    tmp_path, monkeypatch, settings, arguments, reason
+):
+    from powercontext.cli import dsh, dsh_transport
+    from powercontext.cli.authorization import credential_path, write_stored_authorization
+
+    for key in list(os.environ):
+        if key.startswith("POWERCONTEXT_"):
+            monkeypatch.delenv(key)
+    clients = tmp_path / "clients.json"
+    clients.write_text('{"version":1,"hosts":{"dsh":{"server_url":"https://saved.example"}}}')
+    monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(clients))
+    monkeypatch.setattr(dsh_transport, "read_dsh_settings", lambda **_options: settings)
+    installer = Mock()
+    monkeypatch.setattr(dsh, "install_dsh_plugin", installer)
+    original = clients.read_bytes()
+    credentials = credential_path("dsh")
+    write_stored_authorization(credentials, server_url="https://saved.example", value="saved-token")
+    original_credentials = credentials.read_bytes()
+
+    if "--server-url" not in arguments:
+        arguments = ["--server-url", settings["baseUrl"], *arguments]
+    result = CliRunner().invoke(create_cli([setup_app]), ["setup", "dsh", "--json", *arguments])
+
+    assert result.exit_code == 1
+    assert reason in result.output
+    installer.assert_not_called()
+    assert clients.read_bytes() == original
+    assert credentials.read_bytes() == original_credentials
+
+
+def test_matching_native_transport_is_accepted_without_a_native_runtime(monkeypatch):
+    from powercontext.cli import dsh_transport
+
+    for key in list(os.environ):
+        if key.startswith("POWERCONTEXT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("DSH_PROFILE", "custom")
+    monkeypatch.setattr(
+        dsh_transport,
+        "read_dsh_settings",
+        lambda **_options: {"baseUrl": "http://remote.example", "allowInsecureHttp": True},
+    )
+    transport = prepare_setup_transport("dsh", server_url="http://remote.example/", json_output=True)
+    assert transport.server_url == "http://remote.example"
+    assert transport.allow_insecure_http is True
+
+
+def compatibility_profile(profile, tmp_path, *, incompatible="custom-bundle"):
+    source = plugin_source(tmp_path)
+    metadata = json.loads((source / "package.json").read_text())
+    metadata["version"] = "1.0.0"
+    if incompatible == "powercontext-dsh":
+        metadata["peerDependencies"] = {"@deepseek-ai/dsh-app-boot": "999.0.0"}
+    (source / "package.json").write_text(json.dumps(metadata))
+    shutil.copytree(source, profile / "node_modules/powercontext-dsh")
+    custom = profile / "node_modules/custom-bundle"
+    custom.mkdir()
+    metadata = {"name": "custom-bundle", "version": "1.0.0", "dsh": {"bundle": {"patch": "cordis.patch.yml"}}}
+    if incompatible == "custom-bundle":
+        metadata["peerDependencies"] = {"@deepseek-ai/dsh-app-boot": "999.0.0"}
+    (custom / "package.json").write_text(json.dumps(metadata))
+    (custom / "cordis.patch.yml").write_text(
+        "- id: powercontext-dsh\n  config:\n    baseUrl: https://unexpected.example\n"
+    )
+    (profile / "package.json").write_text(
+        json.dumps({
+            "dependencies": {"powercontext-dsh": f"link:{source.as_posix()}", "custom-bundle": "1.0.0"},
+            "dsh": {"profile": {"bundles": ["powercontext-dsh", "custom-bundle"]}},
+        })
+    )
+    return source
+
+
+def test_incompatible_third_party_bundle_is_excluded_from_first_and_repeated_setup(
+    dsh_native_api_profile, tmp_path, monkeypatch
+):
+    from powercontext.cli import dsh
+
+    profile = dsh_native_api_profile
+    source = compatibility_profile(profile, tmp_path)
+    original = {path: path.read_bytes() for path in profile.rglob("*") if path.is_file()}
+    monkeypatch.setattr(dsh, "_run_dsh", Mock(return_value="id: powercontext-dsh\n"))
+    for _ in range(2):
+        result = CliRunner().invoke(
+            create_cli([setup_app]),
+            ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["plugin"] == "powercontext-dsh"
+        assert "incompatible third-party bundle" in result.stderr
+        assert json.loads((tmp_path / "clients.json").read_text())["hosts"]["dsh"]["server_url"] == (
+            "https://selected.example"
+        )
+    assert {path: path.read_bytes() for path in profile.rglob("*") if path.is_file()} == original
+
+
+def test_incompatible_powercontext_still_fails_before_installation(dsh_native_api_profile, tmp_path, monkeypatch):
+    from powercontext.cli import dsh
+
+    source = compatibility_profile(dsh_native_api_profile, tmp_path, incompatible="powercontext-dsh")
+    installer = Mock()
+    monkeypatch.setattr(dsh, "_run_dsh", installer)
+    result = CliRunner().invoke(
+        create_cli([setup_app]),
+        ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+    )
+    assert result.exit_code == 1
+    assert "PowerContext is incompatible" in result.output
+    installer.assert_not_called()
+    assert not (tmp_path / "clients.json").exists()
+
+
+def test_version_exemption_keeps_third_party_transport_overrides(dsh_native_api_profile, tmp_path, monkeypatch):
+    from powercontext.cli import dsh
+
+    source = compatibility_profile(dsh_native_api_profile, tmp_path)
+    (dsh_native_api_profile / "compatibility.json").write_text(json.dumps({"custom-bundle@1.0.0": ["0.2.0-rc.2"]}))
+    installer = Mock()
+    monkeypatch.setattr(dsh, "_run_dsh", installer)
+    result = CliRunner().invoke(
+        create_cli([setup_app]),
+        ["setup", "dsh", "--source", str(source), "--server-url", "https://selected.example", "--json"],
+    )
+    assert result.exit_code == 1
+    assert "baseUrl conflicts" in result.output
+    installer.assert_not_called()
+    assert not (tmp_path / "clients.json").exists()
+
+
+@pytest.mark.parametrize("available", ["module", "missing"])
+def test_unavailable_host_configuration_apis_give_recovery_guidance(dsh_native_api_profile, tmp_path, available):
+    entry = tmp_path / "carrier/node_modules/@deepseek-ai/dsh-app-boot/index.js"
+    if available == "module":
+        entry.write_text("export {}\n")
+    else:
+        entry.unlink()
+    with pytest.raises(ValueError, match="upgrade or reinstall DSH"):
+        read_dsh_settings()
