@@ -61,6 +61,109 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        memory:
+          $ref: '#/definitions/Result/properties/memory'
+          type: object
+          properties:
+            family:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/family'
+              type: string
+            artifact_id:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/artifact_id'
+              type: string
+            revision:
+              $ref: '#/definitions/Result/properties/memory/anyOf/0/properties/revision'
+              type: number
+        entries:
+          $ref: '#/definitions/Result/properties/entries'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/entries/items'
+            type: object
+            properties:
+              citation:
+                $ref: '#/definitions/Result/properties/entries/items/properties/citation'
+                type: object
+                properties:
+                  memory_ref:
+                    $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/memory_ref'
+                    type: object
+                    properties:
+                      family:
+                        $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/memory_ref/properties/family'
+                        type: string
+                      artifact_id:
+                        $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/memory_ref/properties/artifact_id'
+                        type: string
+                      revision:
+                        $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/memory_ref/properties/revision'
+                        type: number
+                  entry_id:
+                    $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/entry_id'
+                    type: string
+                  entry_version_id:
+                    $ref: '#/definitions/Result/properties/entries/items/properties/citation/properties/entry_version_id'
+                    type: string
+              version:
+                $ref: '#/definitions/Result/properties/entries/items/properties/version'
+                type: number
+              kind:
+                $ref: '#/definitions/Result/properties/entries/items/properties/kind'
+                type: string
+              text:
+                $ref: '#/definitions/Result/properties/entries/items/properties/text'
+                type: string
+              state:
+                $ref: '#/definitions/Result/properties/entries/items/properties/state'
+                type: string
+                enum: &id001
+                - active
+                - inactive
+              source_refs:
+                $ref: '#/definitions/Result/properties/entries/items/properties/source_refs'
+                type: array
+                items:
+                  $ref: '#/definitions/Result/properties/entries/items/properties/source_refs/items'
+                  type: object
+                  properties:
+                    name:
+                      $ref: '#/definitions/Result/properties/entries/items/properties/source_refs/items/properties/name'
+                      type: string
+                      description: Stable Source type.
+                    source_id:
+                      $ref: '#/definitions/Result/properties/entries/items/properties/source_refs/items/properties/source_id'
+                      type: string
+              artifact_refs:
+                $ref: '#/definitions/Result/properties/entries/items/properties/artifact_refs'
+                type: array
+                items:
+                  $ref: '#/definitions/Result/properties/entries/items/properties/artifact_refs/items'
+                  type: object
+                  properties:
+                    family:
+                      $ref: '#/definitions/Result/properties/entries/items/properties/artifact_refs/items/properties/family'
+                      type: string
+                    artifact_id:
+                      $ref: '#/definitions/Result/properties/entries/items/properties/artifact_refs/items/properties/artifact_id'
+                      type: string
+                    revision:
+                      $ref: '#/definitions/Result/properties/entries/items/properties/artifact_refs/items/properties/revision'
+                      type: number
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -149,9 +252,7 @@ output_schema:
                 type: string
               state:
                 type: string
-                enum:
-                - active
-                - inactive
+                enum: *id001
               source_refs:
                 type: array
                 items:
@@ -191,13 +292,6 @@ output_schema:
                       minimum: 1
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_memory_list.py

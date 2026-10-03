@@ -76,7 +76,7 @@ parameters:
   llm_description: 'Curated Memory text: nonblank after NFC/trim and at most 8192
     UTF-8 bytes.'
 - name: reason
-  type: string
+  type: any
   required: false
   form: llm
   label:
@@ -86,6 +86,11 @@ parameters:
     en_US: Reason for this explicit operation; preserve the user's intent.
     zh_Hans: 操作原因；按工具契约保留完整值。
   llm_description: Reason for this explicit operation; preserve the user's intent.
+  input_schema:
+    anyOf:
+    - type: string
+      maxLength: 512
+    - type: 'null'
 output_schema:
   type: object
   properties:
@@ -109,6 +114,106 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        memory:
+          $ref: '#/definitions/Result/properties/memory'
+          type: object
+          properties:
+            family:
+              $ref: '#/definitions/Result/properties/memory/properties/family'
+              type: string
+            artifact_id:
+              $ref: '#/definitions/Result/properties/memory/properties/artifact_id'
+              type: string
+            revision:
+              $ref: '#/definitions/Result/properties/memory/properties/revision'
+              type: number
+        entry:
+          $ref: '#/definitions/Result/properties/entry'
+          type: object
+          properties:
+            citation:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation'
+              type: object
+              properties:
+                memory_ref:
+                  $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/memory_ref'
+                  type: object
+                  properties:
+                    family:
+                      $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/memory_ref/properties/family'
+                      type: string
+                    artifact_id:
+                      $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/memory_ref/properties/artifact_id'
+                      type: string
+                    revision:
+                      $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/memory_ref/properties/revision'
+                      type: number
+                entry_id:
+                  $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/entry_id'
+                  type: string
+                entry_version_id:
+                  $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/citation/properties/entry_version_id'
+                  type: string
+            version:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/version'
+              type: number
+            kind:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/kind'
+              type: string
+            text:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/text'
+              type: string
+            state:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/state'
+              type: string
+              enum: &id001
+              - active
+              - inactive
+            source_refs:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/source_refs'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/source_refs/items'
+                type: object
+                properties:
+                  name:
+                    $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/source_refs/items/properties/name'
+                    type: string
+                    description: Stable Source type.
+                  source_id:
+                    $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/source_refs/items/properties/source_id'
+                    type: string
+            artifact_refs:
+              $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/artifact_refs'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/artifact_refs/items'
+                type: object
+                properties:
+                  family:
+                    $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/artifact_refs/items/properties/family'
+                    type: string
+                  artifact_id:
+                    $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/artifact_refs/items/properties/artifact_id'
+                    type: string
+                  revision:
+                    $ref: '#/definitions/Result/properties/entry/anyOf/0/properties/artifact_refs/items/properties/revision'
+                    type: number
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -194,9 +299,7 @@ output_schema:
                 type: string
               state:
                 type: string
-                enum:
-                - active
-                - inactive
+                enum: *id001
               source_refs:
                 type: array
                 items:
@@ -237,13 +340,6 @@ output_schema:
           - type: 'null'
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_remember.py

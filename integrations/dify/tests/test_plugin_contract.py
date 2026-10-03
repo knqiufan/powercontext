@@ -95,13 +95,14 @@ def test_sdk_registers_exact_catalog_and_native_objects(registry):
 def test_workflow_results_expose_context_references_and_complete_handoffs(registry):
     _, _, loaded = registry.tools_mapping["powercontext"]
     for declaration, _ in loaded.values():
+        Draft7Validator.check_schema(declaration.output_schema)
         result = declaration.output_schema["properties"]["result"]
         assert result["type"] == "object"
         assert result["properties"]
         # A workflow must also be able to route an unsuccessful call with an empty result.
-        Draft7Validator(result).validate({})
+        Draft7Validator({**declaration.output_schema, **result}).validate({})
     context = loaded["pc_prepare_context"][0].output_schema["properties"]["result"]
-    content = Draft7Validator(context["properties"]["content"])
+    content = Draft7Validator({**loaded["pc_prepare_context"][0].output_schema, **context["properties"]["content"]})
     content.validate("已保留的上下文")
     content.validate(None)
     memory = loaded["pc_memory_get"][0].output_schema["properties"]["result"]
@@ -110,6 +111,31 @@ def test_workflow_results_expose_context_references_and_complete_handoffs(regist
     assert {"objective", "state", "disposition", "next_action", "omissions"} <= draft["properties"].keys()
     prepared = loaded["pc_handoff_finalize"][0].output_schema["properties"]["result"]
     assert {"schema", "scope_id", "base", "content"} <= prepared["properties"].keys()
+
+
+def test_workflow_rendering_keeps_nullable_values_and_integer_revision_validation(registry):
+    _, _, loaded = registry.tools_mapping["powercontext"]
+    for tool, field in (
+        ("pc_experience_generate", "candidate"),
+        ("pc_handoff_activate", "draft"),
+        ("pc_handoff_prepare", "next_action"),
+    ):
+        schema = loaded[tool][0].output_schema
+        validator = Draft7Validator({**schema, "$ref": f"#/properties/result/properties/{field}"})
+        validator.validate(None)
+        assert not validator.is_valid("malformed object")
+    schema = loaded["pc_handoff_commit"][0].output_schema
+    revision = Draft7Validator({**schema, "$ref": "#/properties/result/properties/reference/properties/revision"})
+    revision.validate(2)
+    assert not revision.is_valid(2.5)
+    assert not revision.is_valid(True)
+
+
+def test_nullable_candidate_receipt_stays_null_through_sdk_messages(registry, transport):
+    receipt = {"status": "no_op", "candidate": None}
+    transport(lambda _request: httpx.Response(200, json=receipt))
+    result = run(registry, "pc_experience_generate", {"source_refs": [{"name": "content", "source_id": "turn-1"}]})
+    assert result["ok"] is True and result["data"] == receipt
 
 
 @pytest.mark.parametrize("empty", [False, True])

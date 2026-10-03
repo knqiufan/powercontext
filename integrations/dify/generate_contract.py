@@ -102,6 +102,34 @@ def json_schema(value):
     return {"anyOf": [result, {"type": "null"}]} if value.get("nullable") else result
 
 
+def workflow_schema(schema, reference):
+    """Expose traversable Dify metadata without changing Draft 7 validation or values."""
+    shape = schema
+    shape_reference = reference
+    if "anyOf" in schema:
+        (non_null,) = [(index, part) for index, part in enumerate(schema["anyOf"]) if part.get("type") != "null"]
+        index, shape = non_null
+        shape_reference += f"/anyOf/{index}"
+    # Draft 7 validates the canonical $ref and ignores these rendering siblings.
+    # Dify 1.17.1 instead reads type/properties directly, including nested fields.
+    display = {"$ref": reference}
+    if "type" in shape:
+        display["type"] = "number" if shape["type"] == "integer" else shape["type"]
+    elif "oneOf" in shape and all(part.get("type") == "object" for part in shape["oneOf"]):
+        display["type"] = "object"
+    if "properties" in shape:
+        display["properties"] = {
+            key: workflow_schema(value, shape_reference + "/properties/" + key.replace("~", "~0").replace("/", "~1"))
+            for key, value in shape["properties"].items()
+        }
+    if "items" in shape:
+        display["items"] = workflow_schema(shape["items"], shape_reference + "/items")
+    for key in ("description", "enum"):
+        if key in shape:
+            display[key] = shape[key]
+    return display
+
+
 def build():
     # Canonical LF text makes generated contracts identical across Git's Windows checkouts.
     raw = (ROOT / "openapi/powercontext.yaml").read_text(encoding="utf-8").encode("utf-8")
@@ -173,7 +201,7 @@ def build():
         if "kind" in params:
             params["kind"]["enum"] = KINDS
         if name == "pc_review_list":
-            params["family"] = {"type": "string", "enum": ["experience", "skill"]}
+            params["family"] = {"type": "string", "enum": ["experience", "skill"], "nullable": True}
         if name in {"pc_experience_generate", "pc_skill_generate"}:
             for key in ("source_refs", "artifact_refs"):
                 params[key]["default"] = []
@@ -194,7 +222,11 @@ def build():
             }
             if enum:
                 param["options"] = [{"value": item, "label": {"en_US": item, "zh_Hans": item}} for item in enum]
-            if kind in {"object", "array"}:
+            if resolved.get("nullable"):
+                # OBJECT casts null/invalid strings to {}; ANY preserves them for
+                # the adapter's public-contract validation and JSON decoding.
+                param["type"] = "any"
+            if kind in {"object", "array"} or resolved.get("nullable"):
                 param["input_schema"] = json_schema(resolved)
             for source, target in (("default", "default"), ("minimum", "min"), ("maximum", "max")):
                 if source in schema:
@@ -206,7 +238,9 @@ def build():
         result_schema.pop("required", None)
         result_schema["description"] = "Complete successful HTTP response; empty object on error or unknown outcome."
         output_schema = deepcopy(OUTPUT)
-        output_schema["properties"]["result"] = result_schema
+        output_schema["$schema"] = "http://json-schema.org/draft-07/schema#"
+        output_schema["definitions"] = {"Result": result_schema}
+        output_schema["properties"]["result"] = workflow_schema(result_schema, "#/definitions/Result")
         output_schema["required"].append("result")
         definition = {
             "identity": {"name": name, "author": "knqiufan", "label": {"en_US": name, "zh_Hans": name}},

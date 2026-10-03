@@ -60,25 +60,26 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
       type: object
-      additionalProperties: false
       properties:
         schema:
+          $ref: '#/definitions/Result/properties/schema'
           type: string
-          enum:
+          enum: &id001
           - powercontext.prepared-context.v1
         status:
+          $ref: '#/definitions/Result/properties/status'
           type: string
-          enum:
+          enum: &id002
           - ready
           - empty
         content:
-          anyOf:
-          - type: string
-          - type: 'null'
+          $ref: '#/definitions/Result/properties/content'
+          type: string
         content_bytes:
-          type: integer
-          minimum: 0
+          $ref: '#/definitions/Result/properties/content_bytes'
+          type: number
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
   required:
@@ -88,6 +89,27 @@ output_schema:
   - data
   - error
   - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
+      type: object
+      additionalProperties: false
+      properties:
+        schema:
+          type: string
+          enum: *id001
+        status:
+          type: string
+          enum: *id002
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+        content_bytes:
+          type: integer
+          minimum: 0
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
 extra:
   python:
     source: tools/pc_prepare_context.py

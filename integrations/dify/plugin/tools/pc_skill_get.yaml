@@ -81,6 +81,142 @@ output_schema:
       - object
       - 'null'
     result:
+      $ref: '#/definitions/Result'
+      type: object
+      properties:
+        memory_citations:
+          $ref: '#/definitions/Result/properties/memory_citations'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/memory_citations/items'
+            type: object
+            properties:
+              memory_ref:
+                $ref: '#/definitions/Result/properties/memory_citations/items/properties/memory_ref'
+                type: object
+                properties:
+                  family:
+                    $ref: '#/definitions/Result/properties/memory_citations/items/properties/memory_ref/properties/family'
+                    type: string
+                  artifact_id:
+                    $ref: '#/definitions/Result/properties/memory_citations/items/properties/memory_ref/properties/artifact_id'
+                    type: string
+                  revision:
+                    $ref: '#/definitions/Result/properties/memory_citations/items/properties/memory_ref/properties/revision'
+                    type: number
+              entry_id:
+                $ref: '#/definitions/Result/properties/memory_citations/items/properties/entry_id'
+                type: string
+              entry_version_id:
+                $ref: '#/definitions/Result/properties/memory_citations/items/properties/entry_version_id'
+                type: string
+          description: Exact Memory entry provenance; non-empty only for Experience.
+            Counted toward the combined evidence bound.
+        artifact:
+          $ref: '#/definitions/Result/properties/artifact'
+          type: object
+          properties:
+            family:
+              $ref: '#/definitions/Result/properties/artifact/properties/family'
+              type: string
+            artifact_id:
+              $ref: '#/definitions/Result/properties/artifact/properties/artifact_id'
+              type: string
+            revision:
+              $ref: '#/definitions/Result/properties/artifact/properties/revision'
+              type: number
+        content:
+          $ref: '#/definitions/Result/properties/content'
+          type: object
+          properties:
+            name:
+              $ref: '#/definitions/Result/properties/content/properties/name'
+              type: string
+            description:
+              $ref: '#/definitions/Result/properties/content/properties/description'
+              type: string
+            instructions:
+              $ref: '#/definitions/Result/properties/content/properties/instructions'
+              type: string
+            validation:
+              $ref: '#/definitions/Result/properties/content/properties/validation'
+              type: array
+              items:
+                $ref: '#/definitions/Result/properties/content/properties/validation/items'
+                type: string
+            package:
+              $ref: '#/definitions/Result/properties/content/properties/package'
+              type: object
+              properties:
+                tree_digest:
+                  $ref: '#/definitions/Result/properties/content/properties/package/anyOf/0/properties/tree_digest'
+                  type: string
+                archive_digest:
+                  $ref: '#/definitions/Result/properties/content/properties/package/anyOf/0/properties/archive_digest'
+                  type: string
+                file_count:
+                  $ref: '#/definitions/Result/properties/content/properties/package/anyOf/0/properties/file_count'
+                  type: number
+                uncompressed_size:
+                  $ref: '#/definitions/Result/properties/content/properties/package/anyOf/0/properties/uncompressed_size'
+                  type: number
+                archive_size:
+                  $ref: '#/definitions/Result/properties/content/properties/package/anyOf/0/properties/archive_size'
+                  type: number
+            license:
+              $ref: '#/definitions/Result/properties/content/properties/license'
+              type: string
+            compatibility:
+              $ref: '#/definitions/Result/properties/content/properties/compatibility'
+              type: string
+            metadata:
+              $ref: '#/definitions/Result/properties/content/properties/metadata'
+              type: object
+            allowed_tools:
+              $ref: '#/definitions/Result/properties/content/properties/allowed_tools'
+              type: string
+        source_refs:
+          $ref: '#/definitions/Result/properties/source_refs'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/source_refs/items'
+            type: object
+            properties:
+              name:
+                $ref: '#/definitions/Result/properties/source_refs/items/properties/name'
+                type: string
+                description: Stable Source type.
+              source_id:
+                $ref: '#/definitions/Result/properties/source_refs/items/properties/source_id'
+                type: string
+        artifact_refs:
+          $ref: '#/definitions/Result/properties/artifact_refs'
+          type: array
+          items:
+            $ref: '#/definitions/Result/properties/artifact_refs/items'
+            type: object
+            properties:
+              family:
+                $ref: '#/definitions/Result/properties/artifact_refs/items/properties/family'
+                type: string
+              artifact_id:
+                $ref: '#/definitions/Result/properties/artifact_refs/items/properties/artifact_id'
+                type: string
+              revision:
+                $ref: '#/definitions/Result/properties/artifact_refs/items/properties/revision'
+                type: number
+      description: Complete successful HTTP response; empty object on error or unknown
+        outcome.
+  required:
+  - ok
+  - operation
+  - status
+  - data
+  - error
+  - result
+  $schema: http://json-schema.org/draft-07/schema#
+  definitions:
+    Result:
       type: object
       additionalProperties: false
       properties:
@@ -272,13 +408,6 @@ output_schema:
                 minimum: 1
       description: Complete successful HTTP response; empty object on error or unknown
         outcome.
-  required:
-  - ok
-  - operation
-  - status
-  - data
-  - error
-  - result
 extra:
   python:
     source: tools/pc_skill_get.py

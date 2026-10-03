@@ -149,7 +149,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check isolated SDK tools and real PowerContext HTTP readback
+      - name: Check out the supported Dify host helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: langgenius/dify
+          ref: 8387590ace4a094de812b7847fc6a4c3a27cd52b # 1.17.1
+          path: .artifacts/dify-host
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            api/core/entities/parameter_entities.py
+            api/core/plugin/entities/parameters.py
+            api/core/tools/__base/tool.py
+            web/app/components/workflow/nodes/tool/default.ts
+            web/app/components/workflow/nodes/tool/output-schema-utils.ts
+            web/app/components/workflow/nodes/_base/components/variable/utils.ts
+
+      - name: Set up project tools
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+
+      - name: Check host casting, Workflow selectors, SDK tools and HTTP readback
+        env:
+          POWERCONTEXT_DIFY_SOURCE: ${{ github.workspace }}/.artifacts/dify-host
         run: make dify-test
 
   hermes-skills:
