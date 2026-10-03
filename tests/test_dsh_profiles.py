@@ -24,7 +24,7 @@ from typer.testing import CliRunner
 
 from powercontext.cli.app import create_cli
 from powercontext.cli.dsh_runtime import DshProfile, desktop_runtime, resolve_dsh_target
-from powercontext.cli.system import setup_app
+from powercontext.cli.system import doctor_app, setup_app
 
 
 @pytest.fixture
@@ -110,6 +110,33 @@ def test_uninitialized_desktop_fails_before_installation(tmp_path, desktop_comma
     assert not (tmp_path / "data").exists()
     run.assert_not_called()
     inspect.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("profile", "available_command", "error"),
+    [
+        ("web", False, "does not exist"),
+        ("desktop", False, "does not exist"),
+        ("desktop", True, "Open Desktop once"),
+    ],
+)
+def test_doctor_keeps_plugin_check_when_target_is_unavailable(
+    tmp_path, desktop_command, profile, available_command, error
+):
+    command = desktop_command if available_command else tmp_path / "missing-dsh.cmd"
+    result = CliRunner().invoke(
+        create_cli([doctor_app]),
+        ["doctor", "dsh", "--profile", profile, "--dsh-command", str(command), "--json"],
+    )
+    assert result.exit_code == 1
+    report = json.loads(result.stdout)
+    assert report["status"] == "failed"
+    assert set(report["checks"]) == {"dsh", "plugin"}
+    assert report["checks"]["dsh"]["status"] == "failed"
+    assert error in report["checks"]["dsh"]["detail"]
+    assert report["checks"]["plugin"]["status"] == "skipped"
+    assert "not checked" in report["checks"]["plugin"]["detail"]
+    assert not (Path(os.environ["DSH_HOME"]) / "profiles").exists()
 
 
 def test_desktop_rejects_npm_command_without_writes(tmp_path, setup_boundary):
