@@ -34,11 +34,20 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from powercontext.builtin.artifacts.skill import capture_skill_archive
 from powercontext.client import PowerContextClient
 from powercontext.http import ArtifactReference, CaptureContentSourceRequest, RecordSkillUsageRequest
 
 from .applicability import SelectionRequest, SelectionResult
 from .applicability_catalog import ServerCandidateCatalog
+from .applicability_fixture import SKILLS, skill_archive
+
+# These exact fixture packages describe the workflow witnessed by the commands below.
+# Reading another Skill does not establish that its different procedure was invoked.
+_CONTRACT_WORKFLOW_DIGESTS = frozenset(
+    "sha256:" + capture_skill_archive(skill_archive(name, *SKILLS[name])).reference.tree_digest
+    for name in ("http-general-maintenance", "http-contract-generation")
+)
 
 GENERATOR = """import json
 from pathlib import Path
@@ -274,7 +283,10 @@ async def run_codex_host(
         and "CLIENT_GENERATION_PASSED" in item.get("aggregated_output", "")
         for item in commands
     )
-    invocation_observed = context_read and generation_run and tests_run
+    workflow_observed = context_read and generation_run and tests_run
+    invocation_observed = workflow_observed and any(
+        item.package_digest in _CONTRACT_WORKFLOW_DIGESTS for item in selected
+    )
     success = exit_code == 0 and generation_run and tests_run and verify_workspace(directory, digest)
     evidence = {
         "host": "real Codex CLI, explicit context loading",
@@ -301,6 +313,7 @@ async def run_codex_host(
         if candidate.address.artifact.family != "skill":
             continue
         assert candidate.package_digest is not None  # noqa: S101 - Skill candidate validation guarantees this.
+        invoked = workflow_observed and candidate.package_digest in _CONTRACT_WORKFLOW_DIGESTS
         usage = await client.record_skill_usage(
             RecordSkillUsageRequest.model_validate({
                 "scope_id": candidate.address.scope_id,
@@ -309,9 +322,9 @@ async def run_codex_host(
                 "package_digest": candidate.package_digest,
                 "target_id": "codex-explicit-context",
                 "selected": True,
-                "invoked": "true" if invocation_observed else "unknown",
+                "invoked": "true" if invoked else "unknown",
                 "validation": "passed",
-                "outcome": ("success" if success else "failure") if invocation_observed else "unknown",
+                "outcome": ("success" if success else "failure") if invoked else "unknown",
                 "task_source": source.source,
             })
         )

@@ -158,7 +158,10 @@ This is real CLI/tool execution with explicit context loading, not native Skill 
 publication. The runner never installs a package or executes package scripts. The existing
 `record_skill_usage` API records each selected exact Skill revision and package digest with an
 outcome Source. `invoked=true` requires observed context reading, generation and successful
-contract-test commands; selection or a host's final prose alone leaves invocation unknown.
+contract-test commands for an exact known generation/maintenance fixture package. Other selected
+Skills retain unknown invocation/outcome: generating a client cannot establish deployment.
+An empty Skill selection cannot produce a Skill invocation observation. Selection or a host's
+final prose alone leaves invocation unknown.
 The JSONL host trace and independent checks support the observation.
 
 Skill usage is a registered adapter Source and can be read through the existing typed

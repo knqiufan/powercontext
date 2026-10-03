@@ -29,7 +29,7 @@ import pytest
 from pydantic import SecretStr
 
 from examples.systemone.adapter import SystemOneConfig, SystemOneDecisionModel
-from examples.systemone.applicability import DecisionApplicabilitySelector, SelectionRequest
+from examples.systemone.applicability import DecisionApplicabilitySelector, SelectionRequest, SelectionResult
 from examples.systemone.applicability_catalog import ServerCandidateCatalog, StaleRecommendationError
 from examples.systemone.applicability_eval import evaluate_cases
 from examples.systemone.applicability_fixture import seed_fixture, skill_archive
@@ -407,9 +407,18 @@ def test_actual_server_reads_feed_exact_versions_to_the_existing_decision_port(t
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("observe_commands,tamper_tests", [(True, False), (False, False), (True, True)])
+@pytest.mark.parametrize(
+    "observe_commands,tamper_tests,selection",
+    [
+        (True, False, "baseline"),
+        (False, False, "baseline"),
+        (True, True, "baseline"),
+        (True, False, "none"),
+        (True, False, "deployment"),
+    ],
+)
 def test_simulated_host_trace_records_exact_usage_without_crediting_selection_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observe_commands: bool, tamper_tests: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observe_commands: bool, tamper_tests: bool, selection: str
 ) -> None:
     """A simulated CLI trace protects evidence recording; this is not real host acceptance."""
 
@@ -443,18 +452,37 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
 
     async def scenario() -> None:
         async with server(tmp_path) as (client, _):
-            scope_id, _ = await seed_fixture(client)
+            scope_id, references = await seed_fixture(client)
             catalog = ServerCandidateCatalog(client, target(tmp_path))
             pool = await catalog.retrieve(scope_id, "HTTP contract")
             request = SelectionRequest(task="Add optional request_id to the HTTP contract", candidates=pool.candidates)
             result = await DecisionApplicabilitySelector().select(request)
+            if selection != "baseline":
+                recommendations = (
+                    tuple(
+                        item.address
+                        for item in pool.candidates
+                        if item.address.artifact.artifact_id == references["http-contract-deployment"].artifact_id
+                    )
+                    if selection == "deployment"
+                    else ()
+                )
+                result = SelectionResult(
+                    mode="decision",
+                    status="selected" if recommendations else "none",
+                    recommendations=recommendations,
+                    pool_digest=request.pool_digest,
+                )
             evidence = await run_codex_host(
                 client, catalog, scope_id, "HTTP contract", request, result, tmp_path / "host"
             )
             assert evidence["task_success"] == (observe_commands and not tamper_tests)
-            assert evidence["skill_invocation_observed"] == observe_commands
+            invoked = observe_commands and selection == "baseline"
+            assert evidence["skill_invocation_observed"] == invoked
             sources = cast(list[dict[str, str]], evidence["skill_usage_sources"])
-            assert len(sources) == 1
+            assert len(sources) == (0 if selection == "none" else 1)
+            if not sources:
+                return
             selected = next(
                 item for item in pool.candidates if item.address in result.recommendations and item.package_digest
             )
@@ -473,8 +501,8 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
             assert usage.skill_ref.model_dump(mode="json") == selected.address.artifact.model_dump(mode="json")
             assert usage.package_digest == selected.package_digest
             assert usage.selected is True
-            assert usage.invoked.value == ("true" if observe_commands else "unknown")
-            expected_outcome = ("failure" if tamper_tests else "success") if observe_commands else "unknown"
+            assert usage.invoked.value == ("true" if invoked else "unknown")
+            expected_outcome = ("failure" if tamper_tests else "success") if invoked else "unknown"
             assert usage.outcome.value == expected_outcome
             assert usage.task_source is not None
             assert {"name": usage.task_source.source_type, "source_id": usage.task_source.source_id} == evidence[
