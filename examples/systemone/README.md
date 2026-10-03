@@ -6,6 +6,10 @@ The integration has two parts: PowerContext retrieves the relevant context; a sm
 
 The runnable experiment makes this concrete. The same generation model writes an amount-conversion function twice, with and without recalled project rules. Jev, optionally alongside Laya, reviews both implementations against the recalled rules. Independent tests execute the generated code, and the observed results become Memory for the next session.
 
+For read-time Experience and Skill selection, see the reusable opt-in
+[applicability selector and paired evaluation](applicability.README.md) ([中文](applicability.zh.md)),
+which reuses this adapter for [#1647](https://github.com/oceanbase/powercontext/issues/1647).
+
 ## Architecture
 
 The example separates context, generation, advisory decisions, and verification:

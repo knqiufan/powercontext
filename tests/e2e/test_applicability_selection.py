@@ -1,0 +1,439 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import subprocess
+import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, cast
+
+import httpx
+import pytest
+from pydantic import SecretStr
+
+from examples.systemone.adapter import SystemOneConfig, SystemOneDecisionModel
+from examples.systemone.applicability import DecisionApplicabilitySelector, SelectionRequest
+from examples.systemone.applicability_catalog import ServerCandidateCatalog, StaleRecommendationError
+from examples.systemone.applicability_eval import evaluate_cases
+from examples.systemone.applicability_fixture import seed_fixture, skill_archive
+from examples.systemone.applicability_host import run_codex_host
+from powercontext.builtin.artifacts.skill.external import AgentEnvironmentProfile, AgentSkillTarget
+from powercontext.builtin.inference import InferenceUsage
+from powercontext.builtin.persistence.sqlite import SQLiteConfig
+from powercontext.builtin.runtime import (
+    BuiltinConfig,
+    DecisionOutcome,
+    DecisionRequest,
+    DecisionResult,
+    RuntimeConfig,
+    open_builtin_contexts,
+)
+from powercontext.builtin.runtime.config import ExternalSkillsConfig
+from powercontext.builtin.sources.skill_usage import SkillUsageCapture
+from powercontext.client import ForbiddenResponseError, PowerContextClient
+from powercontext.http import (
+    ApproveArtifactCandidateRequest,
+    ArtifactReference,
+    ProposeSkillPackageRequest,
+    RejectArtifactCandidateRequest,
+    SkillLifecycleState,
+    UpdateSkillLifecycleRequest,
+)
+from powercontext.server.authentication import AuthenticationResult, ProviderReadiness
+from powercontext.server.authz import PrincipalRef
+from powercontext.server.authz.composition import open_builtin_access_control
+from powercontext.server.factory import create_server_app
+from powercontext.server.settings import AccessControlConfig, McpConfig, MetricsConfig, ServerSettings
+
+
+class Authentication:
+    async def authenticate(self, request):
+        identity = request.headers.get("authorization", "Bearer admin").removeprefix("Bearer ")
+        return AuthenticationResult(subject=PrincipalRef(type="service", id=identity))
+
+    async def readiness(self):
+        return ProviderReadiness(ready=True)
+
+
+@asynccontextmanager
+async def server(directory: Path) -> AsyncIterator[tuple[PowerContextClient, httpx.AsyncClient]]:
+    database = SQLiteConfig(url=f"sqlite+aiosqlite:///{directory / 'selection.db'}")
+    async with open_builtin_access_control(
+        database,
+        bootstrap_administrators=(PrincipalRef(type="service", id="admin"),),
+        deployment_id="selection",
+    ) as access:
+        app = create_server_app(
+            settings=ServerSettings(
+                database=database,
+                runtime=RuntimeConfig(artifact_processing_families=()),
+                external_skills=ExternalSkillsConfig(),
+                access=AccessControlConfig(mode="enforced", deployment_id="selection"),
+                mcp=McpConfig(enabled=False),
+                metrics=MetricsConfig(enabled=False),
+            ),
+            authentication_provider=Authentication(),
+            access_control=access,
+            scheduler_path=directory / "scheduler.db",
+        )
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as http,
+            PowerContextClient("http://localhost", token="admin", http_client=http) as client,  # noqa: S106
+        ):
+            yield client, http
+
+
+def target(directory: Path) -> AgentSkillTarget:
+    return AgentSkillTarget(
+        target_id="codex-project",
+        agent_kind="codex",
+        installation_scope="project",
+        path=directory / "skills",
+        environment=AgentEnvironmentProfile(
+            operating_system="windows", architecture="x86_64", commands={"python": "3.12"}
+        ),
+    )
+
+
+async def propose(client: PowerContextClient, scope_id: str, name: str, *, incompatible: bool = False, target_ref=None):
+    return await client.propose_skill_package(
+        ProposeSkillPackageRequest(
+            scope_id=scope_id,
+            archive_base64=base64.b64encode(
+                skill_archive(
+                    name,
+                    "HTTP contract synthetic procedure.",
+                    "Only modify an HTTP contract.",
+                    incompatible=incompatible,
+                )
+            ).decode(),
+            target=target_ref,
+        )
+    )
+
+
+async def approve(client: PowerContextClient, scope_id: str, pending) -> ArtifactReference:
+    approved = await client.approve_artifact_candidate(
+        ApproveArtifactCandidateRequest(
+            scope_id=scope_id,
+            candidate_id=pending.candidate_id,
+            expected_version=pending.version,
+        )
+    )
+    assert approved.result_artifact is not None
+    return approved.result_artifact
+
+
+def test_authorized_catalog_excludes_unreviewed_retired_and_incompatible_packages(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, references = await seed_fixture(client)
+            await propose(client, scope_id, "http-contract-pending")
+            rejected = await propose(client, scope_id, "http-contract-rejected")
+            await client.reject_artifact_candidate(
+                RejectArtifactCandidateRequest(
+                    scope_id=scope_id,
+                    candidate_id=rejected.candidate_id,
+                    expected_version=rejected.version,
+                    reason="Synthetic package rejected during Review.",
+                )
+            )
+            retired = await approve(client, scope_id, await propose(client, scope_id, "http-contract-retired"))
+            await client.update_skill_lifecycle(
+                UpdateSkillLifecycleRequest(
+                    scope_id=scope_id,
+                    artifact_id=retired.artifact_id,
+                    expected_generation=0,
+                    lifecycle_state=SkillLifecycleState.RETIRED,
+                )
+            )
+            incompatible = await approve(
+                client,
+                scope_id,
+                await propose(
+                    client,
+                    scope_id,
+                    "http-contract-linux",
+                    incompatible=True,
+                ),
+            )
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            actual = {item.address.artifact.artifact_id for item in pool.candidates}
+            assert actual == {item.artifact_id for item in references.values()}
+            assert incompatible.artifact_id not in actual
+            assert any(
+                item.address.artifact.artifact_id == incompatible.artifact_id
+                and item.reason == "Skill compatibility is incompatible"
+                for item in pool.omissions
+            )
+            assert all("pending" not in item.content and "rejected" not in item.content for item in pool.candidates)
+            assert not target(tmp_path).path.exists()  # Selection neither installs nor loads a package.
+            await catalog.revalidate(scope_id, "HTTP contract", pool.candidates)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "version,expected", [("3.12", "incompatible"), ("unknown", "manual_review_required"), ("3.14", None)]
+)
+def test_runtime_version_compatibility_is_decided_before_applicability(
+    tmp_path: Path, version: str, expected: str | None
+) -> None:
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, _ = await seed_fixture(client)
+            constrained = await approve(
+                client, scope_id, await propose(client, scope_id, "http-contract-linux", incompatible=True)
+            )
+            compatible_target = target(tmp_path).model_copy(
+                update={
+                    "environment": AgentEnvironmentProfile(
+                        operating_system="linux", architecture="x86_64", commands={"python": version}
+                    )
+                }
+            )
+            pool = await ServerCandidateCatalog(client, compatible_target).retrieve(scope_id, "HTTP contract")
+            included = any(item.address.artifact.artifact_id == constrained.artifact_id for item in pool.candidates)
+            assert included == (expected is None)
+            if expected is not None:
+                assert any(item.reason == f"Skill compatibility is {expected}" for item in pool.omissions)
+
+    asyncio.run(scenario())
+
+
+def test_paired_report_uses_same_actual_server_pool_and_marks_simulated_selection_as_non_execution(
+    tmp_path: Path,
+) -> None:
+    def provider(incoming: httpx.Request) -> httpx.Response:
+        body = json.loads(incoming.content)
+        state = json.loads(body["state"])
+        assert state["evidence"]
+        return httpx.Response(
+            200,
+            json={
+                "answers": {
+                    "decision": {
+                        "type": "choice",
+                        "choice": "no",
+                        "probabilities": {"yes": 0, "no": 1, "abstain": 0},
+                    }
+                },
+                "usage": {"input_tokens": 20, "output_tokens": 3},
+            },
+        )
+
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _), httpx.AsyncClient(transport=httpx.MockTransport(provider)) as http:
+            scope_id, references = await seed_fixture(client)
+            model = SystemOneDecisionModel(
+                SystemOneConfig(
+                    provider="jev",
+                    endpoint="https://provider.example/systemone",
+                    model="simulated-jev-v1",
+                    api_key=SecretStr("test-key"),
+                ),
+                http,
+            )
+            output = tmp_path / "reports"
+            output.mkdir()
+            records = await evaluate_cases(
+                client,
+                ServerCandidateCatalog(client, target(tmp_path)),
+                model,
+                scope_id,
+                references,
+                (),
+                output_directory=output,
+                input_price_per_million=2,
+                output_price_per_million=4,
+            )
+            by_name = {item["case"]: cast(dict[str, Any], item) for item in records}
+            change = by_name["change-en"]
+            assert change["baseline"]["result"]["pool_digest"] == change["assisted"]["result"]["pool_digest"]
+            assert change["assisted"]["metrics"]["applicable_candidate_recall"] == 0
+            explanation = by_name["explain-en"]
+            assert explanation["baseline"]["metrics"]["unnecessary_recommendations"] == 3
+            assert explanation["assisted"]["metrics"]["selection_exact"]
+            assert explanation["assisted"]["metrics"]["task_success"] is None
+            assert explanation["assisted"]["metrics"]["wrong_loads"] is None
+            assert explanation["hosts"] == {}
+            assert explanation["estimated_added_cost_usd"] == pytest.approx(0.00026)
+            assert len((output / "cases.jsonl").read_text(encoding="utf-8").splitlines()) == len(records)
+            assert "解释" in (output / "explain-zh.json").read_text(encoding="utf-8")
+
+    asyncio.run(scenario())
+
+
+def test_unauthorized_scope_fails_before_model_evaluation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with server(tmp_path) as (admin, http):
+            scope_id, _ = await seed_fixture(admin)
+            async with PowerContextClient("http://localhost", token="outsider", http_client=http) as outsider:  # noqa: S106
+                catalog = ServerCandidateCatalog(outsider, target(tmp_path))
+                with pytest.raises(ForbiddenResponseError):
+                    await catalog.retrieve(scope_id, "HTTP contract")
+
+    asyncio.run(scenario())
+
+
+def test_exact_recommendation_is_rejected_after_revision_or_lifecycle_changes(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, references = await seed_fixture(client)
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            old = references["http-contract-generation"]
+            selected = tuple(item for item in pool.candidates if item.address.artifact.artifact_id == old.artifact_id)
+            updated = await approve(
+                client,
+                scope_id,
+                await propose(
+                    client,
+                    scope_id,
+                    "http-contract-generation",
+                    target_ref=old,
+                ),
+            )
+            assert updated.revision == old.revision + 1
+            with pytest.raises(StaleRecommendationError):
+                await catalog.revalidate(scope_id, "HTTP contract", selected)
+            fresh = await catalog.retrieve(scope_id, "HTTP contract")
+            selected = tuple(
+                item for item in fresh.candidates if item.address.artifact.artifact_id == updated.artifact_id
+            )
+            await client.update_skill_lifecycle(
+                UpdateSkillLifecycleRequest(
+                    scope_id=scope_id,
+                    artifact_id=updated.artifact_id,
+                    expected_generation=0,
+                    lifecycle_state=SkillLifecycleState.DEPRECATED,
+                )
+            )
+            with pytest.raises(StaleRecommendationError):
+                await catalog.revalidate(scope_id, "HTTP contract", selected)
+
+    asyncio.run(scenario())
+
+
+def test_actual_server_reads_feed_exact_versions_to_the_existing_decision_port(tmp_path: Path) -> None:
+    class Judge:
+        policy_id = "simulated.known-version"
+
+        async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
+            assert "HTTP" in request.evidence[0]
+            return DecisionResult(
+                outcome=DecisionOutcome.NO, policy_id=self.policy_id, usage=InferenceUsage(requests=1)
+            )
+
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, _ = await seed_fixture(client)
+            pool = await ServerCandidateCatalog(client, target(tmp_path)).retrieve(scope_id, "HTTP contract")
+            request = SelectionRequest(task="只解释 HTTP 接口用途。", candidates=pool.candidates)
+            baseline = await DecisionApplicabilitySelector().select(request)
+            assisted = await DecisionApplicabilitySelector(Judge(), enabled=True).select(request)
+            assert baseline.recommendations
+            assert assisted.recommendations == ()
+            assert assisted.status == "none"
+            assert baseline.pool_digest == assisted.pool_digest
+            assert tuple(item.address for item in assisted.assessments) == tuple(
+                item.address for item in pool.candidates
+            )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("observe_commands,tamper_tests", [(True, False), (False, False), (True, True)])
+def test_simulated_host_trace_records_exact_usage_without_crediting_selection_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observe_commands: bool, tamper_tests: bool
+) -> None:
+    """A simulated CLI trace protects evidence recording; this is not real host acceptance."""
+
+    def simulated_codex(directory: Path, task: str, timeout: int):
+        assert "request_id" in task
+        schema_path = directory / "openapi/powercontext.yaml"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["components"]["schemas"]["StatusResponse"]["properties"]["request_id"] = {"type": "string"}
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
+        events = []
+        for script in ("read_context.py", "generate.py", "contract_test.py"):
+            command = [sys.executable, script]
+            process = subprocess.run(
+                command, cwd=directory, capture_output=True, text=True, encoding="utf-8", check=True
+            )
+            if observe_commands:
+                events.append({
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": " ".join(command),
+                        "exit_code": process.returncode,
+                        "aggregated_output": process.stdout,
+                    },
+                })
+        if tamper_tests:
+            (directory / "contract_test.py").write_text("print('pretend success')\n", encoding="utf-8")
+        return 0, events
+
+    monkeypatch.setattr("examples.systemone.applicability_host._invoke_codex", simulated_codex)
+
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, _ = await seed_fixture(client)
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            request = SelectionRequest(task="Add optional request_id to the HTTP contract", candidates=pool.candidates)
+            result = await DecisionApplicabilitySelector().select(request)
+            evidence = await run_codex_host(
+                client, catalog, scope_id, "HTTP contract", request, result, tmp_path / "host"
+            )
+            assert evidence["task_success"] == (observe_commands and not tamper_tests)
+            assert evidence["skill_invocation_observed"] == observe_commands
+            sources = cast(list[dict[str, str]], evidence["skill_usage_sources"])
+            assert len(sources) == 1
+            selected = next(
+                item for item in pool.candidates if item.address in result.recommendations and item.package_digest
+            )
+        # Inspect the registered adapter Source through its supported typed catalog and read API.
+        async with open_builtin_contexts(
+            BuiltinConfig(
+                database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'selection.db'}"),
+                runtime=RuntimeConfig(artifact_processing_families=()),
+            )
+        ) as contexts:
+            context = await contexts.get(scope_id)
+            stored = next(item for item in await context.sources.list() if item.name == sources[0]["source_id"])
+            persisted = await context.sources.get(stored)
+            usage = await context.sources.read(persisted)
+            assert isinstance(usage, SkillUsageCapture)
+            assert usage.skill_ref.model_dump(mode="json") == selected.address.artifact.model_dump(mode="json")
+            assert usage.package_digest == selected.package_digest
+            assert usage.selected is True
+            assert usage.invoked.value == ("true" if observe_commands else "unknown")
+            expected_outcome = ("failure" if tamper_tests else "success") if observe_commands else "unknown"
+            assert usage.outcome.value == expected_outcome
+            assert usage.task_source is not None
+            assert {"name": usage.task_source.source_type, "source_id": usage.task_source.source_id} == evidence[
+                "outcome_source"
+            ]
+
+    asyncio.run(scenario())
