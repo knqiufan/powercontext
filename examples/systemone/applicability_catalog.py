@@ -198,7 +198,10 @@ class ServerCandidateCatalog:
             files = {
                 entry.path: package_file(snapshot, entry.path).decode("utf-8")
                 for entry in snapshot.entries
-                if entry.media_type.startswith("text/") and not entry.path.startswith("scripts/")
+                if (
+                    entry.media_type.startswith("text/") or entry.media_type in {"application/json", "application/yaml"}
+                )
+                and not entry.path.startswith("scripts/")
             }
         except UnicodeDecodeError:
             return None, "complete Skill text evidence is not UTF-8"

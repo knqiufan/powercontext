@@ -20,7 +20,9 @@ PreparedContext, database, or default Runtime behavior.
 2. Each shortlisted standard Skill package is downloaded and checked against its approved
    package reference. The existing static compatibility assessor evaluates the host target.
    Incompatible, unknown and manual-review-required results are omitted before any model call.
-   Legacy Skills without a standard package and non-UTF-8 supporting text are omitted with reasons.
+   Complete textual evidence includes JSON and YAML supporting files outside `scripts/`,
+   preserved verbatim alongside the entrypoint. Legacy Skills without a standard package and
+   non-UTF-8 supporting text are omitted with reasons.
 3. Absolute applicability asks `yes`, `no` or `abstain` separately for each candidate. Topic
    similarity is insufficient. A missing prerequisite means unknown; a known contradiction
    means no. All affirmative complementary Experiences are retained.
@@ -158,7 +160,10 @@ This is real CLI/tool execution with explicit context loading, not native Skill 
 publication. The runner never installs a package or executes package scripts. The existing
 `record_skill_usage` API records each selected exact Skill revision and package digest with an
 outcome Source. `invoked=true` requires observed context reading, generation and successful
-contract-test commands for an exact known generation/maintenance fixture package. Other selected
+contract-test commands for an exact known generation/maintenance fixture package.
+Commands may run the fixture's `.py` file or its equivalent `python -m` module; observed Python
+main targets, successful exit codes, output markers and independent workspace checks provide
+the evidence. Quoted names in unrelated commands do not count as fixture execution. Other selected
 Skills retain unknown invocation/outcome: generating a client cannot establish deployment.
 An empty Skill selection cannot produce a Skill invocation observation. Selection or a host's
 final prose alone leaves invocation unknown.

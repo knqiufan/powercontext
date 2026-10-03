@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
+import shlex
 import subprocess
 import sys
+import zipfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +37,7 @@ from examples.systemone.applicability_catalog import ServerCandidateCatalog, Sta
 from examples.systemone.applicability_eval import evaluate_cases
 from examples.systemone.applicability_fixture import seed_fixture, skill_archive
 from examples.systemone.applicability_host import run_codex_host
+from powercontext.builtin.artifacts.skill import capture_skill_archive
 from powercontext.builtin.artifacts.skill.external import AgentEnvironmentProfile, AgentSkillTarget
 from powercontext.builtin.inference import InferenceUsage
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
@@ -233,6 +237,92 @@ def test_catalog_preserves_prepared_context_markers_in_experience_evidence(tmp_p
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("variant", ["complete", "oversized", "invalid-utf8"])
+def test_catalog_preserves_json_yaml_prerequisites_and_applies_complete_evidence_budget(
+    tmp_path: Path, variant: str
+) -> None:
+    files = {
+        "references/conditions.json": '{"approval": "explicit", "条件": "修改 HTTP 合同"}\n'.encode(),
+        "references/conditions.yaml": b"requires: contract-modification\napproval: explicit\n",
+        "references/conditions.yml": b"validation: contract-test\n",
+    }
+    if variant == "oversized":
+        files["references/conditions.yaml"] += b"notes: " + b"x" * 24000 + b"\n"
+    elif variant == "invalid-utf8":
+        files["references/conditions.json"] = b"\xff"
+    buffer = io.BytesIO(
+        skill_archive(
+            "http-contract-conditions",
+            "HTTP contract prerequisites.",
+            "Use only when the prerequisites in references/conditions.json, "
+            "references/conditions.yaml and references/conditions.yml are satisfied.",
+        )
+    )
+    with zipfile.ZipFile(buffer, "a") as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    package = capture_skill_archive(buffer.getvalue())
+
+    class Judge:
+        policy_id = "simulated.complete-evidence"
+
+        def __init__(self) -> None:
+            self.requests: list[DecisionRequest] = []
+
+        async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
+            self.requests.append(request)
+            return DecisionResult(
+                outcome=DecisionOutcome.YES, policy_id=self.policy_id, usage=InferenceUsage(requests=1)
+            )
+
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, _ = await seed_fixture(client)
+            pending = await client.propose_skill_package(
+                ProposeSkillPackageRequest(
+                    scope_id=scope_id, archive_base64=base64.b64encode(buffer.getvalue()).decode()
+                )
+            )
+            reference = await approve(client, scope_id, pending)
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            selected = tuple(
+                item for item in pool.candidates if item.address.artifact.artifact_id == reference.artifact_id
+            )
+            if variant == "invalid-utf8":
+                assert selected == ()
+                assert any(
+                    item.address.artifact.artifact_id == reference.artifact_id
+                    and item.reason == "complete Skill text evidence is not UTF-8"
+                    for item in pool.omissions
+                )
+                return
+            assert len(selected) == 1
+            candidate = selected[0]
+            assert candidate.address.artifact.model_dump(mode="json") == reference.model_dump(mode="json")
+            assert candidate.package_digest == "sha256:" + package.reference.tree_digest
+            assert not any(item.address == candidate.address for item in pool.omissions)
+            evidence = json.loads(candidate.content)
+            for path, content in files.items():
+                assert evidence["files"][path] == content.decode("utf-8")
+            await catalog.revalidate(scope_id, "HTTP contract", selected)
+            model = Judge()
+            result = await DecisionApplicabilitySelector(model, enabled=True).select(
+                SelectionRequest(task="Change the HTTP contract with explicit approval.", candidates=selected)
+            )
+            assert result.used_fallback is False
+            if variant == "oversized":
+                assert model.requests == []
+                assert result.recommendations == ()
+                assert result.assessments[0].outcome is DecisionOutcome.ABSTAIN
+                assert result.assessments[0].policy_id == "local.input-budget"
+            else:
+                assert result.recommendations == (candidate.address,)
+                assert model.requests[0].evidence == (candidate.content,)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "version,expected", [("3.12", "incompatible"), ("unknown", "manual_review_required"), ("3.14", None)]
 )
@@ -408,17 +498,26 @@ def test_actual_server_reads_feed_exact_versions_to_the_existing_decision_port(t
 
 
 @pytest.mark.parametrize(
-    "observe_commands,tamper_tests,selection",
+    "invocation,tamper_tests,selection",
     [
-        (True, False, "baseline"),
-        (False, False, "baseline"),
-        (True, True, "baseline"),
-        (True, False, "none"),
-        (True, False, "deployment"),
+        ("script", False, "baseline"),
+        ("module", False, "baseline"),
+        ("shell-script", False, "baseline"),
+        ("shell-module", False, "baseline"),
+        ("none", False, "baseline"),
+        ("echo", False, "baseline"),
+        ("inline-code", False, "baseline"),
+        ("read-script", False, "baseline"),
+        ("unrelated-module", False, "baseline"),
+        ("missing-markers", False, "baseline"),
+        ("failed-command", False, "baseline"),
+        ("module", True, "baseline"),
+        ("module", False, "none"),
+        ("module", False, "deployment"),
     ],
 )
 def test_simulated_host_trace_records_exact_usage_without_crediting_selection_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observe_commands: bool, tamper_tests: bool, selection: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invocation: str, tamper_tests: bool, selection: str
 ) -> None:
     """A simulated CLI trace protects evidence recording; this is not real host acceptance."""
 
@@ -430,18 +529,35 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
         events = []
         for script in ("read_context.py", "generate.py", "contract_test.py"):
-            command = [sys.executable, script]
+            module = script.removesuffix(".py")
+            command = (
+                [sys.executable, script] if invocation.endswith("script") else [sys.executable, "-u", "-m", module]
+            )
             process = subprocess.run(
                 command, cwd=directory, capture_output=True, text=True, encoding="utf-8", check=True
             )
-            if observe_commands:
+            recorded = subprocess.list2cmdline(command) if sys.platform == "win32" else shlex.join(command)
+            shell_command = (
+                f"pwsh.exe -Command \"& '{sys.executable}' {' '.join(command[1:])}\""
+                if sys.platform == "win32"
+                else "/bin/bash -lc " + shlex.quote(recorded)
+            )
+            recorded = {
+                "shell-script": shell_command,
+                "shell-module": shell_command,
+                "echo": "echo " + recorded,
+                "inline-code": f"python -c \"print('{script} -m {module}')\"",
+                "read-script": f"pwsh.exe -Command \"Get-Content -LiteralPath '{script}'\"",
+                "unrelated-module": f"python -m unrelated.{module}",
+            }.get(invocation, recorded)
+            if invocation != "none":
                 events.append({
                     "type": "item.completed",
                     "item": {
                         "type": "command_execution",
-                        "command": " ".join(command),
-                        "exit_code": process.returncode,
-                        "aggregated_output": process.stdout,
+                        "command": recorded,
+                        "exit_code": 1 if invocation == "failed-command" else process.returncode,
+                        "aggregated_output": "" if invocation == "missing-markers" else process.stdout,
                     },
                 })
         if tamper_tests:
@@ -476,6 +592,7 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
             evidence = await run_codex_host(
                 client, catalog, scope_id, "HTTP contract", request, result, tmp_path / "host"
             )
+            observe_commands = invocation in {"script", "module", "shell-script", "shell-module"}
             assert evidence["task_success"] == (observe_commands and not tamper_tests)
             invoked = observe_commands and selection == "baseline"
             assert evidence["skill_invocation_observed"] == invoked

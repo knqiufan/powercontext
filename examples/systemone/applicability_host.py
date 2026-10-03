@@ -26,11 +26,14 @@ import asyncio
 import hashlib
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -238,6 +241,71 @@ def _invoke_codex(directory: Path, task: str, timeout: int) -> tuple[int | None,
     return exit_code, events
 
 
+def _command_arguments(command: str, *, depth: int = 0) -> Iterator[list[str]]:
+    """Inspect simple command boundaries and CLI shell wrappers without evaluating a trace."""
+
+    if depth > 2:
+        return
+    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    segments: list[list[str]] = [[]]
+    try:
+        for token in lexer:
+            if not token.strip(";&|\n"):
+                segments.append([])
+            else:
+                if token[:1] in {"'", '"'} and token[-1:] == token[:1]:
+                    token = token[1:-1]
+                segments[-1].append(token)
+    except ValueError:
+        return
+    for arguments in segments:
+        if not arguments:
+            continue
+        executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if executable in {"bash", "sh", "zsh", "pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            option = next(
+                (index for index, value in enumerate(arguments) if value.lower() in {"-c", "-lc", "-command"}),
+                None,
+            )
+            if option is not None and option + 2 == len(arguments):
+                yield from _command_arguments(arguments[option + 1], depth=depth + 1)
+        else:
+            yield arguments
+
+
+def _runs_fixture_python(command: str, module: str, directory: Path) -> bool:
+    """Match a Python main target, rather than script names quoted by unrelated commands."""
+
+    for arguments in _command_arguments(command):
+        executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable) is None:
+            continue
+        arguments = arguments[1:]
+        while arguments:
+            argument = arguments.pop(0)
+            if argument == "-m":
+                if arguments and arguments[0] == module:
+                    return True
+                break
+            if argument in {"-W", "-X"} and arguments:
+                arguments.pop(0)
+            elif re.fullmatch(r"-[bBdEiIOPqsSuvx]+", argument) or argument.startswith(("-W", "-X")):
+                continue
+            else:
+                if argument == "--" and arguments:
+                    argument = arguments.pop(0)
+                if (
+                    not argument.startswith("-")
+                    and (directory / argument.replace("\\", "/")).resolve() == (directory / f"{module}.py").resolve()
+                ):
+                    return True
+                break
+    return False
+
+
 async def run_codex_host(
     client: PowerContextClient,
     catalog: ServerCandidateCatalog,
@@ -266,19 +334,19 @@ async def run_codex_host(
         if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "command_execution"
     ]
     context_read = any(
-        "read_context.py" in item.get("command", "")
+        _runs_fixture_python(item.get("command", ""), "read_context", directory)
         and item.get("exit_code") == 0
         and f"POWERCONTEXT_CONTEXT_READ {digest}" in item.get("aggregated_output", "")
         for item in commands
     )
     tests_run = any(
-        "contract_test.py" in item.get("command", "")
+        _runs_fixture_python(item.get("command", ""), "contract_test", directory)
         and item.get("exit_code") == 0
         and "CONTRACT_TEST_PASSED" in item.get("aggregated_output", "")
         for item in commands
     )
     generation_run = any(
-        "generate.py" in item.get("command", "")
+        _runs_fixture_python(item.get("command", ""), "generate", directory)
         and item.get("exit_code") == 0
         and "CLIENT_GENERATION_PASSED" in item.get("aggregated_output", "")
         for item in commands
