@@ -2,7 +2,7 @@
 
 ## Tested source and tools
 
-Local validation date: 2026-10-07. Server baseline: PowerContext master `70ed3648ce9e11d8e21d8ca249bdf88b253ace87`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
+Local validation date: 2026-10-07. Server baseline: PowerContext master `1db8f3b1ed69f98da0a280b75e51c66cfa31e0a9`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
 
 | Component | Tested version / environment |
 | --- | --- |
@@ -10,7 +10,7 @@ Local validation date: 2026-10-07. Server baseline: PowerContext master `70ed364
 | Plugin SDK | `dify-plugin==0.10.2` |
 | Transport / schema validation | `httpx==0.28.1`, `jsonschema==4.25.1` |
 | Official packaging CLI | 0.6.10, Windows amd64 |
-| SDK / Server Python | CPython 3.12.13 / 3.14.5, Windows amd64 |
+| SDK / Server Python | CPython 3.12.13 / 3.12.13, Windows amd64 |
 | HTTP backend | Real uvicorn/FastAPI Server with a disposable SQLite database |
 | Generation | Deterministic injected Handoff/Experience/Skill generators |
 | Host models / casting / Workflow metadata | Dify 1.17.1, commit `8387590ace4a094de812b7847fc6a4c3a27cd52b`; official models/functions executed after daemon serialization |
@@ -31,7 +31,6 @@ Local validation date: 2026-10-07. Server baseline: PowerContext master `70ed364
 - Scope A/B searches do not expose another Scope's unique test entry. Tests use a shared administrator token and establish scoped filtering, not production multi-user authorization. Restricted-principal and nested cross-Scope authorization still require deployment evidence.
 - Provider/declaration/Python bindings match the DSH tool-set manifest. Generated OpenAPI/declarations, isolated lint/format/types, root Linux-target types, repository contract and integration-manifest tests pass.
 - Official CLI packaging succeeds. Archive inspection finds 19 tool declarations, source, icon, privacy, README and routing references, with no credentials, virtual environments, tests or bytecode caches.
-- Website lint, tests, link validation and production static build pass; export validation checks 877 public pages and their internal links.
 
 Local package: `.artifacts/dify/powercontext-0.0.1.difypkg`, 106569 bytes. SHA-256:
 
@@ -57,11 +56,12 @@ uv run --project integrations/dify ruff check integrations/dify
 uv run --project integrations/dify ruff format --check integrations/dify
 uv run --project integrations/dify ty check --project integrations/dify --python integrations/dify/.venv
 uv run --project integrations/dify python -X utf8 -m pytest integrations/dify/tests
-uv run python -X utf8 -m pytest tests/e2e/test_dify_tools_http.py
+uv run --python 3.12 python -X utf8 -m pytest tests/e2e/test_dify_tools_http.py
+uv run --python 3.12 python -X utf8 -m pytest tests/e2e/test_topic_memory_generic_api.py::test_cancelling_a_request_during_a_stalled_usage_write_leaves_the_runtime_healthy tests/builtin/runtime/test_model_usage_recorder.py
 dify plugin package integrations/dify/plugin -o .artifacts/dify/powercontext-0.0.1.difypkg
 ```
 
-On this Windows host, native root `ty check` reports existing POSIX-only `fcntl`, `resource` and `os` attributes outside the Dify change. Root types are checked with `--python-platform linux`, matching the main quality CI job. The isolated plugin type check uses its real Python 3.12 environment. The focused pytest process reports upstream gevent late-patching and Pydantic deprecation warnings; the fresh SDK subprocess runs its patch before HTTP imports. These tests do not establish HTTPS or live Dify application/daemon dispatch acceptance.
+On this Windows host, native root `ty check` reports existing POSIX-only `fcntl`, `resource` and `os` attributes outside the Dify change. Root types are checked with `--python-platform linux`, matching the main quality CI job. The isolated plugin type check uses its real Python 3.12 environment. The focused pytest process reports upstream gevent late-patching and Pydantic deprecation warnings; the fresh SDK subprocess runs its patch before HTTP imports. These tests do not establish HTTPS or live Dify application/daemon dispatch acceptance. The website build is outside this local validation.
 
 A concurrent SQLite write can return HTTP 409; the plugin reports a conflict and does not add a retry. Deployment concurrency must include the intended storage backend and Dify worker limits.
 
