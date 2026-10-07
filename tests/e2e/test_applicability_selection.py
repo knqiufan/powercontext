@@ -511,6 +511,10 @@ def test_actual_server_reads_feed_exact_versions_to_the_existing_decision_port(t
         ("unrelated-module", False, "baseline"),
         ("missing-markers", False, "baseline"),
         ("failed-command", False, "baseline"),
+        ("final-failed", False, "baseline"),
+        ("final-missing-marker", False, "baseline"),
+        ("final-unknown-exit", False, "baseline"),
+        ("host-failed", False, "baseline"),
         ("module", True, "baseline"),
         ("module", False, "none"),
         ("module", False, "deployment"),
@@ -562,7 +566,26 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
                 })
         if tamper_tests:
             (directory / "contract_test.py").write_text("print('pretend success')\n", encoding="utf-8")
-        return 0, events
+        if invocation.startswith("final-"):
+            client_path = directory / "client.py"
+            verified_client = client_path.read_text(encoding="utf-8")
+            if invocation == "final-failed":
+                client_path.write_text(verified_client.replace("NotRequired[str]", "str"), encoding="utf-8")
+            command = [sys.executable, "-m", "contract_test"]
+            process = subprocess.run(
+                command, cwd=directory, capture_output=True, text=True, encoding="utf-8", check=False
+            )
+            client_path.write_text(verified_client, encoding="utf-8")
+            events.append({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": subprocess.list2cmdline(command) if sys.platform == "win32" else shlex.join(command),
+                    "exit_code": None if invocation == "final-unknown-exit" else process.returncode,
+                    "aggregated_output": "" if invocation == "final-missing-marker" else process.stdout,
+                },
+            })
+        return (1 if invocation == "host-failed" else 0), events
 
     monkeypatch.setattr("examples.systemone.applicability_host._invoke_codex", simulated_codex)
 
@@ -592,8 +615,29 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
             evidence = await run_codex_host(
                 client, catalog, scope_id, "HTTP contract", request, result, tmp_path / "host"
             )
-            observe_commands = invocation in {"script", "module", "shell-script", "shell-module"}
-            assert evidence["task_success"] == (observe_commands and not tamper_tests)
+            observe_commands = invocation in {
+                "script",
+                "module",
+                "shell-script",
+                "shell-module",
+                "host-failed",
+                "final-failed",
+                "final-missing-marker",
+                "final-unknown-exit",
+            }
+            task_success = (
+                observe_commands
+                and not tamper_tests
+                and invocation
+                not in {
+                    "host-failed",
+                    "final-failed",
+                    "final-missing-marker",
+                    "final-unknown-exit",
+                }
+            )
+            assert evidence["task_success"] == task_success
+            assert evidence["workspace_verified"] == (not tamper_tests)
             invoked = observe_commands and selection == "baseline"
             assert evidence["skill_invocation_observed"] == invoked
             sources = cast(list[dict[str, str]], evidence["skill_usage_sources"])
@@ -619,8 +663,25 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
             assert usage.package_digest == selected.package_digest
             assert usage.selected is True
             assert usage.invoked.value == ("true" if invoked else "unknown")
-            expected_outcome = ("failure" if tamper_tests else "success") if invoked else "unknown"
+            expected_validation = (
+                (
+                    "failed"
+                    if tamper_tests or invocation in {"failed-command", "final-failed"}
+                    else "passed"
+                    if invoked and invocation not in {"final-missing-marker", "final-unknown-exit"}
+                    else "unknown"
+                )
+                if selection == "baseline"
+                else "unknown"
+            )
+            assert usage.validation.value == expected_validation
+            expected_outcome = (
+                ("success" if task_success else "failure")
+                if invoked and invocation not in {"final-missing-marker", "final-unknown-exit"}
+                else "unknown"
+            )
             assert usage.outcome.value == expected_outcome
+            assert not invoked or usage.outcome.value == evidence["task_outcome"]
             assert usage.task_source is not None
             assert {"name": usage.task_source.source_type, "source_id": usage.task_source.source_id} == evidence[
                 "outcome_source"

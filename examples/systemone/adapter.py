@@ -126,8 +126,14 @@ class SystemOneDecisionModel:
         self._laya_budget = laya_budget
         self.policy_id = f"powercontext.decision.systemone.{config.provider}.v2:{config.model}"
 
-    async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
-        """Keep evidence intact, require an explicit answer, and never infer success."""
+    def validate_input(self, request: DecisionRequest, /) -> None:
+        """Check the exact wire and checkpoint budgets locally, before failure fallback."""
+
+        self._encode_input(request)
+
+    def _encode_input(self, request: DecisionRequest) -> bytes:
+        """Build and validate the same complete input used for preflight and sending."""
+
         state = json.dumps(
             {
                 "decision_kind": request.decision_kind,
@@ -147,6 +153,12 @@ class SystemOneDecisionModel:
             raise InferenceConfigurationError("System One request exceeds max_request_bytes")  # noqa: TRY003
         if self._laya_budget is not None:
             self._laya_budget.validate(state, instructions, _CRITERIA)
+        return content
+
+    async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
+        """Keep evidence intact, require an explicit answer, and never infer success."""
+
+        content = self._encode_input(request)
         headers = {"Content-Type": "application/json"}
         key = self._config.api_key.get_secret_value()
         if key:

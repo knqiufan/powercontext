@@ -26,11 +26,12 @@ import hashlib
 import json
 import math
 import time
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from powercontext.artifacts import ArtifactAddress
+from powercontext.builtin.inference import InferenceConfigurationError
 from powercontext.builtin.runtime import DecisionModel, DecisionOutcome, DecisionRequest, DecisionResult
 from powercontext.builtin.runtime.decision_model import FailOpenDecisionModel
 
@@ -149,6 +150,17 @@ class ApplicabilitySelector(Protocol):
     async def select(self, request: SelectionRequest, /) -> SelectionResult: ...
 
 
+@runtime_checkable
+class DecisionInputPreflight(Protocol):
+    """Optional example-layer port for complete, I/O-free provider input validation.
+
+    Raise ``InferenceConfigurationError`` when the exact input cannot be submitted intact.
+    This check runs before the backend failure envelope; it makes no applicability judgment.
+    """
+
+    def validate_input(self, request: DecisionRequest, /) -> None: ...
+
+
 class DecisionApplicabilitySelector:
     """Use the existing ternary DecisionModel for applicability and bounded Skill preference.
 
@@ -169,6 +181,7 @@ class DecisionApplicabilitySelector:
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or max_evidence_bytes < 1:
             raise ValueError("selection budgets must be positive")  # noqa: TRY003
         self._model = None if decision_model is None else FailOpenDecisionModel(decision_model)
+        self._input_preflight = decision_model if isinstance(decision_model, DecisionInputPreflight) else None
         self._enabled = enabled
         self._timeout_seconds = timeout_seconds
         self._max_evidence_bytes = max_evidence_bytes
@@ -259,24 +272,31 @@ class DecisionApplicabilitySelector:
             ensure_ascii=False,
         )
         started = time.monotonic()
+        decision_request = DecisionRequest(
+            decision_kind="artifact.applicability" if second is None else "skill.applicability-preference",
+            question=APPLICABILITY_QUESTION if second is None else PREFERENCE_QUESTION,
+            subject=subject,
+            evidence=evidence,
+        )
+        budget_reason = None
         if len((subject + "".join(evidence)).encode("utf-8")) > self._max_evidence_bytes:
+            budget_reason = "complete evidence exceeds the selection input budget"
+        elif self._input_preflight is not None:
+            try:
+                self._input_preflight.validate_input(decision_request)
+            except InferenceConfigurationError:
+                budget_reason = "complete input cannot pass the decision provider input preflight"
+        if budget_reason is not None:
             return CandidateAssessment(
                 address=first.address,
                 outcome=DecisionOutcome.ABSTAIN,
                 policy_id="local.input-budget",
                 used_fallback=False,
-                elapsed_ms=0,
-                reason="complete evidence exceeds the selection input budget",
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                reason=budget_reason,
             )
         assert self._model is not None  # noqa: S101
-        result: DecisionResult = await self._model.evaluate(
-            DecisionRequest(
-                decision_kind="artifact.applicability" if second is None else "skill.applicability-preference",
-                question=APPLICABILITY_QUESTION if second is None else PREFERENCE_QUESTION,
-                subject=subject,
-                evidence=evidence,
-            )
-        )
+        result: DecisionResult = await self._model.evaluate(decision_request)
         return CandidateAssessment(
             address=first.address,
             outcome=result.outcome,

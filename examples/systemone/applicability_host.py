@@ -339,11 +339,18 @@ async def run_codex_host(
         and f"POWERCONTEXT_CONTEXT_READ {digest}" in item.get("aggregated_output", "")
         for item in commands
     )
+    validation_commands = [
+        item for item in commands if _runs_fixture_python(item.get("command", ""), "contract_test", directory)
+    ]
     tests_run = any(
-        _runs_fixture_python(item.get("command", ""), "contract_test", directory)
-        and item.get("exit_code") == 0
-        and "CONTRACT_TEST_PASSED" in item.get("aggregated_output", "")
-        for item in commands
+        item.get("exit_code") == 0 and "CONTRACT_TEST_PASSED" in item.get("aggregated_output", "")
+        for item in validation_commands
+    )
+    last_validation = validation_commands[-1] if validation_commands else None
+    final_tests_passed = (
+        last_validation is not None
+        and last_validation.get("exit_code") == 0
+        and "CONTRACT_TEST_PASSED" in last_validation.get("aggregated_output", "")
     )
     generation_run = any(
         _runs_fixture_python(item.get("command", ""), "generate", directory)
@@ -355,15 +362,32 @@ async def run_codex_host(
     invocation_observed = workflow_observed and any(
         item.package_digest in _CONTRACT_WORKFLOW_DIGESTS for item in selected
     )
-    success = exit_code == 0 and generation_run and tests_run and verify_workspace(directory, digest)
+    workspace_verified = verify_workspace(directory, digest)
+    success = exit_code == 0 and generation_run and final_tests_passed and workspace_verified
+    validation = "unknown"
+    if last_validation is not None:
+        if not workspace_verified or last_validation.get("exit_code") not in {0, None}:
+            validation = "failed"
+        elif workflow_observed and final_tests_passed:
+            validation = "passed"
+    outcome = "unknown"
+    if success:
+        outcome = "success"
+    elif exit_code != 0 or not workspace_verified or validation == "failed":
+        outcome = "failure"
     evidence = {
         "host": "real Codex CLI, explicit context loading",
         "context_digest": digest,
         "context_read_observed": context_read,
         "contract_test_observed": tests_run,
+        "final_contract_test_passed": final_tests_passed,
         "generation_observed": generation_run,
         "skill_invocation_observed": invocation_observed,
+        "workspace_verified": workspace_verified,
+        "validation_command_observed": bool(validation_commands),
+        "workflow_validation": validation,
         "task_success": success,
+        "task_outcome": outcome,
         "exit_code": exit_code,
         "elapsed_ms": (time.monotonic() - started) * 1000,
         "usage": [event.get("usage") for event in events if event.get("type") == "turn.completed"],
@@ -391,8 +415,8 @@ async def run_codex_host(
                 "target_id": "codex-explicit-context",
                 "selected": True,
                 "invoked": "true" if invoked else "unknown",
-                "validation": "passed",
-                "outcome": ("success" if success else "failure") if invoked else "unknown",
+                "validation": validation if candidate.package_digest in _CONTRACT_WORKFLOW_DIGESTS else "unknown",
+                "outcome": outcome if invoked else "unknown",
                 "task_source": source.source,
             })
         )

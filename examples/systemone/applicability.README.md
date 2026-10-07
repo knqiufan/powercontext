@@ -72,8 +72,13 @@ as proof of eligibility. Revalidation is a read-time check, not an execution lea
 The default catalog requests at most two Experiences and eight Skills. The selector accepts at
 most 16 candidates and performs at most N absolute decisions plus N−1 Skill preferences, with
 a 60-second total deadline and a 24,000-byte complete-evidence budget per decision. Oversized
-evidence is explicitly unknown, never silently clipped. The existing provider/Laya preflight
-also applies. Catalog revalidation repeats the bounded reads and package downloads. The existing
+evidence is explicitly unknown, never silently clipped. Backends implementing the optional
+`DecisionInputPreflight.validate_input` port are checked before the failure envelope. The System
+One adapter supplies this local check using the same full JSON encoding as the request, including
+escaping and instructions, and the configured Laya checkpoint limits. A local input rejection
+is an abstention with `used_fallback=False`, not an outage that restores the retrieval baseline.
+Direct adapter calls still raise inference configuration errors for rejected input. Catalog
+revalidation repeats the bounded reads and package downloads. The existing
 server's retrieval and library search own their indexing costs; this example does not establish
 whole-library performance. No programs in Skill packages are executed by the selector/catalog.
 
@@ -94,6 +99,12 @@ These `.env_*` files are ignored by Git. Configure:
 | `SYSTEMONE_ENDPOINT` | Complete decision URL: OpenRouter `/api/alpha/decisions`, or Laya `/v1/systemone` |
 | `SYSTEMONE_MODEL` | Served model ID; prefer a provider-verified fixed version |
 | `SYSTEMONE_API_KEY` | Provider credential; leave empty only for a local unauthenticated Laya server |
+
+`--env-file` is the sole source of these provider settings. Process `SYSTEMONE_*` variables
+cannot override or fill missing fields in it, and loading the file does not change the process
+environment. The file uses the existing UTF-8, shell-free assignment parser: quoted values are
+supported, while shell expansion is rejected unless single-quoted/escaped as a literal. An unreadable,
+malformed or incomplete file fails before evaluation starts.
 
 For Jev, the template selects OpenRouter and a versioned model ID. Fill in only the key in
 your local `.env_jev`; never commit it:
@@ -165,6 +176,17 @@ Commands may run the fixture's `.py` file or its equivalent `python -m` module; 
 main targets, successful exit codes, output markers and independent workspace checks provide
 the evidence. Quoted names in unrelated commands do not count as fixture execution. Other selected
 Skills retain unknown invocation/outcome: generating a client cannot establish deployment.
+Usage `validation` is also attributed to the exact known fixture package. `passed` requires
+the observed workflow, a successful final contract-test command and marker, and independent
+workspace verification. A failed validation command or failed workspace verification after a
+validation attempt yields `failed`; absent validation commands, incomplete observations and
+other Skill packages yield `unknown`. A host session failure alone does not change a witnessed
+validation pass. The outcome Source includes the independent verification and observed validation
+status, keeping validation separate from overall task success.
+The strict benchmark requires affirmative completion evidence. Missing final markers or exit
+status can leave `task_success=False` while usage `outcome=unknown`; insufficient observation
+does not establish failure. An observed failed validation, failed independent verification or
+host failure still records `outcome=failure` for an invoked fixture Skill.
 An empty Skill selection cannot produce a Skill invocation observation. Selection or a host's
 final prose alone leaves invocation unknown.
 The JSONL host trace and independent checks support the observation.

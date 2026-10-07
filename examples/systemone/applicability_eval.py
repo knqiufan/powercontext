@@ -34,13 +34,13 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from pydantic import Field, SecretStr, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import ValidationError
 
 from powercontext.builtin.artifacts.skill.external import AgentEnvironmentProfile, AgentSkillTarget
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime import DecisionModel, DecisionOutcome, RuntimeConfig
 from powercontext.builtin.runtime.config import ExternalSkillsConfig
+from powercontext.cli.env_file import EnvironmentFileError, read_environment_file
 from powercontext.client import PowerContextClient
 from powercontext.http import ArtifactReference
 from powercontext.server.factory import create_server_app
@@ -52,20 +52,6 @@ from .applicability_catalog import ServerCandidateCatalog
 from .applicability_fixture import CASES, FIXTURE_VERSION, EvaluationCase, seed_fixture
 from .applicability_host import run_codex_host
 from .decision import load_laya_budget
-
-
-class ProviderSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="SYSTEMONE_",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        hide_input_in_errors=True,
-    )
-
-    provider: Literal["jev", "laya"]
-    endpoint: str = Field(repr=False)
-    model: str
-    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""), repr=False)
 
 
 def selection_metrics(
@@ -305,10 +291,15 @@ def main() -> int:
         if value is not None and (not math.isfinite(value) or value < 0):
             parser.error("prices must be finite and nonnegative")
     try:
-        # BaseSettings obtains required fields from the dedicated environment file.
-        settings = ProviderSettings(_env_file=args.env_file)  # ty: ignore[missing-argument, unknown-argument]
-        config = SystemOneConfig.model_validate(settings.model_dump())
-    except ValidationError:
+        # One explicit file owns the entire provider tuple; process values cannot mix into it.
+        environment = {name.upper(): value for name, value in read_environment_file(args.env_file).items()}
+        config = SystemOneConfig.model_validate({
+            "provider": environment.get("SYSTEMONE_PROVIDER", ""),
+            "endpoint": environment.get("SYSTEMONE_ENDPOINT", ""),
+            "model": environment.get("SYSTEMONE_MODEL", ""),
+            "api_key": environment.get("SYSTEMONE_API_KEY", ""),
+        })
+    except (OSError, EnvironmentFileError, ValidationError):
         parser.error("Invalid SYSTEMONE_* settings; configure the dedicated provider file")
     if config.provider == "laya" and args.checkpoint is None:
         parser.error("Laya requires --checkpoint matching the served model")

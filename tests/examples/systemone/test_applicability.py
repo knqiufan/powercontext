@@ -19,9 +19,11 @@ import hashlib
 import json
 from collections import deque
 
+import httpx
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
+from examples.systemone.adapter import SystemOneConfig, SystemOneDecisionModel
 from examples.systemone.applicability import (
     APPLICABILITY_VERSION,
     PREFERENCE_VERSION,
@@ -29,6 +31,7 @@ from examples.systemone.applicability import (
     DecisionApplicabilitySelector,
     SelectionRequest,
 )
+from examples.systemone.laya import LayaInputBudget
 from powercontext.artifacts import ArtifactAddress, ArtifactRef
 from powercontext.builtin.inference import InferenceUsage
 from powercontext.builtin.runtime import DecisionOutcome, DecisionRequest, DecisionResult
@@ -165,6 +168,192 @@ def test_complete_oversized_evidence_is_unknown_without_a_provider_call() -> Non
         assert result.assessments[0].reason == "complete evidence exceeds the selection input budget"
         assert result.recommendations == ()
         assert model.requests == []  # Oversized evidence must not incur an external request.
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("text", ['"\\' * 6000, '证据😀"\\\n' * 1600], ids=["quote-backslash", "unicode-control"])
+def test_provider_encoding_budget_is_unknown_without_recommending_unassessed_candidates(text: str) -> None:
+    """Use the real selector and wire adapter; only the network is simulated."""
+
+    async def scenario() -> None:
+        request = SelectionRequest(task="Change the HTTP contract", candidates=(candidate("escaped", text=text),))
+        sent: list[httpx.Request] = []
+
+        def handler(incoming: httpx.Request) -> httpx.Response:
+            sent.append(incoming)
+            return httpx.Response(
+                200,
+                json={
+                    "answers": {
+                        "decision": {
+                            "type": "choice",
+                            "choice": "abstain",
+                            "probabilities": {"yes": 0.0, "no": 0.0, "abstain": 1.0},
+                        }
+                    },
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            settings = {
+                "provider": "jev",
+                "endpoint": "https://provider.example/decisions",
+                "model": "jev-test",
+                "api_key": "test-key",
+            }
+            unrestricted = SystemOneDecisionModel(
+                SystemOneConfig.model_validate({**settings, "max_request_bytes": 100000}), client
+            )
+            await DecisionApplicabilitySelector(unrestricted, enabled=True).select(request)
+            body = json.loads(sent.pop().content)
+            state = json.loads(body["state"])
+            assert state["evidence"] == [text]
+            assert len((state["subject"] + text).encode("utf-8")) < 24000
+            assert len(json.dumps(body, ensure_ascii=False).encode("utf-8")) > 32768
+
+            bounded = SystemOneDecisionModel(SystemOneConfig.model_validate(settings), client)
+            result = await DecisionApplicabilitySelector(bounded, enabled=True).select(request)
+            assert result.status == "uncertain"
+            assert result.mode == "decision"
+            assert result.recommendations == ()
+            assert result.used_fallback is False
+            assert result.assessments[0].outcome is DecisionOutcome.ABSTAIN
+            assert result.assessments[0].policy_id == "local.input-budget"
+            assert result.assessments[0].input_tokens is None
+            assert sent == []  # A locally unexecutable input must incur no request.
+
+    asyncio.run(scenario())
+
+
+def test_laya_checkpoint_budget_is_unknown_without_backend_fallback() -> None:
+    async def scenario() -> None:
+        sent: list[httpx.Request] = []
+
+        def handler(incoming: httpx.Request) -> httpx.Response:
+            sent.append(incoming)
+            pytest.fail("the rejected input must not reach a provider")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = SystemOneDecisionModel(
+                SystemOneConfig(provider="laya", endpoint="http://127.0.0.1:8891/v1/systemone", model="test"),
+                client,
+                laya_budget=LayaInputBudget(
+                    tokenize=lambda text: list(range(len(text.split()))),
+                    max_length=256,
+                    head_max_length=128,
+                    mask_token="<mask>",  # noqa: S106 - Tokenizer vocabulary.
+                ),
+            )
+            result = await DecisionApplicabilitySelector(model, enabled=True).select(
+                SelectionRequest(task="Change the contract", candidates=(candidate("contract"),))
+            )
+            assert result.status == "uncertain"
+            assert result.recommendations == ()
+            assert result.used_fallback is False
+            assert result.assessments[0].policy_id == "local.input-budget"
+            assert sent == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("boundary", ["fits", "one-byte-over", "outage"])
+def test_exact_wire_budget_preserves_valid_calls_and_real_outage_policy(boundary: str) -> None:
+    async def scenario() -> None:
+        request = SelectionRequest(task="Check the contract", candidates=(candidate("contract", text='完整证据"\\'),))
+        sent: list[httpx.Request] = []
+        unavailable = False
+
+        def handler(incoming: httpx.Request) -> httpx.Response:
+            sent.append(incoming)
+            if unavailable:
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                json={
+                    "answers": {
+                        "decision": {
+                            "type": "choice",
+                            "choice": "no",
+                            "probabilities": {"yes": 0.0, "no": 1.0, "abstain": 0.0},
+                        }
+                    }
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            config = SystemOneConfig(
+                provider="jev",
+                endpoint="https://provider.example/decisions",
+                model="test",
+                api_key=SecretStr("test-key"),
+            )
+            await DecisionApplicabilitySelector(SystemOneDecisionModel(config, client), enabled=True).select(request)
+            wire_size = len(sent.pop().content)
+            config = config.model_copy(update={"max_request_bytes": wire_size - (boundary == "one-byte-over")})
+            unavailable = boundary == "outage"
+            result = await DecisionApplicabilitySelector(SystemOneDecisionModel(config, client), enabled=True).select(
+                request
+            )
+            if boundary == "one-byte-over":
+                assert result.status == "uncertain"
+                assert result.recommendations == ()
+                assert result.used_fallback is False
+                assert sent == []
+            elif boundary == "outage":
+                baseline = await DecisionApplicabilitySelector().select(request)
+                assert result.recommendations == baseline.recommendations
+                assert result.mode == "retrieval"
+                assert result.used_fallback is True
+                assert len(sent) == 1
+            else:
+                assert result.status == "none"
+                assert result.recommendations == ()
+                assert result.used_fallback is False
+                assert len(sent) == 1
+
+    asyncio.run(scenario())
+
+
+def test_oversized_preference_keeps_only_an_individually_assessed_skill() -> None:
+    async def scenario() -> None:
+        pool = (candidate("first", text='"' * 4500), candidate("second", text='"' * 4500))
+        request = SelectionRequest(task="Change the contract", candidates=pool)
+        sent: list[httpx.Request] = []
+
+        def handler(incoming: httpx.Request) -> httpx.Response:
+            sent.append(incoming)
+            return httpx.Response(
+                200,
+                json={
+                    "answers": {
+                        "decision": {
+                            "type": "choice",
+                            "choice": "yes",
+                            "probabilities": {"yes": 1.0, "no": 0.0, "abstain": 0.0},
+                        }
+                    }
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = SystemOneDecisionModel(
+                SystemOneConfig(
+                    provider="jev",
+                    endpoint="https://provider.example/decisions",
+                    model="test",
+                    api_key=SecretStr("test-key"),
+                ),
+                client,
+            )
+            result = await DecisionApplicabilitySelector(model, enabled=True).select(request)
+            assert result.mode == "decision"
+            assert result.used_fallback is False
+            assert result.recommendations == (pool[0].address,)
+            assert all(item.outcome is DecisionOutcome.YES for item in result.assessments)
+            assert result.preferences[0].decision.outcome is DecisionOutcome.ABSTAIN
+            assert result.preferences[0].decision.policy_id == "local.input-budget"
+            assert len(sent) == 2  # The pair cannot incur a request after its complete input fails preflight.
 
     asyncio.run(scenario())
 
