@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -50,6 +52,7 @@ from powercontext.builtin.runtime import (
     open_builtin_contexts,
 )
 from powercontext.builtin.runtime.config import ExternalSkillsConfig
+from powercontext.builtin.sources.content import ContentCapture
 from powercontext.builtin.sources.skill_usage import SkillUsageCapture
 from powercontext.client import ForbiddenResponseError, PowerContextClient
 from powercontext.http import (
@@ -686,5 +689,212 @@ def test_simulated_host_trace_records_exact_usage_without_crediting_selection_al
             assert {"name": usage.task_source.source_type, "source_id": usage.task_source.source_id} == evidence[
                 "outcome_source"
             ]
+
+    asyncio.run(scenario())
+
+
+def run_fixture_subprocess(
+    directory: Path, script: str, shell: str, *, fallback: str, trace: str
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
+    """Observe a real fixture process using the command/aggregate fields supplied by a host trace."""
+
+    command = [sys.executable, script]
+    direct = subprocess.list2cmdline(command) if sys.platform == "win32" else shlex.join(command)
+    if sys.platform == "win32":
+        invocation = "& '" + sys.executable.replace("'", "''") + "' " + script
+        trailer = f"Get-Content -LiteralPath {script}" if fallback == "cat" else f"Write-Output '{fallback}'"
+        shell_command = [shell, "-NoProfile", "-NonInteractive", "-Command", invocation]
+    else:
+        invocation = direct
+        trailer = f"cat {script}" if fallback == "cat" else "printf '%s\\n' " + shlex.quote(fallback)
+        shell_command = [shell, "-c", invocation]
+    if fallback:
+        shell_command[-1] += " || " + trailer
+    use_shell = bool(fallback) or trace in {"wrapper-success", "call-success"}
+    process = subprocess.run(
+        shell_command if use_shell else command,
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    recorded = (
+        invocation
+        if trace == "call-success"
+        else (subprocess.list2cmdline(shell_command) if sys.platform == "win32" else shlex.join(shell_command))
+        if use_shell
+        else direct
+    )
+    if fallback and trace in {"passed-then-wrapper-args", "passed-then-deep-wrapper"}:
+        # These are simulated bash trace shapes; the real failing subprocess uses the available shell.
+        wrapped = "bash -c " + shlex.quote("python contract_test.py || cat contract_test.py")
+        recorded = (
+            wrapped + " trace-name"
+            if trace == "passed-then-wrapper-args"
+            else "bash -c " + shlex.quote("bash -c " + shlex.quote(wrapped))
+        )
+    return process, {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "command": recorded,
+            "exit_code": process.returncode,
+            "aggregated_output": process.stdout + process.stderr,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "trace",
+    [
+        "failed-cat",
+        "failed-echo",
+        "passed-then-ambiguous",
+        "passed-then-wrapper-args",
+        "passed-then-deep-wrapper",
+        "revalidated",
+        "compound-context",
+        "compound-generation",
+        "wrapper-success",
+        "call-success",
+    ],
+)
+def test_host_attributes_fixture_results_before_persisting_reopened_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trace: str
+) -> None:
+    """Run real fixture/shell subprocesses, but simulate Codex command events and its final exit."""
+
+    shell = shutil.which("pwsh" if sys.platform == "win32" else "bash") or pytest.skip(
+        "This process-attribution scenario requires PowerShell or bash"
+    )
+
+    def simulated_codex(directory: Path, task: str, timeout: int):
+        events = []
+
+        def execute(script: str, *, fallback: str = "", record: bool = True):
+            process, event = run_fixture_subprocess(
+                directory,
+                script,
+                shell,
+                fallback=fallback,
+                trace=trace,
+            )
+            events.extend([event] if record else [])
+            return process
+
+        context_path = directory / "selected-context.json"
+        original_context = context_path.read_bytes()
+        if trace == "compound-context":
+            digest = "sha256:" + hashlib.sha256(original_context).hexdigest()
+            context_path.write_text("{}", encoding="utf-8")
+            assert execute("read_context.py", record=False).returncode == 1
+            process = execute("read_context.py", fallback=f"POWERCONTEXT_CONTEXT_READ {digest}")
+            assert process.returncode == 0 and "POWERCONTEXT_CONTEXT_READ" in process.stdout
+            context_path.write_bytes(original_context)
+        else:
+            assert execute("read_context.py").returncode == 0
+
+        schema_path = directory / "openapi/powercontext.yaml"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["components"]["schemas"]["StatusResponse"]["properties"]["request_id"] = {"type": "string"}
+        valid_schema = json.dumps(schema)
+        if trace == "compound-generation":
+            schema_path.write_text("{}", encoding="utf-8")
+            assert execute("generate.py", record=False).returncode == 1
+            process = execute("generate.py", fallback="CLIENT_GENERATION_PASSED")
+            assert process.returncode == 0 and "CLIENT_GENERATION_PASSED" in process.stdout
+        schema_path.write_text(valid_schema, encoding="utf-8")
+        assert execute("generate.py", record=trace != "compound-generation").returncode == 0
+
+        ambiguous_validation = trace in {
+            "failed-cat",
+            "failed-echo",
+            "passed-then-ambiguous",
+            "passed-then-wrapper-args",
+            "passed-then-deep-wrapper",
+            "revalidated",
+        }
+        if ambiguous_validation:
+            if trace.startswith("passed-then-") or trace == "revalidated":
+                assert execute("contract_test.py").returncode == 0
+            client_path = directory / "client.py"
+            valid_client = client_path.read_text(encoding="utf-8")
+            client_path.write_text(valid_client.replace("NotRequired[str]", "str"), encoding="utf-8")
+            # The target process really fails; only the aggregate shell result and marker look successful.
+            assert execute("contract_test.py", record=False).returncode == 1
+            fallback = "CONTRACT_TEST_PASSED" if trace == "failed-echo" else "cat"
+            process = execute("contract_test.py", fallback=fallback)
+            assert process.returncode == 0 and "CONTRACT_TEST_PASSED" in process.stdout
+            assert "AssertionError" in process.stderr
+            client_path.write_text(valid_client, encoding="utf-8")
+        if not ambiguous_validation or trace == "revalidated":
+            assert execute("contract_test.py").returncode == 0
+        return 0, events
+
+    monkeypatch.setattr("examples.systemone.applicability_host._invoke_codex", simulated_codex)
+
+    async def scenario() -> None:
+        async with server(tmp_path) as (client, _):
+            scope_id, _ = await seed_fixture(client)
+            catalog = ServerCandidateCatalog(client, target(tmp_path))
+            pool = await catalog.retrieve(scope_id, "HTTP contract")
+            request = SelectionRequest(task="Add optional request_id to the HTTP contract", candidates=pool.candidates)
+            result = await DecisionApplicabilitySelector().select(request)
+            evidence = await run_codex_host(
+                client, catalog, scope_id, "HTTP contract", request, result, tmp_path / "host"
+            )
+            invoked = trace.startswith("passed-then-") or trace in {"revalidated", "wrapper-success", "call-success"}
+            validated = trace in {"revalidated", "wrapper-success", "call-success"}
+            succeeded = validated or trace == "compound-context"
+            assert evidence["workspace_verified"] is True
+            assert evidence["context_read_observed"] == (trace != "compound-context")
+            assert evidence["generation_observed"] == (trace != "compound-generation")
+            assert evidence["skill_invocation_observed"] == invoked
+            assert evidence["validation_command_observed"] is True
+            assert evidence["final_validation_attributable"] == (
+                trace not in {"failed-cat", "failed-echo"} and not trace.startswith("passed-then-")
+            )
+            assert evidence["workflow_validation"] == ("passed" if validated else "unknown")
+            assert evidence["task_success"] == succeeded
+            assert evidence["task_outcome"] == ("success" if succeeded else "unknown")
+            sources = cast(list[dict[str, str]], evidence["skill_usage_sources"])
+            assert len(sources) == 1
+            selected = next(
+                item for item in pool.candidates if item.address in result.recommendations and item.package_digest
+            )
+        # Reopen SQLite independently of the HTTP Server, then read the authoritative registered Sources.
+        async with open_builtin_contexts(
+            BuiltinConfig(
+                database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'selection.db'}"),
+                runtime=RuntimeConfig(artifact_processing_families=()),
+            )
+        ) as contexts:
+            context = await contexts.get(scope_id)
+            stored = await context.sources.list()
+            usage_id = next(item for item in stored if item.name == sources[0]["source_id"])
+            usage = await context.sources.read(await context.sources.get(usage_id))
+            assert isinstance(usage, SkillUsageCapture)
+            assert usage.skill_ref.model_dump(mode="json") == selected.address.artifact.model_dump(mode="json")
+            assert usage.package_digest == selected.package_digest
+            assert usage.selected is True
+            assert usage.invoked.value == ("true" if invoked else "unknown")
+            assert usage.validation.value == ("passed" if validated else "unknown")
+            assert usage.outcome.value == ("success" if validated else "unknown")
+            assert usage.task_source is not None
+            source_id = next(item for item in stored if item.name == usage.task_source.source_id)
+            outcome = await context.sources.read(await context.sources.get(source_id))
+            assert isinstance(outcome, ContentCapture)
+            assert outcome.source_id == cast(dict[str, str], evidence["outcome_source"])["source_id"]
+            captured = json.loads(outcome.content)
+            for field in (
+                "context_read_observed",
+                "generation_observed",
+                "final_validation_attributable",
+                "workflow_validation",
+                "task_success",
+                "task_outcome",
+            ):
+                assert captured[field] == evidence[field]
 
     asyncio.run(scenario())

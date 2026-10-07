@@ -174,17 +174,29 @@ outcome Source. `invoked=true` requires observed context reading, generation and
 contract-test commands for an exact known generation/maintenance fixture package.
 Commands may run the fixture's `.py` file or its equivalent `python -m` module; observed Python
 main targets, successful exit codes, output markers and independent workspace checks provide
-the evidence. Quoted names in unrelated commands do not count as fixture execution. Other selected
+the evidence. A result must be attributable to a single Python invocation. Simple bash/PowerShell
+wrappers through two levels and PowerShell's leading `&` call operator are supported. Extra wrapper
+arguments or deeper nesting retain recognizable target attempts with unknown results. A compound command, pipeline,
+redirection or substitution with only aggregate output and exit status cannot prove that the target
+process passed or failed. This rule applies to context reading, generation and contract validation.
+Quoted names in unrelated commands do not count as fixture execution. Other selected
 Skills retain unknown invocation/outcome: generating a client cannot establish deployment.
 Usage `validation` is also attributed to the exact known fixture package. `passed` requires
-the observed workflow, a successful final contract-test command and marker, and independent
-workspace verification. A failed validation command or failed workspace verification after a
+the observed workflow, a successful final contract-test process and marker, and independent
+workspace verification. Every recognized validation attempt is retained: an ambiguous final
+compound command yields `unknown` rather than reusing an earlier pass. For example,
+`python contract_test.py || cat contract_test.py` may print the success marker from source after
+the test failed; it cannot establish validation success. A subsequent attributable successful
+test run can establish a final pass. A failed validation process or failed workspace verification after a
 validation attempt yields `failed`; absent validation commands, incomplete observations and
 other Skill packages yield `unknown`. A host session failure alone does not change a witnessed
 validation pass. The outcome Source includes the independent verification and observed validation
 status, keeping validation separate from overall task success.
-The strict benchmark requires affirmative completion evidence. Missing final markers or exit
-status can leave `task_success=False` while usage `outcome=unknown`; insufficient observation
+Context-reading evidence governs observed loading and Skill invocation. The strict task gate
+requires a successful host exit, attributable successful generation and final validation, and
+independent workspace verification. Missing final markers or exit
+status, or a final result available only from a compound command, can leave `task_success=False`
+while usage `outcome=unknown`; insufficient observation
 does not establish failure. An observed failed validation, failed independent verification or
 host failure still records `outcome=failure` for an invoked fixture Skill.
 An empty Skill selection cannot produce a Skill invocation observation. Selection or a host's

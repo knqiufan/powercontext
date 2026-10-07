@@ -241,47 +241,76 @@ def _invoke_codex(directory: Path, task: str, timeout: int) -> tuple[int | None,
     return exit_code, events
 
 
-def _command_arguments(command: str, *, depth: int = 0) -> Iterator[list[str]]:
-    """Inspect simple command boundaries and CLI shell wrappers without evaluating a trace."""
+def _command_segments(command: str) -> tuple[list[list[str]], bool]:
+    """Inspect static arguments without assigning a compound shell's result to one process."""
 
-    if depth > 2:
-        return
-    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    segments: list[list[str]] = [[]]
+    operators = ";&|\n(){}<>"
     try:
-        for token in lexer:
-            if not token.strip(";&|\n"):
-                segments.append([])
-            else:
-                if token[:1] in {"'", '"'} and token[-1:] == token[:1]:
-                    token = token[1:-1]
-                segments[-1].append(token)
+        prefix = shlex.shlex(command.strip(), posix=False)
+        prefix.whitespace_split = True
+        prefix.commenters = ""
+        executable = next(prefix, "").strip("'\"").replace("\\", "/").rsplit("/", 1)[-1].lower()
+        posix = executable in {"bash", "sh", "zsh"}
+        lexer = shlex.shlex(command.strip(), posix=posix, punctuation_chars=operators)
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
     except ValueError:
-        return
-    for arguments in segments:
-        if not arguments:
-            continue
-        executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if executable in {"bash", "sh", "zsh", "pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
-            option = next(
-                (index for index, value in enumerate(arguments) if value.lower() in {"-c", "-lc", "-command"}),
-                None,
-            )
-            if option is not None and option + 2 == len(arguments):
-                yield from _command_arguments(arguments[option + 1], depth=depth + 1)
+        return [], False
+    # PowerShell's leading call operator starts one process; a later '&' composes commands.
+    if tokens[:1] == ["&"]:
+        tokens = tokens[1:]
+    attributable = True
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if not token.strip(operators):
+            attributable = False
+            segments.append([])
         else:
-            yield arguments
+            quoted = not posix and token[:1] in {"'", '"'} and token[-1:] == token[:1]
+            # Substitutions and shell expansions cannot establish the process from this trace.
+            attributable = attributable and (token[:1] == "'" or not any(character in token for character in "$`#"))
+            segments[-1].append(token[1:-1] if quoted else token)
+    return [arguments for arguments in segments if arguments], attributable
 
 
-def _runs_fixture_python(command: str, module: str, directory: Path) -> bool:
+def _command_arguments(command: str) -> Iterator[tuple[list[str], bool]]:
+    """Keep target attempts even in unsupported wrappers; only two simple wrapper levels are attributable."""
+
+    pending = [(command, 0, True)]
+    while pending:
+        current, depth, attributable = pending.pop()
+        segments, single_invocation = _command_segments(current)
+        attributable = attributable and single_invocation
+        for arguments in segments:
+            executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if executable in {"bash", "sh", "zsh", "pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+                option = next(
+                    (index for index, value in enumerate(arguments) if value.lower() in {"-c", "-lc", "-command"}),
+                    None,
+                )
+                if option is not None and option + 1 < len(arguments):
+                    payload = arguments[option + 1]
+                    # Every expansion strictly shortens the command, so inspection terminates without recursion.
+                    if len(payload) < len(current):
+                        pending.append((
+                            payload,
+                            depth + 1,
+                            attributable and depth < 2 and option + 2 == len(arguments),
+                        ))
+            else:
+                yield arguments, attributable
+
+
+def _runs_fixture_python(command: str, module: str, directory: Path, *, require_attribution: bool = False) -> bool:
     """Match a Python main target, rather than script names quoted by unrelated commands."""
 
-    for arguments in _command_arguments(command):
+    for arguments, attributable in _command_arguments(command):
         executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable) is None:
+        if (require_attribution and not attributable) or re.fullmatch(
+            r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable
+        ) is None:
             continue
         arguments = arguments[1:]
         while arguments:
@@ -334,7 +363,7 @@ async def run_codex_host(
         if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "command_execution"
     ]
     context_read = any(
-        _runs_fixture_python(item.get("command", ""), "read_context", directory)
+        _runs_fixture_python(item.get("command", ""), "read_context", directory, require_attribution=True)
         and item.get("exit_code") == 0
         and f"POWERCONTEXT_CONTEXT_READ {digest}" in item.get("aggregated_output", "")
         for item in commands
@@ -343,17 +372,23 @@ async def run_codex_host(
         item for item in commands if _runs_fixture_python(item.get("command", ""), "contract_test", directory)
     ]
     tests_run = any(
-        item.get("exit_code") == 0 and "CONTRACT_TEST_PASSED" in item.get("aggregated_output", "")
+        _runs_fixture_python(item.get("command", ""), "contract_test", directory, require_attribution=True)
+        and item.get("exit_code") == 0
+        and "CONTRACT_TEST_PASSED" in item.get("aggregated_output", "")
         for item in validation_commands
     )
     last_validation = validation_commands[-1] if validation_commands else None
+    final_validation_attributable = last_validation is not None and _runs_fixture_python(
+        last_validation.get("command", ""), "contract_test", directory, require_attribution=True
+    )
     final_tests_passed = (
-        last_validation is not None
+        final_validation_attributable
+        and last_validation is not None
         and last_validation.get("exit_code") == 0
         and "CONTRACT_TEST_PASSED" in last_validation.get("aggregated_output", "")
     )
     generation_run = any(
-        _runs_fixture_python(item.get("command", ""), "generate", directory)
+        _runs_fixture_python(item.get("command", ""), "generate", directory, require_attribution=True)
         and item.get("exit_code") == 0
         and "CLIENT_GENERATION_PASSED" in item.get("aggregated_output", "")
         for item in commands
@@ -366,7 +401,9 @@ async def run_codex_host(
     success = exit_code == 0 and generation_run and final_tests_passed and workspace_verified
     validation = "unknown"
     if last_validation is not None:
-        if not workspace_verified or last_validation.get("exit_code") not in {0, None}:
+        if not workspace_verified or (
+            final_validation_attributable and last_validation.get("exit_code") not in {0, None}
+        ):
             validation = "failed"
         elif workflow_observed and final_tests_passed:
             validation = "passed"
@@ -385,6 +422,7 @@ async def run_codex_host(
         "skill_invocation_observed": invocation_observed,
         "workspace_verified": workspace_verified,
         "validation_command_observed": bool(validation_commands),
+        "final_validation_attributable": final_validation_attributable,
         "workflow_validation": validation,
         "task_success": success,
         "task_outcome": outcome,
