@@ -722,6 +722,13 @@ def run_fixture_subprocess(
             }[trace]
             shell_command[-1] = prefix + " " + shell_command[-1]
         shell_command[-1] += " || " + trailer
+        if trace == "passed-then-native-compound":
+            harmless = (
+                subprocess.list2cmdline([shell, "-Command", "Write-Output harmless"])
+                if sys.platform == "win32"
+                else shlex.join([shell, "-c", "printf harmless"])
+            )
+            shell_command[-1] = harmless + "; " + shell_command[-1]
     use_shell = bool(fallback) or trace in {"wrapper-success", "call-success"}
     process = subprocess.run(
         shell_command if use_shell else command,
@@ -765,6 +772,7 @@ def run_fixture_subprocess(
         "passed-then-ambiguous",
         "passed-then-wrapper-args",
         "passed-then-deep-wrapper",
+        "passed-then-native-compound",
         "passed-then-assignment",
         "passed-then-assignment-quoted",
         "passed-then-env",
@@ -835,6 +843,7 @@ def test_host_attributes_fixture_results_before_persisting_reopened_usage(
                 "passed-then-ambiguous",
                 "passed-then-wrapper-args",
                 "passed-then-deep-wrapper",
+                "passed-then-native-compound",
                 "revalidated",
             }
             or prefixed_validation

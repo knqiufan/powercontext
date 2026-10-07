@@ -253,7 +253,9 @@ def _command_segments(command: str) -> tuple[list[list[str]], bool]:
         first_token = next(prefix, "").strip("'\"")
         executable = first_token.replace("\\", "/").rsplit("/", 1)[-1].lower()
         if sys.platform == "win32" and executable in {"bash.exe", "sh.exe", "zsh.exe", "pwsh.exe", "powershell.exe"}:
-            return [_windows_command_arguments(command)], True
+            native_arguments = _windows_command_arguments(command)
+            if native_arguments is not None:
+                return [native_arguments], True
         posix = executable in {"bash", "sh", "zsh", "env", "env.exe"} or bool(
             re.match(r"[A-Za-z_][A-Za-z0-9_]*=", first_token)
         )
@@ -281,9 +283,21 @@ def _command_segments(command: str) -> tuple[list[list[str]], bool]:
     return [arguments for arguments in segments if arguments], attributable
 
 
-def _windows_command_arguments(command: str) -> list[str]:
+def _windows_command_arguments(command: str) -> list[str] | None:
     """Decode native launcher arguments without losing escaped quotes in its payload."""
 
+    quoted = False
+    backslashes = 0
+    for character in command.strip():
+        if character == '"' and backslashes % 2 == 0:
+            quoted = not quoted
+        elif not quoted and character in "';&|\n(){}<>":
+            # Operators outside native argument quotes belong to the shell.
+            # Preserve its segments so a later failed test remains visible.
+            return None
+        backslashes = backslashes + 1 if character == "\\" else 0
+    if quoted:
+        return None
     if sys.platform != "win32":
         raise ValueError("Native command-line decoding requires Windows")  # noqa: TRY003
     shell = ctypes.WinDLL("shell32", use_last_error=True)
