@@ -40,7 +40,7 @@ repeating that command does not update a moving branch. A broken checkout is rep
 
 Existing UI and model patches can remain in place. Setup checks the composed PowerContext connection settings;
 see [remote connection configuration](../operate/connect-remote-server.md) for conflicts and dynamic configuration limits.
-The check includes children of both `group: true` groups and groups named `@deepseek-ai/cordis-plugin-group`;
+The check includes children of `group: true` groups and groups named `@deepseek-ai/cordis-plugin-group` or `cordis:group`;
 multiple PowerContext entries are rejected before installation and during the installed-configuration check.
 Native `@deepseek-ai/cordis-plugin-include` and `cordis:include` trees are checked with the selected host's
 YAML/JSON parser and include patches. Relative paths start at the profile directory; nested includes resolve

@@ -40,7 +40,7 @@ powercontext setup dsh --source ./powercontext-dsh-dev
 
 已有界面和模型 patch 可以保留。setup 检查合成后的 PowerContext 连接设置；
 冲突处理及动态配置限制见[远程连接配置](../operate/connect-remote-server.md)。
-检查会遍历 `group: true` 分组及名称为 `@deepseek-ai/cordis-plugin-group` 的分组内的子项；
+检查会遍历 `group: true` 分组及名称为 `@deepseek-ai/cordis-plugin-group` 或 `cordis:group` 的分组内的子项；
 安装前检查和安装后复查都会拒绝多个 PowerContext 条目。
 原生 `@deepseek-ai/cordis-plugin-include` 和 `cordis:include` 配置树使用所选宿主的 YAML/JSON 解析器及
 include patches 检查。相对路径从 profile 目录解析，嵌套 include 从所在文件的目录解析。

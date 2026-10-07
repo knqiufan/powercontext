@@ -39,6 +39,9 @@ uv run pytest tests/test_dsh_transport.py --require-dsh-config-runtime
 The Python 3.11–3.14 CI matrix installs this locked configuration package, resolves `DSH_TEST_CONFIG_BOOT`,
 and requires it while running the unit suite. Missing APIs fail instead of silently skipping their tests;
 tests that need the DSH CLI can still skip when that host is absent.
+Native configuration regressions cover all supported group forms (`group: true`,
+`@deepseek-ai/cordis-plugin-group`, and `cordis:group`) through setup and installed readback,
+including duplicate instances, nested includes, disabled children and conditional activation.
 
 Run `uv run pytest tests/test_dsh_transport.py --require-dsh-runtime` with `DSH_TEST_EXECUTABLE` selecting the
 installed DSH CLI. The `dsh-package` CI job resolves both runtimes before running that command and fails if

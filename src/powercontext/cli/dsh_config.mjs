@@ -261,7 +261,7 @@ async function inspect(executable, home, profile, candidate, prospective, requir
         includeStack.add(tree.canonical)
         try { await visit(tree.entries, unavailable, conditionalEntry, tree.baseUrl, tree.file) }
         finally { includeStack.delete(tree.canonical) }
-      } else if (row.group || row.name === '@deepseek-ai/cordis-plugin-group') {
+      } else if (row.group || row.name === '@deepseek-ai/cordis-plugin-group' || row.name === 'cordis:group') {
         if (!Array.isArray(row.config)) fail('DSH group children must be a static entry list before setup', location)
         await visit(row.config, unavailable, conditionalEntry, baseUrl, location)
       }
