@@ -737,6 +737,8 @@ Family, binding, Scope, attempted Window range and attempt/request/token counter
 Deduplication is bounded and local to the Supervisor term; restart or cache eviction may report the condition again.
 Evicted terminal keys remain protected by the domain gate and are revisited through bounded durable-intent discovery;
 terminal cache pressure does not pause other Scope admission.
+Failed metadata rechecks retain the last terminal block, its waiting interval and log deduplication. Exhausting the
+Supervisor's shared admission time allowance yields control without attributing another failure to the Scope.
 
 A terminal frontier retains its Sources, Cursor, Pending, and later same-Scope Sources. It is not a NOOP, success, or
 permission to skip evidence. Other Scope keys remain processable. A retry that succeeds within the remaining allowance

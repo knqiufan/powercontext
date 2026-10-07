@@ -651,6 +651,8 @@ provider 额度完成工作，但不能再开始第四次。请求或 token 额�
 包含 stage、error code、Family、binding、Scope、已尝试的 Window 范围和尝试/请求/token 计数；缓存内状态未变化的
 检查保持安静。日志去重缓存有界且仅在当前 Supervisor 任期内有效，重启或缓存淘汰后可能再次报告该状态。
 淘汰的终止键仍由领域准入检查保护，并通过有界的持久调用发现重新检查；终止缓存压力不暂停其他 Scope 的准入。
+metadata 重新检查出错时保留已知终止状态、等待间隔和日志去重信息；Supervisor 共享准入时间额度耗尽时让出控制，
+不将正在检查的 Scope 记成新的失败。
 
 终止的 frontier 保留 Source、Cursor、Pending 以及同 Scope 尾部；不会视为 NOOP、成功或跳过证据的授权。其他 Scope
 仍可处理。剩余额度内重试成功后仍按原合同发布，并继续处理尾部。不提供自动额度重置、retry/reset API 或 quarantine

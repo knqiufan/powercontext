@@ -510,6 +510,15 @@ failure metadata carrying the same block, so the Supervisor can enter waiting wi
 failure. Other errors preserve ordinary backoff. Metadata-probe failures are isolated to the affected key and back off;
 they do not revoke the shared Supervisor term. No Source selection, token estimation or model work moves to the parent.
 Admission checks share a bounded time allowance per Family per cycle, so a page of slow probes yields to other Families.
+The shared allowance decides whether another check starts; it does not shorten a check already in flight. Each probe
+owns a full bounded I/O timeout, independent of earlier Scopes. A cycle may finish its last probe after the shared
+allowance expires; probe work is bounded by the shared allowance plus one probe timeout. This yields to other Families
+without charging an unrelated Scope a failure. A failed terminal recheck retains its blocked interval, block identity
+and failure history. Its first or changed probe error emits
+`artifact_processing.block_recheck_failed` as a warning; repeated identical errors stay quiet until a successful check.
+The attempted request generation is remembered even when the check fails, so ordinary wakes cannot repeatedly bypass
+the interval, while a newer explicit request can still recheck promptly. A probe's own timeout, distinct from shared
+allowance expiry, remains a genuine probe error.
 
 Memory owns a persisted per-Scope window reduction for generation timeouts. A failed extraction can
 halve the next window without advancing its Source cursor or acknowledging the invocation; the

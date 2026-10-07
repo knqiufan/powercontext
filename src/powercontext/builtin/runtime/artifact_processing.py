@@ -77,6 +77,7 @@ _OCEANBASE_LEASE_SECONDS = 15.0
 _RETRY_BASE_SECONDS = 30.0
 _RETRY_CAP_SECONDS = 1800.0
 _BLOCKED_CHECK_SECONDS = 300.0
+_ADMISSION_PROBE_TIMEOUT_SECONDS = 2.0
 _CONTROL_CONFLICT_RETRY_SECONDS = 0.1
 _DISCOVERY_PAGE_SIZE = 100
 _RETRY_STATE_LIMIT = 1000
@@ -382,6 +383,7 @@ class _RetryState:
     deadline: float
     block: ArtifactProcessingBlock | None = None
     request_generation: int = 0
+    probe_error: tuple[str, str] | None = None
 
 
 @dataclass(slots=True)
@@ -840,6 +842,7 @@ class ArtifactProcessingSupervisor:
         *,
         block: ArtifactProcessingBlock | None = None,
         request_generation: int = 0,
+        probe_error: tuple[str, str] | None = None,
     ) -> None:
         if scope not in state.retries and len(state.retries) >= _RETRY_STATE_LIMIT:
             now = asyncio.get_running_loop().time()
@@ -876,7 +879,7 @@ class ArtifactProcessingSupervisor:
                 state.overflow_not_before = max(state.overflow_not_before, deadline)
                 self.wake(state.binding.binding_name)
                 return
-        state.retries[scope] = _RetryState(failures, deadline, block, request_generation)
+        state.retries[scope] = _RetryState(failures, deadline, block, request_generation, probe_error)
 
     async def _dispatch(self, state: _FamilyState) -> None:
         # Rejections do not occupy slots. Bound their admission work so a page
@@ -907,16 +910,18 @@ class ArtifactProcessingSupervisor:
             )
             if state.binding.work_block is not None:
                 try:
-                    async with asyncio.timeout_at(admission_deadline), self._database.transaction() as connection:
+                    # Each probe owns its full I/O allowance. Earlier Scopes'
+                    # work must not turn this check into a spurious timeout.
+                    async with (
+                        asyncio.timeout(_ADMISSION_PROBE_TIMEOUT_SECONDS),
+                        self._database.transaction() as connection,
+                    ):
                         await self._leases.require_fence(connection, fence)
                         block = await state.binding.work_block(connection, scope, state.binding.binding_name)
                 except ArtifactProcessingLeadershipLostError:
                     raise
                 except Exception as error:
-                    failures = 1 if retry is None else retry.failures + 1
-                    delay = self._retry_delay(failures)
-                    self._defer(state, scope, failures, asyncio.get_running_loop().time() + delay)
-                    self._log_failure(state, assignment, error, "work_admission", failures, delay)
+                    self._defer_admission_error(state, assignment, error)
                     continue
                 if block is not None:
                     self._wait_for_block(state, assignment, block)
@@ -930,6 +935,45 @@ class ArtifactProcessingSupervisor:
             state.running[scope] = _RunningWorker(assignment, task, asyncio.get_running_loop().time())
         if state.ready and len(state.running) < state.binding.max_workers:
             self._wake.set()
+
+    def _defer_admission_error(
+        self, state: _FamilyState, assignment: ArtifactProcessingWorkAssignment, error: Exception
+    ) -> None:
+        retry = state.retries.get(assignment.scope_id)
+        now = asyncio.get_running_loop().time()
+        if retry is not None and retry.block is not None:
+            probe_error = (type(error).__name__, _safe_error_attribute(error, "error_code", type(error).__name__))
+            if retry.probe_error != probe_error:
+                log_safely(
+                    logger,
+                    logging.WARNING,
+                    "Artifact processing block recheck failed; retaining the last observed block",
+                    extra={
+                        "event": "artifact_processing.block_recheck_failed",
+                        "stage": "work_admission",
+                        "binding": assignment.binding_name,
+                        "family": assignment.artifact_family,
+                        "scope": assignment.scope_id,
+                        "request_generation": assignment.claimed_request_generation,
+                        "exception_type": probe_error[0],
+                        "error_code": probe_error[1],
+                        "retry_delay_seconds": self._blocked_check_seconds,
+                    },
+                )
+            self._defer(
+                state,
+                assignment.scope_id,
+                retry.failures,
+                now + self._blocked_check_seconds,
+                block=retry.block,
+                request_generation=assignment.claimed_request_generation,
+                probe_error=probe_error,
+            )
+            return
+        failures = 1 if retry is None else retry.failures + 1
+        delay = self._retry_delay(failures)
+        self._defer(state, assignment.scope_id, failures, now + delay)
+        self._log_failure(state, assignment, error, "work_admission", failures, delay)
 
     def _wait_for_block(
         self, state: _FamilyState, assignment: ArtifactProcessingWorkAssignment, block: ArtifactProcessingBlock
