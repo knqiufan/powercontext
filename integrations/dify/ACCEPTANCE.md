@@ -2,7 +2,7 @@
 
 ## Tested source and tools
 
-Local validation date: 2026-10-03. Server baseline: PowerContext master `6b2f6e8a4c1aac59fca75662aca26d78748bfa29` with the model-usage prerequisite [#1838](https://github.com/oceanbase/powercontext/pull/1838) at `86811036b5f52266e9fe493147c26c595a9926c0`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
+Local validation date: 2026-10-07. Server baseline: PowerContext master `70ed3648ce9e11d8e21d8ca249bdf88b253ace87`; public HTTP contract version 1.2.0. The plugin's generated contract hashes canonical UTF-8/LF OpenAPI text so Windows Git line endings do not change it.
 
 | Component | Tested version / environment |
 | --- | --- |
