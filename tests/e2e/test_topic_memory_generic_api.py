@@ -31,6 +31,7 @@ from powercontext.builtin.persistence.sqlite.topic_memory_index import SQLiteTop
 from powercontext.builtin.persistence.statistics import StatisticsRepository
 from powercontext.builtin.persistence.tag_schema import ensure_topic_memory_tag_schema
 from powercontext.builtin.runtime import InferenceConfig, RuntimeConfig
+from powercontext.builtin.runtime._model_usage import _ModelUsageRecorder
 from powercontext.server.factory import create_server_app
 from powercontext.server.settings import AccessControlConfig, BearerAuthConfig, McpConfig, ServerSettings
 
@@ -107,7 +108,7 @@ def _topic_embedding_requests(database, scope=None):
         return connection.execute(query, parameters).fetchone()[0]
 
 
-async def _await_usage_record(database, scope):
+async def _await_usage_record(database, scope, write_budget):
     """Wait until the scope's usage row is visible.
 
     A visible row means the recorder's transaction committed, so it no longer
@@ -115,9 +116,13 @@ async def _await_usage_record(database, scope):
     consult the busy handler and fails immediately instead of waiting, so a
     health check issued while that write is still in flight measures contention
     rather than the runtime's health.
+
+    The window must exceed the recorder's own write budget: a record that
+    consumes its whole budget commits late but still commits, and a window
+    smaller than the budget would report a healthy runtime as wedged.
     """
 
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(write_budget + 5):
         while _topic_embedding_requests(database, scope) == 0:  # noqa: ASYNC110 - bounded observation of committed database state
             await asyncio.sleep(0.02)
 
@@ -465,7 +470,7 @@ def test_stalled_usage_write_does_not_delay_or_fail_the_topic_write(tmp_path, mo
                 assert await asyncio.wait_for(entered.wait(), 5)
                 release.set()
             assert len((await client.get(path + "/topic-memory")).json()["items"]) == 1
-            await _await_usage_record(tmp_path / "topics.db", scope)
+            await _await_usage_record(tmp_path / "topics.db", scope, 30.0)
             assert (await client.post(path, json=payload)).status_code == 201
 
     asyncio.run(scenario())
@@ -566,7 +571,13 @@ def test_cancelling_a_request_during_a_stalled_usage_write_leaves_the_runtime_he
     async def scenario():
         release = asyncio.Event()
         entered = asyncio.Event()
+        completing = asyncio.Event()
         original = StatisticsRepository.record
+        original_flush = _ModelUsageRecorder.flush
+
+        async def observed_flush(recorder, through=None):
+            completing.set()
+            await original_flush(recorder, through)
 
         async def stalled_record(repository, connection, *args):
             entered.set()
@@ -588,13 +599,25 @@ def test_cancelling_a_request_during_a_stalled_usage_write_leaves_the_runtime_he
             payload = {"family": "topic-memory", "content": _content("cancelled")}
             with monkeypatch.context() as injected:
                 injected.setattr(StatisticsRepository, "record", stalled_record)
+                injected.setattr(_ModelUsageRecorder, "flush", observed_flush)
                 pending = asyncio.create_task(client.post(path, json=payload))
                 await asyncio.wait_for(entered.wait(), 5)
+                # Usage can start before the business transaction commits. Cancel
+                # at the request's usage completion boundary, after that commit.
+                await asyncio.wait_for(completing.wait(), 5)
                 pending.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await pending
                 release.set()
-            await _await_usage_record(tmp_path / "topics.db", scope)
+            await _await_usage_record(tmp_path / "topics.db", scope, 30.0)
+            assert _topic_embedding_requests(tmp_path / "topics.db", scope) == 1
+            listed = await client.get(path + "/topic-memory")
+            assert listed.status_code == 200, listed.text
+            assert len(listed.json()["items"]) == 1
+            artifact_id = listed.json()["items"][0]["artifact_id"]
+            saved = await client.get(f"{path}/topic-memory/{artifact_id}")
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["content"] == payload["content"]
             assert (await client.post(path, json=payload)).status_code == 201
 
     asyncio.run(scenario())
