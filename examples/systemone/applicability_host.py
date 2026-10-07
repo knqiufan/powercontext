@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
@@ -249,8 +250,13 @@ def _command_segments(command: str) -> tuple[list[list[str]], bool]:
         prefix = shlex.shlex(command.strip(), posix=False)
         prefix.whitespace_split = True
         prefix.commenters = ""
-        executable = next(prefix, "").strip("'\"").replace("\\", "/").rsplit("/", 1)[-1].lower()
-        posix = executable in {"bash", "sh", "zsh"}
+        first_token = next(prefix, "").strip("'\"")
+        executable = first_token.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if sys.platform == "win32" and executable in {"bash.exe", "sh.exe", "zsh.exe", "pwsh.exe", "powershell.exe"}:
+            return [_windows_command_arguments(command)], True
+        posix = executable in {"bash", "sh", "zsh", "env", "env.exe"} or bool(
+            re.match(r"[A-Za-z_][A-Za-z0-9_]*=", first_token)
+        )
         lexer = shlex.shlex(command.strip(), posix=posix, punctuation_chars=operators)
         lexer.whitespace = " \t\r"
         lexer.whitespace_split = True
@@ -275,6 +281,58 @@ def _command_segments(command: str) -> tuple[list[list[str]], bool]:
     return [arguments for arguments in segments if arguments], attributable
 
 
+def _windows_command_arguments(command: str) -> list[str]:
+    """Decode native launcher arguments without losing escaped quotes in its payload."""
+
+    if sys.platform != "win32":
+        raise ValueError("Native command-line decoding requires Windows")  # noqa: TRY003
+    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    parse = shell.CommandLineToArgvW
+    parse.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    parse.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    count = ctypes.c_int()
+    arguments = parse(command.strip(), ctypes.byref(count))
+    if not arguments:
+        raise ValueError("Cannot decode the native command line")  # noqa: TRY003
+    try:
+        return [arguments[index] for index in range(count.value)]
+    finally:
+        free = ctypes.WinDLL("kernel32", use_last_error=True).LocalFree
+        free.argtypes = [ctypes.c_void_p]
+        free.restype = ctypes.c_void_p
+        free(arguments)
+
+
+def _environment_commands(arguments: list[str]) -> Iterator[tuple[str, bool]]:
+    """Locate env's target while keeping unsupported option semantics unconfirmed."""
+
+    while arguments:
+        option = arguments[0]
+        if option == "--":
+            arguments = arguments[1:]
+            break
+        if option in {"-i", "--ignore-environment"} or option.startswith("--unset="):
+            arguments = arguments[1:]
+        elif option in {"-u", "--unset"} and len(arguments) > 1:
+            arguments = arguments[2:]
+        elif option in {"-S", "--split-string"} and len(arguments) > 1:
+            yield arguments[1] + " " + shlex.join(arguments[2:]), False
+            return
+        elif option.startswith("--split-string="):
+            yield option.partition("=")[2] + " " + shlex.join(arguments[1:]), False
+            return
+        elif option.startswith("-"):
+            # Unknown options cannot establish success. Preserve possible target
+            # attempts rather than silently falling back to an earlier pass.
+            for index in range(1, len(arguments)):
+                yield shlex.join(arguments[index:]), False
+            return
+        else:
+            break
+    if arguments:
+        yield shlex.join(arguments), True
+
+
 def _command_arguments(command: str) -> Iterator[tuple[list[str], bool]]:
     """Keep target attempts even in unsupported wrappers; only two simple wrapper levels are attributable."""
 
@@ -284,8 +342,36 @@ def _command_arguments(command: str) -> Iterator[tuple[list[str], bool]]:
         segments, single_invocation = _command_segments(current)
         attributable = attributable and single_invocation
         for arguments in segments:
+            # Environment assignments do not change the main process, but its
+            # attempt must still invalidate an earlier pass in a compound command.
+            first_program = next(
+                (
+                    index
+                    for index, argument in enumerate(arguments)
+                    if not re.match(r"[A-Za-z_][A-Za-z0-9_]*=", argument)
+                ),
+                len(arguments),
+            )
+            arguments = arguments[first_program:]
+            if not arguments:
+                continue
             executable = arguments[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
-            if executable in {"bash", "sh", "zsh", "pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            if executable in {"env", "env.exe"}:
+                for payload, environment_attributable in _environment_commands(arguments[1:]):
+                    if payload and len(payload) < len(current):
+                        pending.append((payload, depth + 1, attributable and environment_attributable and depth < 2))
+            elif executable in {
+                "bash",
+                "bash.exe",
+                "sh",
+                "sh.exe",
+                "zsh",
+                "zsh.exe",
+                "pwsh",
+                "pwsh.exe",
+                "powershell",
+                "powershell.exe",
+            }:
                 option = next(
                     (index for index, value in enumerate(arguments) if value.lower() in {"-c", "-lc", "-command"}),
                     None,

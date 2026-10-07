@@ -700,15 +700,27 @@ def run_fixture_subprocess(
 
     command = [sys.executable, script]
     direct = subprocess.list2cmdline(command) if sys.platform == "win32" else shlex.join(command)
-    if sys.platform == "win32":
+    prefixed_validation = trace.startswith(("passed-then-assignment", "passed-then-env"))
+    if sys.platform == "win32" and not prefixed_validation:
         invocation = "& '" + sys.executable.replace("'", "''") + "' " + script
         trailer = f"Get-Content -LiteralPath {script}" if fallback == "cat" else f"Write-Output '{fallback}'"
         shell_command = [shell, "-NoProfile", "-NonInteractive", "-Command", invocation]
     else:
-        invocation = direct
+        invocation = shlex.join([sys.executable.replace("\\", "/"), script])
         trailer = f"cat {script}" if fallback == "cat" else "printf '%s\\n' " + shlex.quote(fallback)
         shell_command = [shell, "-c", invocation]
     if fallback:
+        if prefixed_validation:
+            prefix = {
+                "passed-then-assignment": "TRACE=1",
+                "passed-then-assignment-quoted": "TRACE='path/with space'",
+                "passed-then-env": "env TRACE=1",
+                "passed-then-env-quoted": 'env TRACE="/tmp/my path"',
+                "passed-then-env-separator": "env -- TRACE=1",
+                "passed-then-env-ignore": "env -i TRACE=1",
+                "passed-then-env-unset": "env -u TRACE TRACE=1",
+            }[trace]
+            shell_command[-1] = prefix + " " + shell_command[-1]
         shell_command[-1] += " || " + trailer
     use_shell = bool(fallback) or trace in {"wrapper-success", "call-success"}
     process = subprocess.run(
@@ -753,6 +765,13 @@ def run_fixture_subprocess(
         "passed-then-ambiguous",
         "passed-then-wrapper-args",
         "passed-then-deep-wrapper",
+        "passed-then-assignment",
+        "passed-then-assignment-quoted",
+        "passed-then-env",
+        "passed-then-env-quoted",
+        "passed-then-env-separator",
+        "passed-then-env-ignore",
+        "passed-then-env-unset",
         "revalidated",
         "compound-context",
         "compound-generation",
@@ -765,7 +784,8 @@ def test_host_attributes_fixture_results_before_persisting_reopened_usage(
 ) -> None:
     """Run real fixture/shell subprocesses, but simulate Codex command events and its final exit."""
 
-    shell = shutil.which("pwsh" if sys.platform == "win32" else "bash") or pytest.skip(
+    prefixed_validation = trace.startswith(("passed-then-assignment", "passed-then-env"))
+    shell = shutil.which("pwsh" if sys.platform == "win32" and not prefixed_validation else "bash") or pytest.skip(
         "This process-attribution scenario requires PowerShell or bash"
     )
 
@@ -807,14 +827,18 @@ def test_host_attributes_fixture_results_before_persisting_reopened_usage(
         schema_path.write_text(valid_schema, encoding="utf-8")
         assert execute("generate.py", record=trace != "compound-generation").returncode == 0
 
-        ambiguous_validation = trace in {
-            "failed-cat",
-            "failed-echo",
-            "passed-then-ambiguous",
-            "passed-then-wrapper-args",
-            "passed-then-deep-wrapper",
-            "revalidated",
-        }
+        ambiguous_validation = (
+            trace
+            in {
+                "failed-cat",
+                "failed-echo",
+                "passed-then-ambiguous",
+                "passed-then-wrapper-args",
+                "passed-then-deep-wrapper",
+                "revalidated",
+            }
+            or prefixed_validation
+        )
         if ambiguous_validation:
             if trace.startswith("passed-then-") or trace == "revalidated":
                 assert execute("contract_test.py").returncode == 0
