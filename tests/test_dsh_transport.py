@@ -684,7 +684,7 @@ def test_postinstall_include_drift_preserves_saved_connection_and_credentials(
     monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("POWERCONTEXT_DSH_AUTHORIZATION", "Bearer new-secret-token")
 
-    def install(*_args):
+    def install(*_args, **_kwargs):
         shutil.copytree(source, profile / "node_modules/powercontext-dsh")
         (profile / "package.json").write_text(json.dumps({"dsh": {"profile": {"bundles": ["powercontext-dsh"]}}}))
         (profile / "included.json").write_text(
