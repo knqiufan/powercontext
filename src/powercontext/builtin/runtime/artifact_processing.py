@@ -125,6 +125,7 @@ class ArtifactProcessingBinding:
     # Applies to every invocation, including explicit requests and retries.
     # Domains inspect durable metadata here; they retain their Worker guards.
     work_block: Callable[[AsyncConnection, str, str], Awaitable[ArtifactProcessingBlock | None]] | None = None
+    work_failure: Callable[[AsyncConnection, str, str, str], Awaitable[None]] | None = None
 
     def __post_init__(self) -> None:
         if not self.binding_name or self.binding_name != self.binding_name.strip():
@@ -1210,6 +1211,34 @@ class ArtifactProcessingSupervisor:
                 if block is not None:
                     self._wait_for_block(state, running.assignment, block)
                     continue
+                if state.binding.work_failure is not None:
+                    code = (
+                        processing_error_code(error.failure.exception_type, error.failure.error_code)
+                        if isinstance(error, _WorkerExecutionError)
+                        else processing_error_code(type(error), _safe_error_attribute(error, "error_code", ""))
+                    )
+                    try:
+                        async with (
+                            asyncio.timeout(_ADMISSION_PROBE_TIMEOUT_SECONDS),
+                            self._database.transaction() as connection,
+                        ):
+                            await self._leases.require_fence(connection, running.assignment.fence)
+                            await state.binding.work_failure(connection, scope, state.binding.binding_name, code)
+                    except ArtifactProcessingLeadershipLostError:
+                        raise
+                    except Exception as recording_error:
+                        log_safely(
+                            logger,
+                            logging.WARNING,
+                            "Failed to retain processing failure diagnostics",
+                            extra={
+                                "event": "artifact_processing.failure_record_failed",
+                                "family": state.binding.artifact_family,
+                                "binding": state.binding.binding_name,
+                                "scope": scope,
+                                "exception_type": type(recording_error).__name__,
+                            },
+                        )
                 previous = state.retries.get(scope)
                 failures = 1 if previous is None else previous.failures + 1
                 delay = self._retry_delay(failures)

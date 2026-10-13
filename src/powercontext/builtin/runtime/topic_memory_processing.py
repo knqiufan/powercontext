@@ -519,6 +519,7 @@ class TopicMemoryProcessor:
             source_through=assignment.source_through,
             cursor_generation=assignment.cursor_generation,
             fence=assignment.fence,
+            target_source_through=assignment.wave_target,
         )
         token = self._work_budget.set(budget)
         self._used_stages.clear()
@@ -536,6 +537,8 @@ class TopicMemoryProcessor:
             except TopicMemoryGenerationError as error:
                 if error.code in RECORDED_TOPIC_MEMORY_REJECTIONS:
                     await budget.fail(error.code)
+                else:
+                    await budget.record_failure(error.code)
                 raise
         except ArtifactProcessingLeadershipLostError:
             return ArtifactProcessingWorkerCompletion(ArtifactProcessingWorkerOutcome.LEADERSHIP_LOST)
